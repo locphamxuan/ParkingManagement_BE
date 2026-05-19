@@ -1,8 +1,12 @@
-const express = require('express');
-const userRoutes = require('./user');
+const express = require("express");
+const adminRoutes = require("./admin");
+const managerRoutes = require("./manager");
+const userRoutes = require("./user");
 
 const router = express.Router();
 
-router.use('/users', userRoutes);
+router.use("/admin", adminRoutes);
+router.use("/manager", managerRoutes);
+router.use("/users", userRoutes);
 
 module.exports = router;
