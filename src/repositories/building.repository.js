@@ -1,4 +1,4 @@
-const Building = require("../models/Building");
+﻿const Building = require("../models/building/Building");
 
 const list = ({
   filter = {},
@@ -33,3 +33,4 @@ module.exports = {
   updateById,
   deleteById,
 };
+
