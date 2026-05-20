@@ -5,6 +5,7 @@ build/
 coverage/
 claude/
 openspec/
+.claude/
 logs/
 *.log
 
