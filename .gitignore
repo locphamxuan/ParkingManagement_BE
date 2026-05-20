@@ -12,3 +12,13 @@ logs/
 .idea/
 
 .DS_Store
+
+#Docs project 
+Admin API Contract Draft....txt
+Requirements.docx.txt
+Scope + database.txt
+API_DOC.md
+AGENTS.md
+docs/api-doc.md
+.claude/commands/opsx/pbms-be.md
+reports/
