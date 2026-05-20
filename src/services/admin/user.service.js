@@ -121,6 +121,11 @@ const update = async (actor, id, payload) => {
 };
 
 const updateStatus = async (actor, id, isActive) => {
+  const current = await getById(id);
+  if (current.role === ROLES.ADMIN) {
+    throw new AppError("Cannot change status of admin account", 400);
+  }
+
   const updated = await User.findByIdAndUpdate(
     id,
     { isActive: !!isActive },
@@ -132,6 +137,7 @@ const updateStatus = async (actor, id, isActive) => {
     action: isActive ? "UNLOCK_USER" : "LOCK_USER",
     targetTable: "users",
     targetId: id,
+    previousValue: { isActive: current.isActive, role: current.role },
     newValue: { isActive: !!isActive },
     severity: "medium",
   });
