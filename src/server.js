@@ -45,6 +45,6 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 start().catch((err) => {
-  console.error('[Server]', err.message);
+  console.error('[Server] Unhandled error during start:', err);
   process.exit(1);
 });
