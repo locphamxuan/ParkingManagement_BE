@@ -17,7 +17,9 @@ const extractBuildingId = (req) =>
   req.params.buildingId ||
   req.params.id ||
   req.query.buildingId ||
-  req.body.buildingId;
+  req.query.building ||
+  req.body.buildingId ||
+  req.body.building;
 
 const authorizeBuildingAccess = (req, _res, next) => {
   if (!req.user) {

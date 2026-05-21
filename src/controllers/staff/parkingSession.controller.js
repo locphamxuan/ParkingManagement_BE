@@ -9,12 +9,12 @@ const checkIn = asyncHandler(async (req, res) => {
 });
 
 const checkOut = asyncHandler(async (req, res) => {
-  const session = await parkingService.checkOut(req.user, req.params.id);
+  const session = await parkingService.checkOut(req.user, req.params.id, req.body);
   sendSuccess(res, { data: session });
 });
 
 const listActive = asyncHandler(async (req, res) => {
-  const items = await parkingService.listActive(req.user);
+  const items = await parkingService.listActive(req.user, req.query);
   sendSuccess(res, { data: { items } });
 });
 
@@ -24,7 +24,7 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const search = asyncHandler(async (req, res) => {
-  const items = await parkingService.search(req.user, req.query.plate);
+  const items = await parkingService.search(req.user, req.query.plate, req.query);
   sendSuccess(res, { data: { items } });
 });
 
