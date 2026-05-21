@@ -20,5 +20,7 @@ Scope + database.txt
 API_DOC.md
 AGENTS.md
 docs/api-doc.md
+.vscode/
+docs/staff-api-data-structures.md
 .claude/commands/opsx/pbms-be.md
 reports/

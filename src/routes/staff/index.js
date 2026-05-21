@@ -12,4 +12,7 @@ router.get("/dashboard", controller.getDashboard);
 router.get("/buildings", controller.listAssignedBuildings);
 router.get("/buildings/:id", controller.getAssignedBuilding);
 
+const parkingSessionRoutes = require('./parking-sessions.routes');
+router.use('/parking-sessions', parkingSessionRoutes);
+
 module.exports = router;
