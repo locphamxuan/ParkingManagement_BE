@@ -1,14 +1,46 @@
+# Dependencies
 node_modules/
-.env
+
+# Build output
 dist/
 build/
 coverage/
+
+# Environment
+.env
+
+# Logs
 .claude/
 openspec/
 logs/
 *.log
 
+# Editor / OS
 .vscode/
 .idea/
-
 .DS_Store
+
+# Project tooling
+claude/
+openspec/
+.test/
+
+# Generated docs
+API_DOC.md
+AGENTS.md
+docs/api-doc.md
+docs/api-doc-current.md
+docs/session-operations-test-report.md
+docs/staff-api-data-structures.md
+
+# Generated exports / reports
+postman/
+.postman/
+reports/
+tests/
+
+# Source notes
+Admin API Contract Draft....txt
+Requirements.docx.txt
+Scope + database.txt
+.claude/commands/opsx/pbms-be.md

@@ -5,6 +5,7 @@ const { PricePolicy, PolicyPushLog, ReservationPolicy, LongTermPackage, LongTerm
 const { ParkingSession, Reservation, Shift, StaffShift } = require("./operations");
 const { Payment, ShiftRevenue } = require("./finance");
 const { AuditLog, Feedback } = require("./log");
+const WalletTransaction = require("./WalletTransaction");
 
 module.exports = {
   User,
@@ -27,4 +28,5 @@ module.exports = {
   ParkingSession,
   Reservation,
   Payment,
+  WalletTransaction,
 };
