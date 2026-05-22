@@ -1,21 +1,32 @@
-const User = require('./User');
-const Building = require('./Building');
-const ParkingSession = require('./ParkingSession');
-const ParkingSlot = require('./ParkingSlot');
-const Reservation = require('./Reservation');
-const LongTermSubscription = require('./LongTermSubscription');
-const Payment = require('./Payment');
-const WalletTransaction = require('./WalletTransaction');
-const AuditLog = require('./AuditLog');
+const User = require("./user/User");
+
+const { Building, BuildingManager, Floor, Gate, ParkingSlot, VehicleType } = require("./building");
+const { PricePolicy, PolicyPushLog, ReservationPolicy, LongTermPackage, LongTermSubscription } = require("./policy");
+const { ParkingSession, Reservation, Shift, StaffShift } = require("./operations");
+const { Payment, ShiftRevenue } = require("./finance");
+const { AuditLog, Feedback } = require("./log");
+const WalletTransaction = require("./WalletTransaction");
 
 module.exports = {
   User,
   Building,
-  ParkingSession,
+  BuildingManager,
+  VehicleType,
+  Floor,
+  Gate,
   ParkingSlot,
-  Reservation,
+  PricePolicy,
+  PolicyPushLog,
+  LongTermPackage,
   LongTermSubscription,
+  ReservationPolicy,
+  Shift,
+  StaffShift,
+  ShiftRevenue,
+  Feedback,
+  AuditLog,
+  ParkingSession,
+  Reservation,
   Payment,
   WalletTransaction,
-  AuditLog,
 };

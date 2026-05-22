@@ -1,5 +1,5 @@
-const User = require("../models/User");
-const BuildingManager = require("../models/BuildingManager");
+﻿const User = require("../models/user/User");
+const BuildingManager = require("../models/building/BuildingManager");
 const AppError = require("../utils/AppError");
 const asyncHandler = require("../utils/asyncHandler");
 const { verifyToken } = require("../utils/token");
@@ -35,3 +35,4 @@ const authenticate = asyncHandler(async (req, _res, next) => {
 });
 
 module.exports = { authenticate };
+

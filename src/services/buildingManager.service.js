@@ -1,8 +1,8 @@
-const AppError = require("../utils/AppError");
+﻿const AppError = require("../utils/AppError");
 const buildingRepository = require("../repositories/building.repository");
 const buildingManagerRepo = require("../repositories/buildingManager.repository");
-const User = require("../models/User");
-const Building = require("../models/Building");
+const User = require("../models/user/User");
+const Building = require("../models/building/Building");
 
 const ensureManagerUser = async (userId) => {
   const user = await User.findById(userId);
@@ -107,3 +107,4 @@ module.exports = {
   listManagerAssignmentsForBuilding,
   listAssignmentsForUser,
 };
+

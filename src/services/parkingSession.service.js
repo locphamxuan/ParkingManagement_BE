@@ -8,7 +8,7 @@ const LongTermSubscription = require('../models/LongTermSubscription');
 const Payment = require('../models/Payment');
 const WalletTransaction = require('../models/WalletTransaction');
 const AuditLog = require('../models/AuditLog');
-const User = require('../models/User');
+const User = require('../models/user/User');
 
 const normalizePlate = (plate) => `${plate || ''}`.trim().toUpperCase();
 
@@ -31,9 +31,22 @@ const assertBuildingScope = (user, buildingId) => {
 };
 
 const logAudit = async (session, payload) =>
-  AuditLog.create([{ ...payload }], { session });
+  AuditLog.create([{
+    actor: payload.actor,
+    actorRole: payload.actorRole || null,
+    action: payload.action,
+    targetTable: payload.entityType,
+    targetId: payload.entityId || null,
+    building: payload.building || null,
+    previousValue: payload.before || null,
+    newValue: payload.after || null,
+    description: payload.description || '',
+  }], { session });
 
 const getBalance = (user) => Number(user?.walletBalance || 0);
+
+const asObjectId = (value) =>
+  mongoose.Types.ObjectId.isValid(value) ? value : null;
 
 const findDuplicateActiveSession = async (plateNumber) =>
   ParkingSession.findOne({ plateNumber, status: 'active' });
@@ -49,7 +62,7 @@ const resolveLongTermSubscription = async (plateNumber, allowedBuildings) => {
     return null;
   }
 
-  const endAt = subscription.endAt ? new Date(subscription.endAt) : null;
+  const endAt = subscription.endDate ? new Date(subscription.endDate) : null;
   if (endAt && endAt.getTime() < Date.now()) {
     await LongTermSubscription.updateOne(
       { _id: subscription._id },
@@ -65,7 +78,7 @@ const resolveReservation = async (plateNumber, allowedBuildings) => {
   const reservation = await Reservation.findOne({
     plateNumber,
     building: { $in: allowedBuildings },
-    status: { $in: ['active', 'pending'] },
+    status: { $in: ['pending', 'confirmed'] },
   })
     .sort({ updatedAt: -1 })
     .populate('slot');
@@ -75,11 +88,9 @@ const resolveReservation = async (plateNumber, allowedBuildings) => {
   }
 
   const now = Date.now();
-  const holdUntil = reservation.holdUntil ? new Date(reservation.holdUntil) : null;
-  const expiresAt = reservation.expiresAt ? new Date(reservation.expiresAt) : null;
+  const expiresAt = reservation.endTime ? new Date(reservation.endTime) : null;
   const expired =
-    (holdUntil && holdUntil.getTime() < now) ||
-    (expiresAt && expiresAt.getTime() < now);
+    expiresAt && expiresAt.getTime() < now;
 
   if (expired) {
     reservation.status = 'expired';
@@ -106,8 +117,8 @@ const checkIn = async (user, payload) => {
     const result = await session.withTransaction(async () => {
       const buildingId = payload?.building;
       const plateNumber = normalizePlate(payload?.plateNumber);
-      const vehicleType = payload?.vehicleType || 'car';
-      const gate = payload?.gate || null;
+      const vehicleType = asObjectId(payload?.vehicleType);
+      const gate = asObjectId(payload?.gate);
       const forceCheckIn = Boolean(payload?.forceCheckIn);
 
       if (!buildingId) {
@@ -138,14 +149,13 @@ const checkIn = async (user, payload) => {
         const created = await ParkingSession.create(
           [{
             plateNumber,
-            vehicleType,
             building: buildingId,
-            gate,
             staff: user._id,
-            sessionType: 'long_term',
             fee: 0,
-            paymentStatus: 'waived',
-            metadata: { longTermSubscription: longTerm._id },
+            paymentMethod: 'long_term',
+            vehicleType,
+            entryGate: gate,
+            note: `long_term:${longTerm._id}`,
           }],
           { session },
         );
@@ -182,17 +192,17 @@ const checkIn = async (user, payload) => {
       const created = await ParkingSession.create(
         [{
           plateNumber,
-          vehicleType,
           building: buildingId,
-          gate,
           staff: user._id,
           reservation: reservation?._id || null,
           slot: slotId,
-          sessionType: reservation ? 'reservation' : 'standard',
-          metadata: {
-            forceCheckIn,
-            duplicateBypassed: Boolean(duplicate && forceCheckIn),
-          },
+          vehicleType,
+          entryGate: gate,
+          note: reservation
+            ? 'reservation_check_in'
+            : duplicate && forceCheckIn
+              ? 'duplicate_bypassed'
+              : '',
         }],
         { session },
       );
@@ -255,7 +265,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
       const feeMethod = payload.paymentMethod || 'cash';
       let fee = Number(parkingSession.fee || 0);
       if (!fee) {
-        const ms = Date.now() - new Date(parkingSession.checkInAt).getTime();
+       const ms = Date.now() - new Date(parkingSession.entryTime).getTime();
         fee = Math.max(1, Math.ceil(ms / (1000 * 60 * 60)));
       }
 
@@ -299,32 +309,28 @@ const checkOut = async (user, sessionId, payload = {}) => {
         await userDoc.save({ session: mongoSession });
       }
 
-      const payment = await Payment.create(
+      await Payment.create(
         [{
           building: parkingSession.building,
-          session: parkingSession._id,
-          type: 'checkout',
+          parkingSession: parkingSession._id,
+          type: 'session',
           method: feeMethod,
           amount: fee,
-          status: 'paid',
-          adjustmentReason: payload.adjustmentReason || null,
-          note: payload.forceCheckoutReason || null,
-          metadata: {
-            bypassMismatch: Boolean(payload.bypassMismatch),
-            forceCheckoutReason: payload.forceCheckoutReason || null,
-            walletTransactionId: walletTx?.[0]?._id ? `${walletTx[0]._id}` : null,
-          },
+          status: 'success',
+          user: user._id,
+          staff: user._id,
+          note: [payload.adjustmentReason, payload.forceCheckoutReason].filter(Boolean).join(' | '),
         }],
         { session: mongoSession },
       );
 
-      parkingSession.checkOutAt = new Date();
-      parkingSession.status = 'closed';
+      parkingSession.exitTime = new Date();
+      parkingSession.status = 'completed';
       parkingSession.fee = fee;
       parkingSession.paymentMethod = feeMethod;
-      parkingSession.paymentStatus = 'paid';
-      parkingSession.forceCheckoutReason = payload.forceCheckoutReason || null;
-      parkingSession.mismatchBypassed = Boolean(payload.bypassMismatch);
+      parkingSession.note = [parkingSession.note, payload.forceCheckoutReason, payload.bypassMismatch ? 'plate_mismatch_bypassed' : null]
+        .filter(Boolean)
+        .join(' | ');
       await parkingSession.save({ session: mongoSession });
 
       if (parkingSession.slot) {
@@ -349,7 +355,6 @@ const checkOut = async (user, sessionId, payload = {}) => {
         building: parkingSession.building,
         after: parkingSession.toObject(),
         metadata: {
-          paymentId: `${payment[0]._id}`,
           paymentMethod: feeMethod,
           adjustedFee: payload.adjustedFee ?? null,
           adjustmentReason: payload.adjustmentReason || null,
@@ -373,7 +378,7 @@ const listActive = async (user, query = {}) => {
     ? { building: query.buildingId || query.building }
     : { building: { $in: allowedBuildings } };
 
-  return ParkingSession.find({ ...buildingFilter, status: 'active' }).sort({ checkInAt: -1 });
+  return ParkingSession.find({ ...buildingFilter, status: 'active' }).sort({ entryTime: -1 });
 };
 
 const getById = async (user, id) => {
@@ -407,7 +412,7 @@ const search = async (user, plate, query = {}) => {
   return ParkingSession.find({
     ...buildingFilter,
     plateNumber: { $regex: `${plate}`.trim(), $options: 'i' },
-  }).sort({ checkInAt: -1 });
+  }).sort({ entryTime: -1 });
 };
 
 module.exports = { checkIn, checkOut, listActive, getById, search };

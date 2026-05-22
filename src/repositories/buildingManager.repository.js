@@ -1,4 +1,4 @@
-const BuildingManager = require("../models/BuildingManager");
+﻿const BuildingManager = require("../models/building/BuildingManager");
 
 const create = (payload) => BuildingManager.create(payload);
 
@@ -26,3 +26,4 @@ module.exports = {
   findOne,
   deactivate,
 };
+
