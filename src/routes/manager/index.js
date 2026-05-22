@@ -12,34 +12,11 @@ const resourceRoutes = require("./resources.routes");
 
 const router = express.Router();
 
-router.get(
-  "/buildings",
-  authenticate,
-  authorize(ROLES.MANAGER, ROLES.ADMIN),
-  buildingController.getBuilding
-);
-router.put(
-  "/buildings/:id",
-  authenticate,
-  authorize(ROLES.MANAGER, ROLES.ADMIN),
-  validateManagerBuildingUpdate,
-  buildingController.updateBuilding
-);
+router.use(authenticate, authorize(ROLES.MANAGER, ROLES.ADMIN));
+
+router.get("/buildings", buildingController.getBuilding);
+router.put("/buildings/:id", validateManagerBuildingUpdate, buildingController.updateBuilding);
 
 router.use("/buildings/:buildingId", resourceRoutes);
-
-router.get(
-  "/building",
-  authenticate,
-  authorize(ROLES.MANAGER, ROLES.ADMIN),
-  buildingController.getBuilding
-);
-router.put(
-  "/building/:id",
-  authenticate,
-  authorize(ROLES.MANAGER, ROLES.ADMIN),
-  validateManagerBuildingUpdate,
-  buildingController.updateBuilding
-);
 
 module.exports = router;

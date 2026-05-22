@@ -3,9 +3,8 @@ node_modules/
 dist/
 build/
 coverage/
-claude/
-openspec/
 .claude/
+openspec/
 logs/
 *.log
 
