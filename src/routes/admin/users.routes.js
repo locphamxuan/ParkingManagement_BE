@@ -3,6 +3,7 @@ const controller = require("../../controllers/admin/user.controller");
 const { authenticate } = require("../../middlewares/auth.middleware");
 const { authorize } = require("../../middlewares/rbac");
 const { ROLES } = require("../../constants/roles");
+const { validateUserStatus } = require("../../validators/user.validator");
 
 const router = express.Router();
 
@@ -12,7 +13,7 @@ router.get("/", controller.list);
 router.get("/:id", controller.get);
 router.post("/", controller.create);
 router.put("/:id", controller.update);
-router.patch("/:id/status", controller.updateStatus);
+router.patch("/:id/status", validateUserStatus, controller.updateStatus);
 router.delete("/:id", controller.remove);
 
 module.exports = router;
