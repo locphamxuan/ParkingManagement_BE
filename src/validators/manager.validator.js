@@ -22,9 +22,9 @@ const wrap = (fn) => (req, _res, next) => {
 };
 
 const validateVehicleType = wrap((req) => {
-  if (req.method === "POST") requireFields(req.body, ["code", "name"]);
+  if (req.method === "POST") requireFields(req.body, ["name"]);
   if (req.body.code !== undefined && !isNonEmptyString(req.body.code))
-    throw new AppError("code is required", 400);
+    throw new AppError("code must not be empty", 400);
   if (req.body.name !== undefined && !isNonEmptyString(req.body.name))
     throw new AppError("name is required", 400);
 });

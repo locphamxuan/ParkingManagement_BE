@@ -37,7 +37,26 @@ const assignManagerToBuilding = async ({ buildingId, userId }) => {
 
   const user = await ensureManagerUser(userId);
 
-  // check existing assignment
+  // Enforce 1 manager : 1 building constraint
+  const managerOtherBuilding = await buildingManagerRepo.findOne({
+    user: userId,
+    isActive: true,
+    building: { $ne: buildingId },
+  });
+  if (managerOtherBuilding) {
+    throw new AppError("Manager is already assigned to another building", 400);
+  }
+
+  const buildingOtherManager = await buildingManagerRepo.findOne({
+    building: buildingId,
+    isActive: true,
+    user: { $ne: userId },
+  });
+  if (buildingOtherManager) {
+    throw new AppError("Building already has an active manager", 400);
+  }
+
+  // check existing assignment for this exact pair
   const existing = await buildingManagerRepo.findOne({
     building: buildingId,
     user: userId,

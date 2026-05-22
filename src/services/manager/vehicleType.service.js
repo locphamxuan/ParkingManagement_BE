@@ -12,11 +12,27 @@ const list = async (user, buildingId, query = {}) => {
   return VehicleType.find(filter).sort("code");
 };
 
+const generateCode = (name) =>
+  name
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/Đ/g, "D")
+    .replace(/[^A-Z0-9]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "")
+    .substring(0, 20);
+
 const create = async (user, buildingId, payload) => {
   ensureManagerOwnsBuilding(user, buildingId);
+  const code = payload.code
+    ? String(payload.code).trim().toUpperCase()
+    : generateCode(String(payload.name || ""));
+
   const created = await VehicleType.create({
     building: buildingId,
-    code: String(payload.code || "").trim().toUpperCase(),
+    code,
     name: String(payload.name || "").trim(),
     description: payload.description || "",
     isActive: payload.isActive !== false,
