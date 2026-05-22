@@ -1,19 +1,37 @@
-﻿const Building = require("../../models/building/Building");
+const Building = require("../../models/building/Building");
 const User = require("../../models/user/User");
 const ParkingSession = require("../../models/operations/ParkingSession");
 const Payment = require("../../models/finance/Payment");
 const { ROLES } = require("../../constants/roles");
 
-const startOfDay = (date) => {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
+const VALID_PERIODS = ["today", "week", "month"];
+
+const getDateRange = (period) => {
+  const now = new Date();
+  const from = new Date(now);
+
+  if (period === "week") {
+    const day = from.getDay();
+    const diff = day === 0 ? -6 : 1 - day; // Monday
+    from.setDate(from.getDate() + diff);
+  } else if (period === "month") {
+    from.setDate(1);
+  }
+  from.setHours(0, 0, 0, 0);
+
+  return { from, to: now };
 };
 
-const getOverview = async () => {
-  const today = startOfDay(new Date());
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+const getOverview = async (period = "today") => {
+  if (!VALID_PERIODS.includes(period)) {
+    const { AppError } = require("../../utils/AppError");
+    throw new (require("../../utils/AppError"))(
+      `period must be one of: ${VALID_PERIODS.join(", ")}`,
+      400
+    );
+  }
+
+  const { from, to } = getDateRange(period);
 
   const [
     totalBuildings,
@@ -21,7 +39,7 @@ const getOverview = async () => {
     totalStaff,
     totalUsers,
     activeSessions,
-    todayPayments,
+    periodPayments,
   ] = await Promise.all([
     Building.countDocuments({}),
     User.countDocuments({ role: ROLES.MANAGER, isActive: true }),
@@ -32,20 +50,27 @@ const getOverview = async () => {
       {
         $match: {
           status: "success",
-          createdAt: { $gte: today, $lt: tomorrow },
+          createdAt: { $gte: from, $lte: to },
         },
       },
-      { $group: { _id: "$method", amount: { $sum: "$amount" }, count: { $sum: 1 } } },
+      {
+        $group: {
+          _id: "$method",
+          amount: { $sum: "$amount" },
+          count: { $sum: 1 },
+        },
+      },
     ]),
   ]);
 
-  const revenueByMethod = todayPayments.reduce((acc, row) => {
+  const revenueByMethod = periodPayments.reduce((acc, row) => {
     acc[row._id] = { amount: row.amount, count: row.count };
     return acc;
   }, {});
-  const todayRevenue = todayPayments.reduce((acc, row) => acc + row.amount, 0);
+  const totalRevenue = periodPayments.reduce((acc, row) => acc + row.amount, 0);
 
   return {
+    period,
     counts: {
       buildings: totalBuildings,
       managers: totalManagers,
@@ -53,9 +78,8 @@ const getOverview = async () => {
       users: totalUsers,
       activeSessions,
     },
-    revenue: { today: todayRevenue, byMethod: revenueByMethod },
+    revenue: { total: totalRevenue, byMethod: revenueByMethod },
   };
 };
 
 module.exports = { getOverview };
-
