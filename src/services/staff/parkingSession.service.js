@@ -1,14 +1,16 @@
 const mongoose = require('mongoose');
-const AppError = require('../utils/AppError');
-const buildingRepository = require('../repositories/building.repository');
-const ParkingSession = require('../models/ParkingSession');
-const ParkingSlot = require('../models/ParkingSlot');
-const Reservation = require('../models/Reservation');
-const LongTermSubscription = require('../models/LongTermSubscription');
-const Payment = require('../models/Payment');
-const WalletTransaction = require('../models/WalletTransaction');
-const AuditLog = require('../models/AuditLog');
-const User = require('../models/user/User');
+const AppError = require('../../utils/AppError');
+const buildingRepository = require('../../repositories/building.repository');
+const {
+  ParkingSession,
+  ParkingSlot,
+  Reservation,
+  LongTermSubscription,
+  Payment,
+  WalletTransaction,
+  AuditLog,
+  User,
+} = require('../../models');
 
 const normalizePlate = (plate) => `${plate || ''}`.trim().toUpperCase();
 

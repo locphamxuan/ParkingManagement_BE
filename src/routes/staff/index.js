@@ -1,5 +1,5 @@
 const express = require("express");
-const controller = require("../../controllers/staff.controller");
+const buildingAccessController = require("../../controllers/staff/buildingAccess.controller");
 const { authenticate } = require("../../middlewares/auth.middleware");
 const { authorize } = require("../../middlewares/rbac");
 const { ROLES } = require("../../constants/roles");
@@ -8,11 +8,18 @@ const router = express.Router();
 
 router.use(authenticate, authorize(ROLES.STAFF));
 
-router.get("/dashboard", controller.getDashboard);
-router.get("/buildings", controller.listAssignedBuildings);
-router.get("/buildings/:id", controller.getAssignedBuilding);
+router.get("/dashboard", buildingAccessController.getDashboard);
+router.get("/buildings", buildingAccessController.listAssignedBuildings);
+router.get("/buildings/:id", buildingAccessController.getAssignedBuilding);
 
-const parkingSessionRoutes = require('./parking-sessions.routes');
-router.use('/parking-sessions', parkingSessionRoutes);
+const parkingSessionRoutes = require("./parking-sessions.routes");
+const reservationRoutes = require("./reservation.routes");
+const walletRoutes = require("./wallet.routes");
+const incidentRoutes = require("./incident.routes");
+
+router.use("/parking-sessions", parkingSessionRoutes);
+router.use("/reservations", reservationRoutes);
+router.use("/wallet-transactions", walletRoutes);
+router.use("/incidents", incidentRoutes);
 
 module.exports = router;

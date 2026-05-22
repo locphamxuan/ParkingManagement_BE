@@ -1,4 +1,4 @@
-const ParkingSession = require('../models/ParkingSession');
+const { ParkingSession } = require('../models');
 
 const create = async (data) => {
   const doc = new ParkingSession(data);

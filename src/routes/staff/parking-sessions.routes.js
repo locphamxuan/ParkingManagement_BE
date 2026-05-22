@@ -1,13 +1,13 @@
-const express = require('express');
-const controller = require('../../controllers/staff/parkingSession.controller');
-const { authorizeBuildingAccess } = require('../../middlewares/rbac');
+const express = require("express");
+const parkingSessionController = require("../../controllers/staff/parkingSession.controller");
+const { authorizeBuildingAccess } = require("../../middlewares/rbac");
 
 const router = express.Router();
 
-router.post('/check-in', authorizeBuildingAccess, controller.checkIn);
-router.get('/active', controller.listActive);
-router.get('/search', controller.search);
-router.patch('/:id/check-out', controller.checkOut);
-router.get('/:id', controller.getById);
+router.post("/check-in", authorizeBuildingAccess, parkingSessionController.checkIn);
+router.get("/active", parkingSessionController.listActive);
+router.get("/search", parkingSessionController.search);
+router.patch("/:id/check-out", parkingSessionController.checkOut);
+router.get("/:id", parkingSessionController.getById);
 
 module.exports = router;

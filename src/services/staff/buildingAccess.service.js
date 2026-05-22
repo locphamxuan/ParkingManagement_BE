@@ -1,5 +1,5 @@
-const AppError = require("../utils/AppError");
-const buildingRepository = require("../repositories/building.repository");
+const AppError = require('../../utils/AppError');
+const buildingRepository = require('../../repositories/building.repository');
 
 const normalizeBuildingId = (building) => `${building._id || building}`;
 
@@ -19,15 +19,15 @@ const fetchAssignedBuildings = async (user) => {
     filter: { _id: { $in: assignedIds } },
     page: 1,
     limit: 1000,
-    sort: "name",
+    sort: 'name',
   });
 };
 
 const getDashboard = async (user) => {
   const buildings = await fetchAssignedBuildings(user);
-  const activeBuildings = buildings.filter((building) => building.status === "active");
+  const activeBuildings = buildings.filter((building) => building.status === 'active');
   const maintenanceBuildings = buildings.filter(
-    (building) => building.status === "maintenance",
+    (building) => building.status === 'maintenance',
   );
 
   return {
@@ -62,23 +62,19 @@ const getAssignedBuilding = async (user, buildingId) => {
   const assignedIds = getAssignedBuildingIds(user);
 
   if (!buildingId) {
-    throw new AppError("buildingId is required", 400);
+    throw new AppError('buildingId is required', 400);
   }
 
   if (!assignedIds.includes(`${buildingId}`)) {
-    throw new AppError("Forbidden for this building", 403);
+    throw new AppError('Forbidden for this building', 403);
   }
 
   const building = await buildingRepository.findById(buildingId);
   if (!building) {
-    throw new AppError("Building not found", 404);
+    throw new AppError('Building not found', 404);
   }
 
   return building;
 };
 
-module.exports = {
-  getDashboard,
-  listAssignedBuildings,
-  getAssignedBuilding,
-};
+module.exports = { getDashboard, listAssignedBuildings, getAssignedBuilding };
