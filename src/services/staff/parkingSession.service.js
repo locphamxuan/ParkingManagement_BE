@@ -8,44 +8,11 @@ const {
   LongTermSubscription,
   Payment,
   WalletTransaction,
-  AuditLog,
   User,
 } = require('../../models');
+const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../utils/staffScope');
 
 const normalizePlate = (plate) => `${plate || ''}`.trim().toUpperCase();
-
-const toIdString = (value) => `${value?._id || value}`;
-
-const assignedBuildingIds = (user) =>
-  Array.isArray(user?.assignedBuildings)
-    ? user.assignedBuildings.map((item) => toIdString(item))
-    : [];
-
-const assertBuildingScope = (user, buildingId) => {
-  const allowed = assignedBuildingIds(user);
-  if (allowed.length === 0) {
-    throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
-  }
-  if (buildingId && !allowed.includes(toIdString(buildingId))) {
-    throw new AppError('Forbidden for this building', 403, 'FORBIDDEN_BUILDING_SCOPE');
-  }
-  return allowed;
-};
-
-const logAudit = async (session, payload) =>
-  AuditLog.create([{
-    actor: payload.actor,
-    actorRole: payload.actorRole || null,
-    action: payload.action,
-    targetTable: payload.entityType,
-    targetId: payload.entityId || null,
-    building: payload.building || null,
-    previousValue: payload.before || null,
-    newValue: payload.after || null,
-    description: payload.description || '',
-  }], { session });
-
-const getBalance = (user) => Number(user?.walletBalance || 0);
 
 const asObjectId = (value) =>
   mongoose.Types.ObjectId.isValid(value) ? value : null;
@@ -250,10 +217,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
         throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
       }
 
-      const allowedBuildings = assertBuildingScope(user, parkingSession.building);
-      if (!allowedBuildings.includes(toIdString(parkingSession.building))) {
-        throw new AppError('Forbidden for this building', 403);
-      }
+      assertBuildingScope(user, parkingSession.building);
 
       if (parkingSession.status !== 'active') {
         throw new AppError('Session not active', 400);
@@ -267,7 +231,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
       const feeMethod = payload.paymentMethod || 'cash';
       let fee = Number(parkingSession.fee || 0);
       if (!fee) {
-       const ms = Date.now() - new Date(parkingSession.entryTime).getTime();
+        const ms = Date.now() - new Date(parkingSession.entryTime).getTime();
         fee = Math.max(1, Math.ceil(ms / (1000 * 60 * 60)));
       }
 
@@ -286,29 +250,26 @@ const checkOut = async (user, sessionId, payload = {}) => {
         fee += surcharge;
       }
 
-      const userDoc = await User.findById(user._id).session(mongoSession);
-      const currentBalance = getBalance(userDoc);
-
       let walletTx = null;
       if (feeMethod === 'wallet') {
-        if (currentBalance < fee) {
-          throw new AppError('Insufficient wallet balance', 409, 'INSUFFICIENT_WALLET_BALANCE');
-        }
+        const paidUser = await User.findOneAndUpdate(
+          { _id: user._id, walletBalance: { $gte: fee } },
+          { $inc: { walletBalance: -fee } },
+          { new: true, session: mongoSession },
+        );
+        if (!paidUser) throw new AppError('Insufficient wallet balance', 409, 'INSUFFICIENT_WALLET_BALANCE');
         walletTx = await WalletTransaction.create(
           [{
             user: user._id,
             type: 'debit',
             amount: fee,
-            balanceAfter: currentBalance - fee,
+            balanceAfter: paidUser.walletBalance,
             status: 'success',
             reason: 'parking_checkout',
             metadata: { sessionId: `${parkingSession._id}` },
           }],
           { session: mongoSession },
         );
-
-        userDoc.walletBalance = currentBalance - fee;
-        await userDoc.save({ session: mongoSession });
       }
 
       await Payment.create(
@@ -393,10 +354,7 @@ const getById = async (user, id) => {
     throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
   }
 
-  const allowedBuildings = assertBuildingScope(user, parkingSession.building);
-  if (!allowedBuildings.includes(toIdString(parkingSession.building))) {
-    throw new AppError('Forbidden for this building', 403, 'FORBIDDEN_BUILDING_SCOPE');
-  }
+  assertBuildingScope(user, parkingSession.building);
 
   return parkingSession;
 };
