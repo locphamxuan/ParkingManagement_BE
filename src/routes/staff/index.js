@@ -1,7 +1,7 @@
 const express = require("express");
 const buildingAccessController = require("../../controllers/staff/buildingAccess.controller");
 const { authenticate } = require("../../middlewares/auth.middleware");
-const { authorize } = require("../../middlewares/rbac");
+const { authorize } = require("../../middlewares/rbac.middleware");
 const { ROLES } = require("../../constants/roles");
 
 const router = express.Router();
@@ -12,7 +12,7 @@ router.get("/dashboard", buildingAccessController.getDashboard);
 router.get("/buildings", buildingAccessController.listAssignedBuildings);
 router.get("/buildings/:id", buildingAccessController.getAssignedBuilding);
 
-const parkingSessionRoutes = require("./parking-sessions.routes");
+const parkingSessionRoutes = require("./parkingSession.routes");
 const reservationRoutes = require("./reservation.routes");
 const walletRoutes = require("./wallet.routes");
 const incidentRoutes = require("./incident.routes");

@@ -22,12 +22,12 @@ const push = async ({ buildingId, vehicleTypeId, payload, actor }) => {
   if (!vehicleTypeId) throw new AppError("vehicleTypeId is required", 400);
   if (!payload.hourlyRate) throw new AppError("hourlyRate is required", 400);
 
-  const [building, vehicleType] = await Promise.all([
-    Building.findById(buildingId),
-    VehicleType.findById(vehicleTypeId),
+  const [buildingExists, vehicleTypeExists] = await Promise.all([
+    Building.exists({ _id: buildingId }),
+    VehicleType.exists({ _id: vehicleTypeId }),
   ]);
-  if (!building) throw new AppError("Building not found", 404);
-  if (!vehicleType) throw new AppError("VehicleType not found", 404);
+  if (!buildingExists) throw new AppError("Building not found", 404);
+  if (!vehicleTypeExists) throw new AppError("VehicleType not found", 404);
 
   // Deactivate existing active policy for same building + vehicleType
   const existing = await PricePolicy.findOne({

@@ -14,9 +14,11 @@ const topup = async (amount) => {
   const amt = Number(amount);
   if (!amt || amt <= 0) throw new AppError("amount must be a positive number", 400);
 
-  const wallet = await getWallet();
-  wallet.balance += amt;
-  await wallet.save();
+  const wallet = await SystemWallet.findOneAndUpdate(
+    {},
+    { $inc: { balance: amt } },
+    { new: true, upsert: true }
+  );
   return wallet;
 };
 
@@ -26,16 +28,15 @@ const distribute = async ({ buildingId, amount, periodStart, periodEnd, note, ac
   if (!buildingId) throw new AppError("buildingId is required", 400);
   if (!periodStart || !periodEnd) throw new AppError("periodStart and periodEnd are required", 400);
 
-  const building = await Building.findById(buildingId);
-  if (!building) throw new AppError("Building not found", 404);
+  const buildingExists = await Building.exists({ _id: buildingId });
+  if (!buildingExists) throw new AppError("Building not found", 404);
 
-  const wallet = await getWallet();
-  if (wallet.balance < amt)
-    throw new AppError("Insufficient wallet balance", 400);
-
-  wallet.balance -= amt;
-  wallet.totalDistributed += amt;
-  await wallet.save();
+  const wallet = await SystemWallet.findOneAndUpdate(
+    { balance: { $gte: amt } },
+    { $inc: { balance: -amt, totalDistributed: amt } },
+    { new: true }
+  );
+  if (!wallet) throw new AppError("Insufficient wallet balance", 400);
 
   const distribution = await RevenueDistribution.create({
     building: buildingId,

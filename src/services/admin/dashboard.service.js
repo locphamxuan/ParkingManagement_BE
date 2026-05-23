@@ -4,8 +4,6 @@ const ParkingSession = require("../../models/operations/ParkingSession");
 const Payment = require("../../models/finance/Payment");
 const { ROLES } = require("../../constants/roles");
 
-const VALID_PERIODS = ["today", "week", "month"];
-
 const getDateRange = (period) => {
   const now = new Date();
   const from = new Date(now);
@@ -23,14 +21,6 @@ const getDateRange = (period) => {
 };
 
 const getOverview = async (period = "today") => {
-  if (!VALID_PERIODS.includes(period)) {
-    const { AppError } = require("../../utils/AppError");
-    throw new (require("../../utils/AppError"))(
-      `period must be one of: ${VALID_PERIODS.join(", ")}`,
-      400
-    );
-  }
-
   const { from, to } = getDateRange(period);
 
   const [

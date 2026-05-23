@@ -1,13 +1,8 @@
 const express = require("express");
 const controller = require("../../controllers/admin/user.controller");
-const { authenticate } = require("../../middlewares/auth.middleware");
-const { authorize } = require("../../middlewares/rbac");
-const { ROLES } = require("../../constants/roles");
-const { validateUserStatus } = require("../../validators/user.validator");
+const { validateUserStatus } = require("../../validators/adminUsers.validator");
 
 const router = express.Router();
-
-router.use(authenticate, authorize(ROLES.ADMIN));
 
 router.get("/", controller.list);
 router.get("/:id", controller.get);

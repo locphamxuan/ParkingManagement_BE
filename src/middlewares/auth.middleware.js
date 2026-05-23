@@ -14,21 +14,10 @@ const authenticate = asyncHandler(async (req, _res, next) => {
   const { id } = verifyToken(header.slice(7));
   const user = await User.findById(id);
   if (!user) throw new AppError("User no longer exists", 401);
-
-  // populate assignedBuildings via BuildingManager assignments
-  const assignments = await BuildingManager.find({
-    user: id,
-    isActive: true,
-  }).populate({
-    path: "building",
-    select: "name code status isActive",
-  });
-  user.assignedBuildings = assignments.map((a) =>
-    a.building._id ? a.building._id : a.building,
-  );
-
-  if (!user) throw new AppError("User no longer exists", 401);
   if (!user.isActive) throw new AppError("Account is deactivated", 403);
+
+  const assignments = await BuildingManager.find({ user: id, isActive: true }).select("building");
+  user.assignedBuildings = assignments.map((a) => a.building);
 
   req.user = user;
   next();

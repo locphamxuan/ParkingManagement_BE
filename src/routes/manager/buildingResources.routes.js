@@ -1,6 +1,6 @@
 const express = require("express");
 const { authenticate } = require("../../middlewares/auth.middleware");
-const { authorize, authorizeBuildingAccess } = require("../../middlewares/rbac");
+const { authorize, authorizeBuildingAccess } = require("../../middlewares/rbac.middleware");
 const { ROLES } = require("../../constants/roles");
 
 const vehicleTypeController = require("../../controllers/manager/vehicleType.controller");

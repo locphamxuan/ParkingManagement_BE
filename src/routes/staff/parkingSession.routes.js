@@ -1,6 +1,6 @@
 const express = require("express");
 const parkingSessionController = require("../../controllers/staff/parkingSession.controller");
-const { authorizeBuildingAccess } = require("../../middlewares/rbac");
+const { authorizeBuildingAccess } = require("../../middlewares/rbac.middleware");
 
 const router = express.Router();
 
