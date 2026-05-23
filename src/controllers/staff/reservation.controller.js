@@ -1,36 +1,18 @@
-const asyncHandler = require("../../utils/asyncHandler");
-const { sendSuccess } = require("../../utils/response");
-const reservationService = require("../../services/staff/reservation.service");
+const asyncHandler = require('../../utils/asyncHandler');
+const { sendSuccess } = require('../../utils/response');
+const reservationService = require('../../services/staff/reservation.service');
 
 const checkInReservation = asyncHandler(async (req, res) => {
-  const { code } = req.params;
-  const { building, gate, vehicleType } = req.body;
-  const staffId = req.user._id;
-
-  const result = await reservationService.processReservationCheckIn({
-    bookingCode: code,
-    buildingId: building,
-    gate,
-    vehicleType,
-    staffId
+  const result = await reservationService.processReservationCheckIn(req.user, {
+    code: req.params.code,
+    entryGate: req.body.gate,
   });
-
-  sendSuccess(res, "Xác nhận xe đặt chỗ vào bãi thành công", result);
+  sendSuccess(res, { message: 'Xác nhận xe đặt chỗ vào bãi thành công', data: result });
 });
 
 const expireReservation = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const staffId = req.user._id;
-
-  const result = await reservationService.expireReservation({
-    reservationId: id,
-    staffId
-  });
-
-  sendSuccess(res, "Hủy và giải phóng lượt đặt chỗ quá hạn thành công", result);
+  const result = await reservationService.expireReservation(req.user, { id: req.params.id });
+  sendSuccess(res, { message: 'Hủy và giải phóng lượt đặt chỗ quá hạn thành công', data: result });
 });
 
-module.exports = {
-  checkInReservation,
-  expireReservation,
-};
+module.exports = { checkInReservation, expireReservation };

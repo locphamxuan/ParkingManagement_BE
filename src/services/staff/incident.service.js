@@ -1,28 +1,7 @@
 const mongoose = require('mongoose');
 const AppError = require('../../utils/AppError');
-const {
-  ParkingSession,
-  ParkingSlot,
-  Payment,
-  AuditLog,
-  User,
-} = require('../../models');
-
-const logAudit = async (session, payload) =>
-  AuditLog.create([
-    {
-      actor: payload.actor,
-      actorRole: payload.actorRole || null,
-      action: payload.action,
-      targetTable: payload.entityType,
-      targetId: payload.entityId || null,
-      building: payload.building || null,
-      previousValue: payload.before || null,
-      newValue: payload.after || null,
-      severity: payload.severity || 'low',
-      description: payload.description || '',
-    },
-  ], { session });
+const { ParkingSession, ParkingSlot, Payment, User } = require('../../models');
+const { logAudit } = require('../../utils/staffScope');
 
 const createIncidentReport = async (staffUser, payload = {}) => {
   const session = await mongoose.startSession();

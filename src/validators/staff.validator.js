@@ -1,80 +1,72 @@
-const Joi = require('joi');
-const { ObjectId } = require('mongoose').Types;
+const AppError = require('../utils/AppError');
+const mongoose = require('mongoose');
 
-const validateReservationCheckIn = (req, res, next) => {
-  const schema = Joi.object({
-    code: Joi.string().uppercase().required(),
-  });
-  const { error } = schema.validate(req.params);
-  if (error) return res.status(400).json({ message: error.details[0].message });
+const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 
-  const bodySchema = Joi.object({
-    building: Joi.string().custom((value, helpers) => {
-      if (!ObjectId.isValid(value)) {
-        return helpers.error('any.invalid');
-      }
-      return value;
-    }, 'ObjectId validation').required(),
-    gate: Joi.string().required(),
-    vehicleType: Joi.string().required(),
-  });
-  const { error: bodyError } = bodySchema.validate(req.body);
-  if (bodyError) return res.status(400).json({ message: bodyError.details[0].message });
-
-  next();
+const wrap = (fn) => (req, _res, next) => {
+  try {
+    fn(req);
+    next();
+  } catch (err) {
+    next(err);
+  }
 };
 
-const validateReservationExpire = (req, res, next) => {
-  const schema = Joi.object({
-    id: Joi.string().custom((value, helpers) => {
-      if (!ObjectId.isValid(value)) {
-        return helpers.error('any.invalid');
-      }
-      return value;
-    }, 'ObjectId validation').required(),
-  });
-  const { error } = schema.validate(req.params);
-  if (error) return res.status(400).json({ message: error.details[0].message });
-  next();
-};
+const validateReservationCheckIn = wrap((req) => {
+  if (!req.params.code || !String(req.params.code).trim()) {
+    throw new AppError('code is required', 400);
+  }
+  if (req.body.gate !== undefined && typeof req.body.gate !== 'string') {
+    throw new AppError('gate must be a string', 400);
+  }
+});
 
-const validateWalletTransaction = (req, res, next) => {
-  const schema = Joi.object({
-    sessionId: Joi.string().custom((value, helpers) => {
-      if (!ObjectId.isValid(value)) {
-        return helpers.error('any.invalid');
-      }
-      return value;
-    }, 'ObjectId validation').required(),
-    userId: Joi.string().custom((value, helpers) => {
-      if (!ObjectId.isValid(value)) {
-        return helpers.error('any.invalid');
-      }
-      return value;
-    }, 'ObjectId validation').required(),
-    amount: Joi.number().positive().required(),
-  });
-  const { error } = schema.validate(req.body);
-  if (error) return res.status(400).json({ message: error.details[0].message });
-  next();
-};
+const validateReservationExpire = wrap((req) => {
+  if (!isValidObjectId(req.params.id)) {
+    throw new AppError('id must be a valid ObjectId', 400);
+  }
+});
 
-const validateIncidentReport = (req, res, next) => {
-  const schema = Joi.object({
-    building: Joi.string().custom((value, helpers) => {
-      if (!ObjectId.isValid(value)) {
-        return helpers.error('any.invalid');
-      }
-      return value;
-    }, 'ObjectId validation').required(),
-    title: Joi.string().required(),
-    description: Joi.string().required(),
-    severity: Joi.string().valid('low', 'medium', 'high').required(),
-  });
-  const { error } = schema.validate(req.body);
-  if (error) return res.status(400).json({ message: error.details[0].message });
-  next();
-};
+const validateWalletTransaction = wrap((req) => {
+  const { sessionId, userId, amount } = req.body;
+
+  if (!sessionId && !userId) {
+    throw new AppError('sessionId or userId is required', 400);
+  }
+  if (sessionId && !isValidObjectId(sessionId)) {
+    throw new AppError('sessionId must be a valid ObjectId', 400);
+  }
+  if (userId && !isValidObjectId(userId)) {
+    throw new AppError('userId must be a valid ObjectId', 400);
+  }
+
+  const amt = Number(amount);
+  if (!amount || !Number.isFinite(amt) || amt <= 0) {
+    throw new AppError('amount must be a positive number', 400);
+  }
+});
+
+const INCIDENT_PAYMENT_METHODS = ['cash', 'wallet', 'qr'];
+
+const validateIncidentReport = wrap((req) => {
+  const { incidentType, parkingSessionId, penaltyFee, paymentMethod } = req.body;
+
+  if (!incidentType || !String(incidentType).trim()) {
+    throw new AppError('incidentType is required', 400);
+  }
+  if (parkingSessionId !== undefined && !isValidObjectId(parkingSessionId)) {
+    throw new AppError('parkingSessionId must be a valid ObjectId', 400);
+  }
+  if (penaltyFee !== undefined) {
+    const fee = Number(penaltyFee);
+    if (!Number.isFinite(fee) || fee < 0) {
+      throw new AppError('penaltyFee must be a non-negative number', 400);
+    }
+  }
+  if (paymentMethod !== undefined && !INCIDENT_PAYMENT_METHODS.includes(paymentMethod)) {
+    throw new AppError(`paymentMethod must be one of: ${INCIDENT_PAYMENT_METHODS.join(', ')}`, 400);
+  }
+});
 
 module.exports = {
   validateReservationCheckIn,
