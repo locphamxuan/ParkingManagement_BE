@@ -1,6 +1,6 @@
 const express = require("express");
 const { authenticate } = require("../../middlewares/auth.middleware");
-const { authorize } = require("../../middlewares/rbac");
+const { authorize } = require("../../middlewares/rbac.middleware");
 const { ROLES } = require("../../constants/roles");
 
 const buildingController = require("../../controllers/manager/building.controller");
@@ -8,7 +8,7 @@ const {
   validateManagerBuildingUpdate,
 } = require("../../validators/building.validator");
 
-const resourceRoutes = require("./resources.routes");
+const resourceRoutes = require("./buildingResources.routes");
 
 const router = express.Router();
 

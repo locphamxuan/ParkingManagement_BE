@@ -1,17 +1,12 @@
 const express = require("express");
 const controller = require("../../controllers/admin/building.controller");
-const { authorize } = require("../../middlewares/rbac");
-const { authenticate } = require("../../middlewares/auth.middleware");
 const {
   validateBuildingCreate,
   validateBuildingUpdate,
   validateBuildingStatus,
 } = require("../../validators/building.validator");
-const { ROLES } = require("../../constants/roles");
 
 const router = express.Router();
-
-router.use(authenticate, authorize(ROLES.ADMIN));
 
 router.get("/", controller.listBuildings);
 router.get("/:id", controller.getBuilding);
