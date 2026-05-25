@@ -21,4 +21,17 @@ const getMe = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: { user } });
 });
 
-module.exports = { register, login, getMe };
+const forgotPassword = asyncHandler(async (req, res) => {
+  await authService.forgotPassword(req.body.email);
+  // Always return 200 regardless of whether email exists (prevent enumeration)
+  sendSuccess(res, {
+    message: 'If that email is registered, a reset link has been sent.',
+  });
+});
+
+const resetPassword = asyncHandler(async (req, res) => {
+  const data = await authService.resetPassword(req.body.token, req.body.newPassword);
+  sendSuccess(res, { message: 'Password has been reset successfully', data });
+});
+
+module.exports = { register, login, getMe, forgotPassword, resetPassword };
