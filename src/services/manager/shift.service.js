@@ -1,6 +1,7 @@
 ﻿const Shift = require("../../models/operations/Shift");
 const StaffShift = require("../../models/operations/StaffShift");
 const ShiftRevenue = require("../../models/finance/ShiftRevenue");
+const BuildingManager = require("../../models/building/BuildingManager");
 const User = require("../../models/user/User");
 const AppError = require("../../utils/AppError");
 const { ROLES } = require("../../constants/roles");
@@ -186,9 +187,11 @@ const removeStaffShift = async (user, buildingId, id) => {
 
 const listAvailableStaff = async (user, buildingId) => {
   ensureManagerOwnsBuilding(user, buildingId);
-  return User.find({ role: ROLES.STAFF, isActive: true })
-    .select("fullName email phone role isActive")
-    .sort("fullName");
+  const assignments = await BuildingManager.find({ building: buildingId, isActive: true })
+    .populate("user", "fullName email phone role isActive");
+  return assignments
+    .filter((a) => a.user?.role === ROLES.STAFF && a.user?.isActive)
+    .map((a) => a.user);
 };
 
 const listShiftRevenues = async (user, buildingId, query = {}) => {
