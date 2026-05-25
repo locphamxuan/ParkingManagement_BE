@@ -10,7 +10,6 @@ const reservationRoutes = require('./reservation.routes');
 const parkingHistoryRoutes = require('./parkingHistory.routes');
 const walletRoutes = require('./wallet.routes');
 const longTermRoutes = require('./longTerm.routes');
-
 const router = express.Router();
 
 router.use('/auth', authRoutes);

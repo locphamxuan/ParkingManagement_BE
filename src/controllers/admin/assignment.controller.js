@@ -38,4 +38,39 @@ const revokeManager = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { assignManager, revokeManager };
+const assignStaff = asyncHandler(async (req, res) => {
+  const { userId } = req.body;
+  const { buildingId } = req.params;
+
+  if (!userId) throw new AppError("userId is required", 400);
+
+  const assignment = await buildingManagerService.assignStaffToBuilding({
+    buildingId,
+    userId,
+  });
+
+  sendSuccess(res, {
+    statusCode: 201,
+    message: "Staff assigned to building",
+    data: { assignment },
+  });
+});
+
+const revokeStaff = asyncHandler(async (req, res) => {
+  const { userId } = req.body;
+  const { buildingId } = req.params;
+
+  if (!userId) throw new AppError("userId is required", 400);
+
+  const assignment = await buildingManagerService.revokeStaffFromBuilding({
+    buildingId,
+    userId,
+  });
+
+  sendSuccess(res, {
+    message: "Staff revoked from building",
+    data: { assignment },
+  });
+});
+
+module.exports = { assignManager, revokeManager, assignStaff, revokeStaff };

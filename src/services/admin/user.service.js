@@ -24,7 +24,7 @@ const buildFilter = (query = {}) => {
 const list = async (query = {}) => {
   const filter = buildFilter(query);
   const page = Math.max(Number(query.page) || 1, 1);
-  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 500);
 
   const [items, total] = await Promise.all([
     User.find(filter)

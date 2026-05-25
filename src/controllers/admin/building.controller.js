@@ -1,6 +1,7 @@
 const asyncHandler = require("../../utils/asyncHandler");
 const { sendSuccess } = require("../../utils/response");
 const buildingService = require("../../services/building.service");
+const buildingManagerService = require("../../services/buildingManager.service");
 
 const listBuildings = asyncHandler(async (req, res) => {
   const data = await buildingService.listBuildings(req.query);
@@ -51,6 +52,11 @@ const deleteBuilding = asyncHandler(async (req, res) => {
   });
 });
 
+const getBuildingMembers = asyncHandler(async (req, res) => {
+  const members = await buildingManagerService.getBuildingMembers(req.params.id);
+  sendSuccess(res, { data: members });
+});
+
 module.exports = {
   listBuildings,
   getBuilding,
@@ -58,4 +64,5 @@ module.exports = {
   updateBuilding,
   updateBuildingStatus,
   deleteBuilding,
+  getBuildingMembers,
 };
