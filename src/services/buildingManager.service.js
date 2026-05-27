@@ -47,12 +47,15 @@ const assignManagerToBuilding = async ({ buildingId, userId }) => {
     throw new AppError("User is already assigned to another building", 400);
   }
 
-  const buildingOtherManager = await buildingManagerRepo.findOne({
-    building: buildingId,
-    isActive: true,
-    user: { $ne: userId },
+  // Check if building already has a different active manager.
+  // Use User model (role + assignedBuildings) instead of BuildingManager
+  // to avoid false-positives from staff records sharing the same building.
+  const existingManager = await User.findOne({
+    _id: { $ne: userId },
+    role: "manager",
+    assignedBuildings: buildingId,
   });
-  if (buildingOtherManager) {
+  if (existingManager) {
     throw new AppError("Building already has an active manager", 400);
   }
 
