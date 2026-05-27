@@ -95,6 +95,28 @@ const update = async (actor, id, payload) => {
   if (payload.role !== undefined) {
     if (!ROLE_LIST.includes(payload.role))
       throw new AppError(`role must be one of: ${ROLE_LIST.join(", ")}`, 400);
+    // Không cho phép gán/tháo role staff hoặc manager trực tiếp.
+    // Phải dùng đúng endpoint:
+    //   POST /admin/buildings/:buildingId/assign-staff   → role staff
+    //   POST /admin/buildings/:buildingId/assign-manager → role manager
+    //   POST /admin/buildings/:buildingId/revoke-staff   → role về user
+    //   POST /admin/buildings/:buildingId/revoke-manager → role về user
+    if (['staff', 'manager'].includes(payload.role)) {
+      throw new AppError(
+        `Cannot set role to "${payload.role}" directly. ` +
+        `Use POST /admin/buildings/:buildingId/assign-${payload.role} instead.`,
+        400,
+        'USE_ASSIGNMENT_ENDPOINT',
+      );
+    }
+    if (['staff', 'manager'].includes(current.role)) {
+      throw new AppError(
+        `Cannot change role of a ${current.role} directly. ` +
+        `Use POST /admin/buildings/:buildingId/revoke-${current.role} first.`,
+        400,
+        'USE_REVOKE_ENDPOINT',
+      );
+    }
     update.role = payload.role;
   }
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;

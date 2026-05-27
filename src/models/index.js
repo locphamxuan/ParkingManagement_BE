@@ -4,7 +4,7 @@ const { Building, BuildingManager, Floor, Gate, ParkingSlot, VehicleType } = req
 const { PricePolicy, PolicyPushLog, ReservationPolicy, LongTermPackage, LongTermSubscription } = require("./policy");
 const { ParkingSession, Reservation, Shift, StaffShift } = require("./operations");
 const { Payment, ShiftRevenue, WalletTransaction, SystemWallet, RevenueDistribution } = require("./finance");
-const { AuditLog, Feedback } = require("./log");
+const { AuditLog, Feedback, Incident } = require('./log');
 module.exports = {
   User,
   Building,
@@ -23,6 +23,7 @@ module.exports = {
   ShiftRevenue,
   Feedback,
   AuditLog,
+  Incident,
   ParkingSession,
   Reservation,
   Payment,
