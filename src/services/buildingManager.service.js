@@ -34,13 +34,31 @@ const assignManagerToBuilding = async ({ buildingId, userId }) => {
   if (!building) throw new AppError("Building not found", 404);
 
   const user = await findUser(userId);
-  if (user.role === "admin") throw new AppError("Cannot assign admin as manager", 400);
-  if (user.role === "staff") throw new AppError("User is currently a staff member. Revoke staff assignment first.", 400);
+  if (user.role === "admin")
+    throw new AppError("Cannot assign admin as manager", 400);
+  if (user.role === "staff")
+    throw new AppError(
+      "User is currently a staff member. Revoke staff assignment first.",
+      400,
+    );
+
+  // Also check existing active staff assignment records
+  const existingActiveStaff = await buildingManagerRepo.findOne({
+    user: userId,
+    isActive: true,
+    role: "staff",
+  });
+  if (existingActiveStaff)
+    throw new AppError(
+      "User is currently a staff member. Revoke staff assignment first.",
+      400,
+    );
 
   // Enforce 1 manager : 1 building constraint
   const managerOtherBuilding = await buildingManagerRepo.findOne({
     user: userId,
     isActive: true,
+    role: "manager",
     building: { $ne: buildingId },
   });
   if (managerOtherBuilding) {
@@ -50,14 +68,23 @@ const assignManagerToBuilding = async ({ buildingId, userId }) => {
   const buildingOtherManager = await buildingManagerRepo.findOne({
     building: buildingId,
     isActive: true,
+    role: "manager",
     user: { $ne: userId },
   });
   if (buildingOtherManager) {
     throw new AppError("Building already has an active manager", 400);
   }
 
-  const existing = await buildingManagerRepo.findOne({ building: buildingId, user: userId });
+  const existing = await buildingManagerRepo.findOne({
+    building: buildingId,
+    user: userId,
+  });
   if (existing && existing.isActive) {
+    // if it's already an active assignment, ensure role is manager
+    if (existing.role !== "manager") {
+      existing.role = "manager";
+      await existing.save();
+    }
     await Promise.all([
       User.updateOne({ _id: userId }, { role: "manager" }),
       Building.updateOne({ _id: buildingId }, { $set: { manager: userId } }),
@@ -70,6 +97,7 @@ const assignManagerToBuilding = async ({ buildingId, userId }) => {
     existing.isActive = true;
     existing.assignedAt = new Date();
     existing.revokedAt = null;
+    existing.role = "manager";
     await existing.save();
     await Promise.all([
       User.updateOne({ _id: userId }, { role: "manager" }),
@@ -79,7 +107,11 @@ const assignManagerToBuilding = async ({ buildingId, userId }) => {
     return existing;
   }
 
-  const created = await buildingManagerRepo.create({ building: buildingId, user: userId });
+  const created = await buildingManagerRepo.create({
+    building: buildingId,
+    user: userId,
+    role: "manager",
+  });
   await Promise.all([
     User.updateOne({ _id: userId }, { role: "manager" }),
     Building.updateOne({ _id: buildingId }, { $set: { manager: userId } }),
@@ -93,12 +125,16 @@ const revokeManagerFromBuilding = async ({ buildingId, userId }) => {
     building: buildingId,
     user: userId,
     isActive: true,
+    role: "manager",
   });
   if (!updated) throw new AppError("Active assignment not found", 404);
 
   await Promise.all([
     User.updateOne({ _id: userId }, { role: "user" }),
-    Building.updateOne({ _id: buildingId, manager: userId }, { $set: { manager: null } }),
+    Building.updateOne(
+      { _id: buildingId, manager: userId },
+      { $set: { manager: null } },
+    ),
     syncUserAssignedBuildings(userId),
   ]);
 
@@ -110,8 +146,25 @@ const assignStaffToBuilding = async ({ buildingId, userId }) => {
   if (!building) throw new AppError("Building not found", 404);
 
   const user = await findUser(userId);
-  if (user.role === "admin") throw new AppError("Cannot assign admin as staff", 400);
-  if (user.role === "manager") throw new AppError("User is currently a manager. Revoke manager assignment first.", 400);
+  if (user.role === "admin")
+    throw new AppError("Cannot assign admin as staff", 400);
+  if (user.role === "manager")
+    throw new AppError(
+      "User is currently a manager. Revoke manager assignment first.",
+      400,
+    );
+
+  // Also check existing active manager assignment records
+  const existingActiveManager = await buildingManagerRepo.findOne({
+    user: userId,
+    isActive: true,
+    role: "manager",
+  });
+  if (existingActiveManager)
+    throw new AppError(
+      "User is currently a manager. Revoke manager assignment first.",
+      400,
+    );
 
   // 1 staff : 1 building constraint
   const existingOtherBuilding = await buildingManagerRepo.findOne({
@@ -123,9 +176,16 @@ const assignStaffToBuilding = async ({ buildingId, userId }) => {
     throw new AppError("User is already assigned to another building", 400);
   }
 
-  const existing = await buildingManagerRepo.findOne({ building: buildingId, user: userId });
+  const existing = await buildingManagerRepo.findOne({
+    building: buildingId,
+    user: userId,
+  });
 
   if (existing && existing.isActive) {
+    if (existing.role !== "staff") {
+      existing.role = "staff";
+      await existing.save();
+    }
     await Promise.all([
       User.updateOne({ _id: userId }, { role: "staff" }),
       syncUserAssignedBuildings(userId),
@@ -137,6 +197,7 @@ const assignStaffToBuilding = async ({ buildingId, userId }) => {
     existing.isActive = true;
     existing.assignedAt = new Date();
     existing.revokedAt = null;
+    existing.role = "staff";
     await existing.save();
     await Promise.all([
       User.updateOne({ _id: userId }, { role: "staff" }),
@@ -145,7 +206,11 @@ const assignStaffToBuilding = async ({ buildingId, userId }) => {
     return existing;
   }
 
-  const created = await buildingManagerRepo.create({ building: buildingId, user: userId });
+  const created = await buildingManagerRepo.create({
+    building: buildingId,
+    user: userId,
+    role: "staff",
+  });
   await Promise.all([
     User.updateOne({ _id: userId }, { role: "staff" }),
     syncUserAssignedBuildings(userId),
@@ -158,6 +223,7 @@ const revokeStaffFromBuilding = async ({ buildingId, userId }) => {
     building: buildingId,
     user: userId,
     isActive: true,
+    role: "staff",
   });
   if (!updated) throw new AppError("Active assignment not found", 404);
 
@@ -182,16 +248,27 @@ const getBuildingMembers = async (buildingId) => {
   const building = await buildingRepository.findById(buildingId);
   if (!building) throw new AppError("Building not found", 404);
 
-  const assignments = await buildingManagerRepo.findActiveByBuilding(buildingId);
+  const assignments =
+    await buildingManagerRepo.findActiveByBuilding(buildingId);
 
-  const managerAssignment = assignments.find((a) => a.user?.role === "manager");
-  const staffAssignments = assignments.filter((a) => a.user?.role === "staff" && a.user?.isActive);
+  const managerAssignment =
+    assignments.find((a) => a.role === "manager") ?? null;
+  const staffAssignments = assignments.filter(
+    (a) => a.role === "staff" && a.user?.isActive,
+  );
 
   return {
-    manager: managerAssignment?.user ?? null,
+    manager: managerAssignment
+      ? {
+          ...managerAssignment.user.toObject(),
+          assignedAt: managerAssignment.assignedAt,
+          role: managerAssignment.role,
+        }
+      : null,
     staff: staffAssignments.map((a) => ({
       ...a.user.toObject(),
       assignedAt: a.assignedAt,
+      role: a.role,
     })),
   };
 };
@@ -205,4 +282,3 @@ module.exports = {
   listAssignmentsForUser,
   getBuildingMembers,
 };
-
