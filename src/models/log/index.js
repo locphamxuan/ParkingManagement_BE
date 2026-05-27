@@ -1,4 +1,5 @@
-const AuditLog = require("./AuditLog");
-const Feedback = require("./Feedback");
+const AuditLog  = require('./AuditLog');
+const Feedback  = require('./Feedback');
+const Incident  = require('./Incident');
 
-module.exports = { AuditLog, Feedback };
+module.exports = { AuditLog, Feedback, Incident };
