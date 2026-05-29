@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const routes = require('./routes');
+const webhookRoutes = require('./routes/payment/webhook.routes');
 const { notFound, errorHandler } = require('./middlewares/error.middleware');
 
 const app = express();
@@ -18,6 +19,10 @@ app.get('/', (_req, res) => {
 });
 
 app.use('/api', routes);
+
+// PayOS webhook — registered after express.json() since PayOS sends JSON body
+// (unlike Stripe which required raw bytes for signature verification)
+app.use('/api/payments/webhook', webhookRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

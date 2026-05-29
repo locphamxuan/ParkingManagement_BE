@@ -7,7 +7,18 @@ const router = express.Router();
 router.post("/check-in", authorizeBuildingAccess, parkingSessionController.checkIn);
 router.get("/active", parkingSessionController.listActive);
 router.get("/search", parkingSessionController.search);
+
+// Plate lookup — returns hasAccount + user wallet info for staff at entry gate
+router.get("/lookup-plate/:plate", parkingSessionController.lookupPlate);
+
 router.patch("/:id/check-out", parkingSessionController.checkOut);
+
+// PayOS payment — tạo QR + checkoutUrl để thu phí gửi xe tại chỗ
+router.post("/:id/initiate-payment", parkingSessionController.initiatePayment);
+
+// Reconcile a bank-transfer (PayOS) payment when the webhook didn't arrive
+router.get("/payment/:orderCode/status", parkingSessionController.verifyPayment);
+
 router.get("/:id", parkingSessionController.getById);
 
 module.exports = router;

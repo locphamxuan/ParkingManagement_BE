@@ -9,15 +9,14 @@ const reservationPolicySchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
-    reservableRatio: {
-      type: Number,
-      default: 0.3,
-      min: 0,
-      max: 1,
-    },
     maxHoldMinutes: {
       type: Number,
       default: 30,
+      min: 0,
+    },
+    bookingFee: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     refundPercent: {
@@ -26,8 +25,8 @@ const reservationPolicySchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
-    minAdvanceMinutes: { type: Number, default: 15, min: 0 },
-    maxAdvanceHours: { type: Number, default: 72, min: 0 },
+    // minAdvanceMinutes và maxAdvanceHours đã bỏ —
+    // khách tự chọn thời gian bất kỳ, hệ thống tính phí tự động.
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

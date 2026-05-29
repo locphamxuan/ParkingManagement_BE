@@ -1,15 +1,16 @@
 const mongoose = require("mongoose");
 
 const PAYMENT_STATUS = ["pending", "success", "failed", "refunded"];
-const PAYMENT_TYPES = ["session", "reservation", "subscription", "refund"];
-const PAYMENT_METHODS = ["cash", "wallet", "qr", "card"];
+const PAYMENT_TYPES = ["session", "reservation", "subscription", "refund", "topup"];
+const PAYMENT_METHODS = ["cash", "wallet", "qr", "card", "payos"];
 
 const paymentSchema = new mongoose.Schema(
   {
     building: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Building",
-      required: true,
+      required: false,
+      default: null,
       index: true,
     },
     type: {
@@ -54,6 +55,9 @@ const paymentSchema = new mongoose.Schema(
       default: null,
     },
     note: { type: String, trim: true, default: "" },
+    // PayOS fields
+    payosOrderCode: { type: Number, default: null, index: true },
+    payosPaymentLinkId: { type: String, default: null },
   },
   { timestamps: true }
 );

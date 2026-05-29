@@ -11,4 +11,6 @@ router.use("/manager", managerRoutes);
 router.use("/staff", staffRoutes);
 router.use("/users", userRoutes);
 
+// NOTE: /payments/webhook is registered in app.js (PayOS uses JSON body, no raw-body constraint).
+
 module.exports = router;

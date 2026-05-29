@@ -3,11 +3,8 @@ const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
 
 const DEFAULT_POLICY = {
-  reservableRatio: 0.3,
   maxHoldMinutes: 30,
   refundPercent: 80,
-  minAdvanceMinutes: 15,
-  maxAdvanceHours: 72,
   isActive: true,
 };
 
@@ -28,7 +25,7 @@ const upsert = async (user, buildingId, payload) => {
   const current = await ReservationPolicy.findOne({ building: buildingId });
 
   const update = {};
-  ["reservableRatio", "maxHoldMinutes", "refundPercent", "minAdvanceMinutes", "maxAdvanceHours"].forEach((k) => {
+  ["maxHoldMinutes", "refundPercent"].forEach((k) => {
     if (payload[k] !== undefined) update[k] = Number(payload[k]);
   });
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;

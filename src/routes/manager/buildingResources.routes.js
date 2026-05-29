@@ -13,6 +13,7 @@ const reservationPolicyController = require("../../controllers/manager/reservati
 const shiftController = require("../../controllers/manager/shift.controller");
 const feedbackController = require("../../controllers/manager/feedback.controller");
 const dashboardController = require("../../controllers/manager/dashboard.controller");
+const buildingWalletController = require("../../controllers/manager/buildingWallet.controller");
 
 const v = require("../../validators/manager.validator");
 
@@ -25,6 +26,13 @@ router.use(
 );
 
 router.get("/dashboard", dashboardController.getOverview);
+
+// ── Building Wallet ────────────────────────────────────────────────────────────
+router.get("/wallet", buildingWalletController.getWallet);
+router.get("/wallet/transactions", buildingWalletController.listTransactions);
+router.get("/wallet/daily-revenue", buildingWalletController.getDailyRevenue);
+// 30% revenue is auto-settled to the admin wallet daily; this lists that history.
+router.get("/wallet/settlements", buildingWalletController.listSettlements);
 
 router
   .route("/vehicle-types")

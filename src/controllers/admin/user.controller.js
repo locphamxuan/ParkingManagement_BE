@@ -36,7 +36,8 @@ const updateStatus = asyncHandler(async (req, res) => {
 });
 
 const remove = asyncHandler(async (req, res) => {
-  await service.remove(req.user, req.params.id);
+  const force = req.query.force === 'true';
+  await service.remove(req.user, req.params.id, { force });
   sendSuccess(res, { message: "User removed", data: null });
 });
 

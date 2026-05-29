@@ -48,7 +48,9 @@ const reservationSchema = new mongoose.Schema(
       maxlength: 20,
     },
     startTime: { type: Date, required: true },
-    endTime: { type: Date, required: true },
+    endTime: { type: Date, default: null },
+    // Amount actually charged to the user's wallet when booking (deposit).
+    fee: { type: Number, default: 0, min: 0 },
     status: {
       type: String,
       enum: RESERVATION_STATUS,

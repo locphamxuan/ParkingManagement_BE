@@ -11,6 +11,8 @@ const {
   User,
 } = require('../../models');
 const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../utils/staffScope');
+const payosService = require('../payment/payos.service');
+const buildingWalletService = require('../manager/buildingWallet.service');
 
 const normalizePlate = (plate) => `${plate || ''}`.trim().toUpperCase();
 
@@ -272,7 +274,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
         );
       }
 
-      await Payment.create(
+      const [payment] = await Payment.create(
         [{
           building: parkingSession.building,
           parkingSession: parkingSession._id,
@@ -280,12 +282,23 @@ const checkOut = async (user, sessionId, payload = {}) => {
           method: feeMethod,
           amount: fee,
           status: 'success',
-          user: user._id,
+          user: parkingSession.user || null,
           staff: user._id,
           note: [payload.adjustmentReason, payload.forceCheckoutReason].filter(Boolean).join(' | '),
         }],
         { session: mongoSession },
       );
+
+      // Credit tiền phí gửi xe vào BuildingWallet (áp dụng mọi method thanh toán)
+      if (fee > 0) {
+        await buildingWalletService.credit(
+          parkingSession.building,
+          fee,
+          'parking_fee',
+          payment._id,
+          mongoSession,
+        );
+      }
 
       parkingSession.exitTime = new Date();
       parkingSession.status = 'completed';
@@ -341,7 +354,10 @@ const listActive = async (user, query = {}) => {
     ? { building: query.buildingId || query.building }
     : { building: { $in: allowedBuildings } };
 
-  return ParkingSession.find({ ...buildingFilter, status: 'active' }).sort({ entryTime: -1 });
+  return ParkingSession.find({ ...buildingFilter, status: 'active' })
+    .sort({ checkIn: -1 })
+    .populate('entryGate', 'code name')
+    .populate('vehicleType', 'name code');
 };
 
 const getById = async (user, id) => {
@@ -349,7 +365,9 @@ const getById = async (user, id) => {
     throw new AppError('sessionId is required', 400, 'SESSION_ID_REQUIRED');
   }
 
-  const parkingSession = await ParkingSession.findById(id);
+  const parkingSession = await ParkingSession.findById(id)
+    .populate('entryGate', 'code name')
+    .populate('vehicleType', 'name code');
   if (!parkingSession) {
     throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
   }
@@ -372,7 +390,207 @@ const search = async (user, plate, query = {}) => {
   return ParkingSession.find({
     ...buildingFilter,
     plateNumber: { $regex: `${plate}`.trim(), $options: 'i' },
-  }).sort({ entryTime: -1 });
+  })
+    .sort({ checkIn: -1 })
+    .populate('entryGate', 'code name')
+    .populate('vehicleType', 'name code');
 };
 
-module.exports = { checkIn, checkOut, listActive, getById, search };
+/* ─────────────────────────────────────────────
+   lookupPlate
+   Identifies whether a plate belongs to a registered user.
+   Used by staff at entry gate to decide payment options.
+───────────────────────────────────────────── */
+
+const lookupPlate = async (staffUser, plateNumber) => {
+  const plate = normalizePlate(plateNumber);
+  if (!plate) throw new AppError('plateNumber is required', 400);
+
+  // Must be scoped to at least one building
+  const allowedBuildings = assignedBuildingIds(staffUser);
+  if (!allowedBuildings.length) {
+    throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
+  }
+
+  const [user, activeSession] = await Promise.all([
+    User.findOne({ 'licensePlates.plateNumber': plate })
+      .select('fullName email phone walletBalance'),
+    ParkingSession.findOne({ plateNumber: plate, status: 'active' })
+      .select('_id building entryTime'),
+  ]);
+
+  return {
+    plateNumber: plate,
+    hasAccount: Boolean(user),
+    user: user
+      ? {
+          id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone || null,
+          walletBalance: user.walletBalance,
+        }
+      : null,
+    activeSession: activeSession
+      ? { id: activeSession._id, building: activeSession.building, entryTime: activeSession.entryTime }
+      : null,
+  };
+};
+
+/* ─────────────────────────────────────────────
+   initiateStripePayment
+   Creates a Stripe Payment Intent for the parking session fee.
+   The session stays "active" until the webhook confirms payment.
+───────────────────────────────────────────── */
+
+/**
+ * Calculate fee (hours elapsed, minimum 1 hour).
+ * Mirrors the logic inside checkOut so both paths agree.
+ */
+const calculateFee = (parkingSession) => {
+  if (parkingSession.fee && parkingSession.fee > 0) return parkingSession.fee;
+  const ms = Date.now() - new Date(parkingSession.entryTime).getTime();
+  return Math.max(1, Math.ceil(ms / (1000 * 60 * 60)));
+};
+
+/**
+ * Tạo PayOS payment link để thu phí gửi xe trực tiếp.
+ * Staff nhận checkoutUrl + qrCode → hiển thị QR cho khách quét.
+ * Session giữ nguyên "active" cho đến khi webhook xác nhận thanh toán.
+ */
+const initiatePayment = async (staffUser, sessionId) => {
+  if (!sessionId) throw new AppError('sessionId is required', 400);
+
+  const parkingSession = await ParkingSession.findById(sessionId);
+  if (!parkingSession) throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
+
+  assertBuildingScope(staffUser, parkingSession.building);
+
+  if (parkingSession.status !== 'active') {
+    throw new AppError('Session is not active', 400, 'SESSION_NOT_ACTIVE');
+  }
+
+  const fee = calculateFee(parkingSession);
+  const orderCode = payosService.generateOrderCode();
+
+  const { checkoutUrl, qrCode, paymentLinkId } = await payosService.createPaymentLink({
+    orderCode,
+    amount: fee,
+    description: 'Phi giu xe PBMS',
+  });
+
+  // Persist pending Payment — webhook will complete the session
+  await Payment.create({
+    building: parkingSession.building,
+    parkingSession: parkingSession._id,
+    type: 'session',
+    method: 'payos',
+    amount: fee,
+    status: 'pending',
+    user: parkingSession.user || null,
+    staff: staffUser._id,
+    payosOrderCode: orderCode,
+    payosPaymentLinkId: paymentLinkId,
+    note: 'Parking fee via PayOS QR',
+  });
+
+  return {
+    checkoutUrl,
+    qrCode,
+    orderCode,
+    amount: fee,
+    plateNumber: parkingSession.plateNumber,
+    entryTime: parkingSession.entryTime,
+  };
+};
+
+/* ─────────────────────────────────────────────
+   settleSessionPayment
+   Complete a parking session paid via PayOS (bank transfer / VietQR) — race-safe
+   & idempotent. Shared by the PayOS webhook and the manual verify endpoint.
+   Atomically flips the pending Payment → success so only one caller completes the
+   session + credits the manager (building) wallet; never double-credits.
+───────────────────────────────────────────── */
+const settleSessionPayment = async (orderCode) => {
+  const oc = Number(orderCode);
+  const mongoSession = await mongoose.startSession();
+  let result = { settled: false, status: 'already_processed' };
+  try {
+    await mongoSession.withTransaction(async () => {
+      const payment = await Payment.findOneAndUpdate(
+        { payosOrderCode: oc, type: 'session', status: 'pending' },
+        { status: 'success' },
+        { new: true, session: mongoSession },
+      );
+      if (!payment) return; // already processed / unknown → no-op
+
+      const ps = await ParkingSession.findById(payment.parkingSession).session(mongoSession);
+      if (!ps) throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
+
+      if (ps.status === 'active') {
+        ps.exitTime = new Date();
+        ps.status = 'completed';
+        ps.fee = payment.amount;
+        ps.paymentMethod = 'payos';
+        await ps.save({ session: mongoSession });
+
+        if (ps.slot) {
+          const slot = await ParkingSlot.findById(ps.slot).session(mongoSession);
+          if (slot && slot.status !== 'maintenance') {
+            slot.status = 'available';
+            await slot.save({ session: mongoSession });
+          }
+        }
+
+        // Credit the manager (building) wallet — same as the cash path.
+        if (payment.amount > 0) {
+          await buildingWalletService.credit(
+            ps.building, payment.amount, 'parking_fee', payment._id, mongoSession,
+          );
+        }
+      }
+
+      result = { settled: true, status: 'success' };
+    });
+    return result;
+  } catch (err) {
+    if (err && err.code === 11000) return { settled: false, status: 'already_processed' };
+    throw err;
+  } finally {
+    mongoSession.endSession();
+  }
+};
+
+/* ─────────────────────────────────────────────
+   verifySessionPayment
+   Reconcile a session payment with PayOS — fallback when the webhook never
+   reaches the server. Credits the wallet (via settleSessionPayment) if PAID.
+───────────────────────────────────────────── */
+const verifySessionPayment = async (staffUser, orderCode) => {
+  const oc = Number(orderCode);
+  if (!oc) throw new AppError('Invalid orderCode', 400);
+
+  const payment = await Payment.findOne({ payosOrderCode: oc, type: 'session' });
+  if (!payment) throw new AppError('Payment order not found', 404);
+  assertBuildingScope(staffUser, payment.building);
+
+  if (payment.status === 'success') {
+    return { status: 'success', settled: false };
+  }
+
+  let info;
+  try {
+    info = await payosService.getPaymentLink(oc);
+  } catch (err) {
+    throw new AppError(`Could not verify payment with PayOS: ${err.message}`, 502);
+  }
+
+  const payosStatus = String(info?.status || '').toUpperCase();
+  if (payosStatus === 'PAID') {
+    const r = await settleSessionPayment(oc);
+    return { status: 'success', settled: r.settled };
+  }
+  return { status: payosStatus.toLowerCase() || 'pending', settled: false };
+};
+
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, initiatePayment, settleSessionPayment, verifySessionPayment };

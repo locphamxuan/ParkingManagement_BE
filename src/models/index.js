@@ -3,7 +3,7 @@ const User = require("./user/User");
 const { Building, BuildingManager, Floor, Gate, ParkingSlot, VehicleType } = require("./building");
 const { PricePolicy, PolicyPushLog, ReservationPolicy, LongTermPackage, LongTermSubscription } = require("./policy");
 const { ParkingSession, Reservation, Shift, StaffShift } = require("./operations");
-const { Payment, ShiftRevenue, WalletTransaction, SystemWallet, RevenueDistribution } = require("./finance");
+const { Payment, ShiftRevenue, WalletTransaction, SystemWallet, RevenueDistribution, BuildingWallet, BuildingWalletTransaction, DailyRevenueSettlement } = require("./finance");
 const { AuditLog, Feedback, Incident } = require('./log');
 module.exports = {
   User,
@@ -30,4 +30,7 @@ module.exports = {
   WalletTransaction,
   SystemWallet,
   RevenueDistribution,
+  BuildingWallet,
+  BuildingWalletTransaction,
+  DailyRevenueSettlement,
 };

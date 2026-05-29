@@ -52,7 +52,7 @@ const parkingSessionSchema = new mongoose.Schema(
     fee: { type: Number, default: 0, min: 0 },
     paymentMethod: {
       type: String,
-      enum: ["cash", "wallet", "qr", "card", "long_term", null],
+      enum: ["cash", "wallet", "qr", "card", "payos", "long_term", null],
       default: null,
     },
     status: {

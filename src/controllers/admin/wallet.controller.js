@@ -34,4 +34,9 @@ const listDistributions = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { getWallet, topup, distribute, listDistributions };
+const getDailyTransfers = asyncHandler(async (req, res) => {
+  const data = await service.getDailyTransfers(req.query);
+  sendSuccess(res, { data });
+});
+
+module.exports = { getWallet, topup, distribute, listDistributions, getDailyTransfers };
