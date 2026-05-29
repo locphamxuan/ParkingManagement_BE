@@ -45,11 +45,13 @@ const create = async (user, buildingId, payload) => {
     building: buildingId,
     vehicleType: payload.vehicleType,
     name: String(payload.name || "").trim(),
+    type: payload.type || 'regular',
     hourlyRate: Number(payload.hourlyRate),
     dailyCap: payload.dailyCap !== undefined ? Number(payload.dailyCap) : null,
     minRate: payload.minRate !== undefined ? Number(payload.minRate) : 0,
     maxRate: payload.maxRate !== undefined ? Number(payload.maxRate) : null,
     timeWindow: payload.timeWindow || undefined,
+    holidayDates: payload.holidayDates || [],
     effectiveFrom: payload.effectiveFrom || new Date(),
     effectiveTo: payload.effectiveTo || null,
     isActive: payload.isActive !== false,
@@ -67,7 +69,9 @@ const update = async (user, buildingId, id, payload) => {
   [
     "name",
     "vehicleType",
+    "type",
     "timeWindow",
+    "holidayDates",
     "effectiveFrom",
     "effectiveTo",
   ].forEach((k) => {

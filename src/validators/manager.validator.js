@@ -37,12 +37,13 @@ const validateFloor = wrap((req) => {
 });
 
 const validateGate = wrap((req) => {
-  if (req.method === "POST") requireFields(req.body, ["code", "name"]);
+  if (req.method === "POST") requireFields(req.body, ["code"]);
+  // direction: only in | out (both still accepted for backward-compat)
   if (
     req.body.direction !== undefined &&
     !["in", "out", "both"].includes(req.body.direction)
   ) {
-    throw new AppError("direction must be in|out|both", 400);
+    throw new AppError("direction must be in|out", 400);
   }
 });
 
@@ -89,11 +90,6 @@ const validateReservationPolicy = wrap((req) => {
     (req.body.refundPercent < 0 || req.body.refundPercent > 100)
   )
     throw new AppError("refundPercent must be 0..100", 400);
-  if (
-    req.body.reservableRatio !== undefined &&
-    (req.body.reservableRatio < 0 || req.body.reservableRatio > 1)
-  )
-    throw new AppError("reservableRatio must be 0..1", 400);
 });
 
 const validateShift = wrap((req) => {

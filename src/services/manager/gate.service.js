@@ -7,6 +7,7 @@ const list = async (user, buildingId) => {
   ensureManagerOwnsBuilding(user, buildingId);
   return Gate.find({ building: buildingId })
     .populate("allowedVehicleTypes", "code name")
+    .populate("floors", "code name levelNumber")
     .sort("code");
 };
 
@@ -20,6 +21,7 @@ const create = async (user, buildingId, payload) => {
     allowedVehicleTypes: Array.isArray(payload.allowedVehicleTypes)
       ? payload.allowedVehicleTypes
       : [],
+    floors: Array.isArray(payload.floors) ? payload.floors : [],
     status: payload.status || "active",
   });
   await writeAuditLog({
@@ -46,6 +48,8 @@ const update = async (user, buildingId, id, payload) => {
     update.code = String(payload.code).trim().toUpperCase();
   if (Array.isArray(payload.allowedVehicleTypes))
     update.allowedVehicleTypes = payload.allowedVehicleTypes;
+  if (Array.isArray(payload.floors))
+    update.floors = payload.floors;
 
   const updated = await Gate.findByIdAndUpdate(id, update, {
     new: true,

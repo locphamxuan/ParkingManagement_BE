@@ -68,15 +68,10 @@ const removeShift = async (user, buildingId, id) => {
   const current = await Shift.findOne({ _id: id, building: buildingId });
   if (!current) throw new AppError("Shift not found", 404);
 
-  const assigned = await StaffShift.countDocuments({
-    shift: id,
-    status: { $in: ["scheduled", "active"] },
-  });
-  if (assigned > 0) {
-    throw new AppError("Shift has active staff assignments", 409);
-  }
-
+  // Xóa toàn bộ StaffShift liên quan trước, sau đó xóa Shift
+  await StaffShift.deleteMany({ shift: id });
   await Shift.deleteOne({ _id: id });
+
   await writeAuditLog({
     actor: user,
     action: "DELETE_SHIFT",

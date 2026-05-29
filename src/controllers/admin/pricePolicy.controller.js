@@ -7,6 +7,12 @@ const list = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: { items } });
 });
 
+// Read-only: admin xem bảng giá theo building
+const listByBuilding = asyncHandler(async (req, res) => {
+  const items = await service.list({ ...req.query, buildingId: req.params.id });
+  sendSuccess(res, { data: { items } });
+});
+
 const push = asyncHandler(async (req, res) => {
   const { buildingId, vehicleTypeId, ...payload } = req.body;
   const policy = await service.push({
@@ -27,4 +33,4 @@ const listPushLogs = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { list, push, listPushLogs };
+module.exports = { list, push, listPushLogs, listByBuilding };

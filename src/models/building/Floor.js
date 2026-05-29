@@ -41,6 +41,12 @@ const floorSchema = new mongoose.Schema(
       enum: ["active", "inactive", "maintenance"],
       default: "active",
     },
+    // Override pricing riêng cho tầng này (ưu tiên hơn building-level pricing)
+    pricePolicy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PricePolicy',
+      default: null,
+    },
   },
   { timestamps: true }
 );

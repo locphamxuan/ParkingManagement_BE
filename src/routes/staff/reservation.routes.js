@@ -4,6 +4,7 @@ const { validateReservationCheckIn, validateReservationExpire } = require("../..
 
 const router = express.Router();
 
+router.get("/", reservationController.listReservations);
 router.post("/:code/check-in", validateReservationCheckIn, reservationController.checkInReservation);
 router.patch("/:id/expire", validateReservationExpire, reservationController.expireReservation);
 

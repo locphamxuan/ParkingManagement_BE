@@ -3,6 +3,7 @@ const BuildingManager = require("../../models/building/BuildingManager");
 const AppError = require("../../utils/AppError");
 const { ROLES, ROLE_LIST } = require("../../constants/roles");
 const { writeAuditLog } = require("../../utils/audit");
+const { revokeStaffFromBuilding, revokeManagerFromBuilding } = require('../buildingManager.service');
 
 const buildFilter = (query = {}) => {
   const filter = {};
@@ -166,20 +167,27 @@ const updateStatus = async (actor, id, isActive) => {
   return updated;
 };
 
-const remove = async (actor, id) => {
+const remove = async (actor, id, { force = false } = {}) => {
   const current = await getById(id);
   if (current.role === ROLES.ADMIN) {
     throw new AppError("Cannot delete admin account", 400);
   }
-  const assignments = await BuildingManager.countDocuments({
-    user: id,
-    isActive: true,
-  });
-  if (assignments > 0) {
-    throw new AppError(
-      "User still assigned to buildings. Revoke first.",
-      409
-    );
+  const activeMappings = await BuildingManager.find({ user: id, isActive: true });
+  if (activeMappings.length > 0) {
+    if (!force) {
+      throw new AppError(
+        "User still assigned to buildings. Revoke first or use ?force=true.",
+        409,
+      );
+    }
+    // Force: revoke all building assignments first
+    for (const mapping of activeMappings) {
+      if (current.role === ROLES.STAFF || current.role === 'staff') {
+        await revokeStaffFromBuilding({ buildingId: mapping.building, userId: id });
+      } else if (current.role === ROLES.MANAGER || current.role === 'manager') {
+        await revokeManagerFromBuilding({ buildingId: mapping.building, userId: id });
+      }
+    }
   }
   await User.deleteOne({ _id: id });
   await writeAuditLog({

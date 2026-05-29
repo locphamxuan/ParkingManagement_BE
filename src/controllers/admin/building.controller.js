@@ -57,6 +57,15 @@ const getBuildingMembers = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: members });
 });
 
+// Admin xem gói đăng ký dài hạn của building (read-only)
+const LongTermPackage = require('../../models/policy/LongTermPackage');
+const listBuildingPackages = asyncHandler(async (req, res) => {
+  const items = await LongTermPackage.find({ building: req.params.id })
+    .populate('vehicleType', 'name code')
+    .sort('-createdAt');
+  sendSuccess(res, { data: { items } });
+});
+
 module.exports = {
   listBuildings,
   getBuilding,
@@ -65,4 +74,5 @@ module.exports = {
   updateBuildingStatus,
   deleteBuilding,
   getBuildingMembers,
+  listBuildingPackages,
 };

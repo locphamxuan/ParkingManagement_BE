@@ -4,11 +4,18 @@ const WalletTransaction = require('../../models/finance/WalletTransaction');
 const User = require('../../models/user/User');
 const AppError = require('../../utils/AppError');
 
-const listPackages = async (buildingId) => {
-  if (!buildingId) throw new AppError('buildingId is required', 400);
+const Building = require('../../models/building/Building');
 
-  const packages = await LongTermPackage.find({ building: buildingId, isActive: true })
-    .populate('vehicleType', 'name');
+const listPackages = async (buildingId) => {
+  // Nếu có buildingId → trả gói của building đó
+  // Nếu không → trả tất cả gói đang active của tất cả buildings (để user browse)
+  const filter = { isActive: true };
+  if (buildingId) filter.building = buildingId;
+
+  const packages = await LongTermPackage.find(filter)
+    .populate('vehicleType', 'name code')
+    .populate('building', 'name code address')
+    .sort('-createdAt');
   return packages;
 };
 

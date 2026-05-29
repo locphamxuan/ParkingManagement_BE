@@ -6,6 +6,7 @@ const router = express.Router();
 
 router.get('/', controller.getWallet);
 router.post('/topup', validateTopup, controller.topup);
+router.get('/topup/:orderCode/status', controller.verifyTopup);
 router.get('/transactions', controller.listTransactions);
 
 module.exports = router;

@@ -17,19 +17,25 @@ const gateSchema = new mongoose.Schema(
     },
     name: {
       type: String,
-      required: [true, "Gate name is required"],
       trim: true,
       maxlength: 100,
+      default: null,
     },
     direction: {
       type: String,
       enum: ["in", "out", "both"],
-      default: "both",
+      default: "in",
     },
     allowedVehicleTypes: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "VehicleType",
+      },
+    ],
+    floors: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Floor",
       },
     ],
     status: {
