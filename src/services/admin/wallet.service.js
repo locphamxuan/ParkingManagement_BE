@@ -166,7 +166,7 @@ const getDailyTransfers = async (query = {}) => {
           as: 'building',
         },
       },
-      { $unwind: { path: '$building', preserveNullAndEmpty: true } },
+      { $unwind: { path: '$building', preserveNullAndEmptyArrays: true } },
       {
         $project: {
           _id: 0,

@@ -40,7 +40,7 @@ const getReport = async ({ from, to, buildingId } = {}) => {
         as: "building",
       },
     },
-    { $unwind: { path: "$building", preserveNullAndEmpty: true } },
+    { $unwind: { path: "$building", preserveNullAndEmptyArrays: true } },
     {
       $project: {
         _id: 0,
