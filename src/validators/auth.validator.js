@@ -35,4 +35,24 @@ const validateLogin = (req, _res, next) => {
   next();
 };
 
-module.exports = { validateRegister, validateLogin };
+const validateForgotPassword = (req, _res, next) => {
+  const { email } = req.body;
+  if (!email?.trim() || !EMAIL_REGEX.test(email)) {
+    return next(new AppError('Valid email is required', 400));
+  }
+  req.body.email = email.trim().toLowerCase();
+  next();
+};
+
+const validateResetPassword = (req, _res, next) => {
+  const { token, newPassword } = req.body;
+  if (!token?.trim()) {
+    return next(new AppError('Token is required', 400));
+  }
+  if (!newPassword || newPassword.length < 6) {
+    return next(new AppError('Password must be at least 6 characters', 400));
+  }
+  next();
+};
+
+module.exports = { validateRegister, validateLogin, validateForgotPassword, validateResetPassword };

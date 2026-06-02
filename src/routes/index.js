@@ -1,8 +1,16 @@
-const express = require('express');
-const userRoutes = require('./user');
+const express = require("express");
+const adminRoutes = require("./admin");
+const managerRoutes = require("./manager");
+const staffRoutes = require("./staff");
+const userRoutes = require("./user");
 
 const router = express.Router();
 
-router.use('/users', userRoutes);
+router.use("/admin", adminRoutes);
+router.use("/manager", managerRoutes);
+router.use("/staff", staffRoutes);
+router.use("/users", userRoutes);
+
+// NOTE: /payments/webhook is registered in app.js (PayOS uses JSON body, no raw-body constraint).
 
 module.exports = router;

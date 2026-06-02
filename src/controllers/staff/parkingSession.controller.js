@@ -1,0 +1,60 @@
+const asyncHandler = require('../../utils/asyncHandler');
+const { sendSuccess } = require('../../utils/response');
+const parkingSessionService = require('../../services/staff/parkingSession.service');
+
+const checkIn = asyncHandler(async (req, res) => {
+  const payload = req.body;
+  const session = await parkingSessionService.checkIn(req.user, payload);
+  sendSuccess(res, { data: session });
+});
+
+const checkOut = asyncHandler(async (req, res) => {
+  const session = await parkingSessionService.checkOut(req.user, req.params.id, req.body);
+  sendSuccess(res, { data: session });
+});
+
+const listActive = asyncHandler(async (req, res) => {
+  const items = await parkingSessionService.listActive(req.user, req.query);
+  sendSuccess(res, { data: { items } });
+});
+
+const getById = asyncHandler(async (req, res) => {
+  const session = await parkingSessionService.getById(req.user, req.params.id);
+  sendSuccess(res, { data: session });
+});
+
+const search = asyncHandler(async (req, res) => {
+  const items = await parkingSessionService.search(req.user, req.query.plate, req.query);
+  sendSuccess(res, { data: { items } });
+});
+
+/**
+ * GET /api/staff/parking-sessions/lookup-plate/:plate
+ * Returns whether the plate belongs to a registered user, with wallet info.
+ */
+const lookupPlate = asyncHandler(async (req, res) => {
+  const data = await parkingSessionService.lookupPlate(req.user, req.params.plate);
+  sendSuccess(res, { data });
+});
+
+/**
+ * POST /api/staff/parking-sessions/:id/initiate-payment
+ * Tạo PayOS payment link (QR + checkoutUrl) để thu phí gửi xe.
+ * Staff hiển thị QR cho khách quét bằng app ngân hàng.
+ */
+const initiatePayment = asyncHandler(async (req, res) => {
+  const data = await parkingSessionService.initiatePayment(req.user, req.params.id);
+  sendSuccess(res, { message: 'PayOS payment link created', data });
+});
+
+/**
+ * GET /api/staff/parking-sessions/payment/:orderCode/status
+ * Reconcile a bank-transfer (PayOS) session payment — fallback when the webhook
+ * did not arrive. Completes the session + credits the manager wallet if PAID.
+ */
+const verifyPayment = asyncHandler(async (req, res) => {
+  const data = await parkingSessionService.verifySessionPayment(req.user, req.params.orderCode);
+  sendSuccess(res, { data });
+});
+
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, initiatePayment, verifyPayment };

@@ -1,0 +1,8 @@
+const express = require("express");
+const controller = require("../../controllers/admin/revenue.controller");
+
+const router = express.Router();
+
+router.get("/", controller.getReport);
+
+module.exports = router;
