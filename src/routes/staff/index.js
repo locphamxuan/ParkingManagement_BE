@@ -17,11 +17,15 @@ const reservationRoutes = require("./reservation.routes");
 const walletRoutes = require("./wallet.routes");
 const incidentRoutes = require("./incident.routes");
 const shiftRoutes = require("./shift.routes");
+const usersRoutes = require("./users.routes");
 
 router.use("/parking-sessions", parkingSessionRoutes);
 router.use("/reservations", reservationRoutes);
 router.use("/wallet-transactions", walletRoutes);
 router.use("/incidents", incidentRoutes);
 router.use("/my-shifts", shiftRoutes);
+router.use("/users", usersRoutes);
+
+
 
 module.exports = router;
