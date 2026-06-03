@@ -45,4 +45,32 @@ const sendResetPasswordEmail = async ({ to, resetUrl, fullName }) => {
   });
 };
 
-module.exports = { sendResetPasswordEmail };
+const sendOtpEmail = async ({ to, otp, fullName }) => {
+  const transporter = createTransporter();
+
+  await transporter.sendMail({
+    from: `"PBMS - Parking Management" <${process.env.EMAIL_USER}>`,
+    to,
+    subject: 'Your OTP Code for Registration - PBMS',
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px">
+        <h2 style="color:#f97316">Email Verification</h2>
+        <p>Hello <strong>${fullName}</strong>,</p>
+        <p>Thank you for registering with PBMS. Use the OTP code below to complete your registration.</p>
+        <p>This code is valid for <strong>5 minutes</strong>.</p>
+        <div style="text-align:center;margin:32px 0">
+          <div style="background:#f97316;color:#fff;font-size:36px;font-weight:bold;letter-spacing:12px;padding:20px 40px;border-radius:8px;display:inline-block">
+            ${otp}
+          </div>
+        </div>
+        <p style="color:#64748b;font-size:13px">
+          If you did not request this, please ignore this email.
+        </p>
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin-top:32px"/>
+        <p style="color:#94a3b8;font-size:12px">PBMS — Parking Building Management System</p>
+      </div>
+    `,
+  });
+};
+
+module.exports = { sendResetPasswordEmail, sendOtpEmail };

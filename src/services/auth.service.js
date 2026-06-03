@@ -1,9 +1,10 @@
 ﻿const crypto = require('crypto');
 const User = require('../models/user/User');
+const OtpVerification = require('../models/user/OtpVerification');
 const AppError = require('../utils/AppError');
 const { signToken } = require('../utils/token');
 const { ROLES } = require('../constants/roles');
-const { sendResetPasswordEmail } = require('../utils/email');
+const { sendResetPasswordEmail, sendOtpEmail } = require('../utils/email');
 
 const toPublicUser = (user) => user.toJSON();
 
@@ -87,5 +88,46 @@ const resetPassword = async (token, newPassword) => {
   return buildAuthResponse(user);
 };
 
-module.exports = { register, login, getProfile, forgotPassword, resetPassword };
+const requestRegistration = async (body) => {
+  const { email, password, fullName, phone } = body;
+
+  const emailExists = await User.exists({ email });
+  if (emailExists) throw new AppError('Email already registered', 409);
+
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+
+  await OtpVerification.deleteOne({ email });
+  await OtpVerification.create({ email, otp, password, fullName, phone });
+
+  await sendOtpEmail({ to: email, otp, fullName });
+};
+
+const verifyOtpAndRegister = async ({ email, otp }) => {
+  const otpRecord = await OtpVerification.findOne({ email });
+
+  if (!otpRecord) {
+    throw new AppError('OTP has expired or does not exist. Please request a new one.', 400);
+  }
+  if (otpRecord.otp !== otp) {
+    throw new AppError('Invalid OTP code', 400);
+  }
+
+  const emailExists = await User.exists({ email });
+  if (emailExists) throw new AppError('Email already registered', 409);
+
+  const user = await User.create({
+    email: otpRecord.email,
+    password: otpRecord.password,
+    fullName: otpRecord.fullName,
+    phone: otpRecord.phone,
+    role: ROLES.USER,
+  });
+
+  await OtpVerification.deleteOne({ email });
+
+  const fresh = await User.findById(user._id);
+  return buildAuthResponse(fresh);
+};
+
+module.exports = { register, login, getProfile, forgotPassword, resetPassword, requestRegistration, verifyOtpAndRegister };
 
