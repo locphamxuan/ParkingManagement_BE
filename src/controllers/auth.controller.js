@@ -34,4 +34,20 @@ const resetPassword = asyncHandler(async (req, res) => {
   sendSuccess(res, { message: 'Password has been reset successfully', data });
 });
 
-module.exports = { register, login, getMe, forgotPassword, resetPassword };
+const registerRequest = asyncHandler(async (req, res) => {
+  await authService.requestRegistration(req.body);
+  sendSuccess(res, {
+    message: 'OTP has been sent to your email. Please verify to complete registration.',
+  });
+});
+
+const registerVerify = asyncHandler(async (req, res) => {
+  const data = await authService.verifyOtpAndRegister(req.body);
+  sendSuccess(res, {
+    statusCode: 201,
+    message: 'Registration successful',
+    data,
+  });
+});
+
+module.exports = { register, login, getMe, forgotPassword, resetPassword, registerRequest, registerVerify };

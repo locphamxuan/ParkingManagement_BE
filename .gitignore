@@ -38,6 +38,7 @@ postman/
 .postman/
 reports/
 tests/
+scripts/seed-manager.js
 
 # Source notes
 Admin API Contract Draft....txt
