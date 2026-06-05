@@ -1,4 +1,5 @@
 const User = require('../../models/user/User');
+const { generatePlateQrCode } = require('../../models/user/User');
 const AppError = require('../../utils/AppError');
 
 const MAX_PLATES_PER_USER = 5;
@@ -6,6 +7,17 @@ const MAX_PLATES_PER_USER = 5;
 const list = async (userId) => {
   const user = await User.findById(userId).select('licensePlates');
   if (!user) throw new AppError('User not found', 404);
+
+  // Backfill QR tokens for plates created before this feature existed.
+  let needsSave = false;
+  user.licensePlates.forEach((p) => {
+    if (!p.qrCode) {
+      p.qrCode = generatePlateQrCode();
+      needsSave = true;
+    }
+  });
+  if (needsSave) await user.save();
+
   return user.licensePlates;
 };
 
@@ -23,7 +35,7 @@ const add = async (userId, { plateNumber, vehicleType }) => {
 
   const updated = await User.findByIdAndUpdate(
     userId,
-    { $push: { licensePlates: { plateNumber: normalized, vehicleType: vehicleType || 'car', isDefault: false } } },
+    { $push: { licensePlates: { plateNumber: normalized, vehicleType: vehicleType || 'car', isDefault: false, qrCode: generatePlateQrCode() } } },
     { new: true, runValidators: true }
   ).select('licensePlates');
 

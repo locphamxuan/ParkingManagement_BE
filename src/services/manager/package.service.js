@@ -25,10 +25,10 @@ const createPackage = async (user, buildingId, payload) => {
     code: String(payload.code || "").trim().toUpperCase(),
     durationDays: Number(payload.durationDays),
     price: Number(payload.price),
-    reservedSlots: payload.reservedSlots
-      ? Number(payload.reservedSlots)
-      : 0,
+    reservedSlots: payload.reservedSlots ? Number(payload.reservedSlots) : 0,
     description: payload.description || "",
+    allowDedicatedSlot: payload.allowDedicatedSlot === true || payload.allowDedicatedSlot === 'true',
+    benefits: Array.isArray(payload.benefits) ? payload.benefits.map(String) : [],
     isActive: payload.isActive !== false,
   });
   await writeAuditLog({
@@ -60,6 +60,12 @@ const updatePackage = async (user, buildingId, id, payload) => {
     if (payload[k] !== undefined) update[k] = Number(payload[k]);
   });
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
+  if (payload.allowDedicatedSlot !== undefined) {
+    update.allowDedicatedSlot = payload.allowDedicatedSlot === true || payload.allowDedicatedSlot === 'true';
+  }
+  if (payload.benefits !== undefined) {
+    update.benefits = Array.isArray(payload.benefits) ? payload.benefits.map(String) : [];
+  }
 
   const updated = await LongTermPackage.findByIdAndUpdate(id, update, {
     new: true,

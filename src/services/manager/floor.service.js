@@ -8,7 +8,7 @@ const list = async (user, buildingId) => {
   ensureManagerOwnsBuilding(user, buildingId);
   return Floor.find({ building: buildingId })
     .populate("allowedVehicleTypes", "code name")
-    .sort("levelNumber");
+    .sort("code");
 };
 
 const getById = async (user, buildingId, id) => {
@@ -26,8 +26,6 @@ const create = async (user, buildingId, payload) => {
   const created = await Floor.create({
     building: buildingId,
     code: String(payload.code || "").trim().toUpperCase(),
-    name: String(payload.name || "").trim(),
-    levelNumber: Number(payload.levelNumber),
     capacity: Number(payload.capacity ?? 0),
     allowedVehicleTypes: Array.isArray(payload.allowedVehicleTypes)
       ? payload.allowedVehicleTypes
@@ -51,7 +49,7 @@ const update = async (user, buildingId, id, payload) => {
   if (!current) throw new AppError("Floor not found", 404);
 
   const update = {};
-  ["name", "status"].forEach((k) => {
+  ["status"].forEach((k) => {
     if (payload[k] !== undefined) update[k] = payload[k];
   });
   if (payload.code !== undefined)

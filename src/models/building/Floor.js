@@ -15,16 +15,6 @@ const floorSchema = new mongoose.Schema(
       trim: true,
       maxlength: 20,
     },
-    name: {
-      type: String,
-      required: [true, "Floor name is required"],
-      trim: true,
-      maxlength: 100,
-    },
-    levelNumber: {
-      type: Number,
-      required: [true, "Floor level number is required"],
-    },
     capacity: {
       type: Number,
       required: [true, "Floor capacity is required"],

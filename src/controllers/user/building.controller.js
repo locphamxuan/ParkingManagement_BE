@@ -5,7 +5,6 @@ const VehicleType = require('../../models/building/VehicleType');
 const Building = require('../../models/building/Building');
 const Floor = require('../../models/building/Floor');
 const ParkingSlot = require('../../models/building/ParkingSlot');
-const Gate = require('../../models/building/Gate');
 const AppError = require('../../utils/AppError');
 
 /**
@@ -56,14 +55,9 @@ const listFloorsWithAvailability = asyncHandler(async (req, res) => {
 
   // Đếm slots theo status cho mỗi tầng
   const floorIds = floors.map((f) => f._id);
-  const [slotCounts, gates] = await Promise.all([
-    ParkingSlot.aggregate([
-      { $match: { floor: { $in: floorIds } } },
-      { $group: { _id: { floor: '$floor', status: '$status' }, count: { $sum: 1 } } },
-    ]),
-    Gate.find({ building: building._id, status: 'active', floors: { $in: floorIds } })
-      .select('_id code name direction floors')
-      .lean(),
+  const slotCounts = await ParkingSlot.aggregate([
+    { $match: { floor: { $in: floorIds } } },
+    { $group: { _id: { floor: '$floor', status: '$status' }, count: { $sum: 1 } } },
   ]);
 
   // Build map floorId → { available, occupied, reserved, maintenance }
@@ -74,16 +68,6 @@ const listFloorsWithAvailability = asyncHandler(async (req, res) => {
     countMap[fid][_id.status] = count;
   }
 
-  // Build map floorId → gates[]
-  const gateMap = {};
-  for (const gate of gates) {
-    for (const fid of gate.floors) {
-      const key = fid.toString();
-      if (!gateMap[key]) gateMap[key] = [];
-      gateMap[key].push({ _id: gate._id, code: gate.code, name: gate.name, direction: gate.direction });
-    }
-  }
-
   const result = floors.map((f) => {
     const counts = countMap[f._id.toString()] || { available: 0, occupied: 0, reserved: 0, maintenance: 0 };
     return {
@@ -92,7 +76,6 @@ const listFloorsWithAvailability = asyncHandler(async (req, res) => {
       occupiedSlots: counts.occupied,
       reservedSlots: counts.reserved,
       totalSlots: counts.available + counts.occupied + counts.reserved + counts.maintenance,
-      gates: gateMap[f._id.toString()] || [],
     };
   });
 

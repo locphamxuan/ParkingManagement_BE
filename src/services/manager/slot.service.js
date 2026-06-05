@@ -16,7 +16,7 @@ const list = async (user, buildingId, query = {}) => {
   if (query.floor) filter.floor = query.floor;
   if (query.status) filter.status = query.status;
   return ParkingSlot.find(filter)
-    .populate("floor", "code name levelNumber")
+    .populate("floor", "code")
     .populate("vehicleType", "code name")
     .sort({ floor: 1, code: 1 });
 };

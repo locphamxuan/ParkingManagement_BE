@@ -1,6 +1,10 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { ROLE_LIST, ROLES } = require('../../constants/roles');
+
+// Unique opaque QR token for a license plate (staff scans this to identify the vehicle/owner).
+const generatePlateQrCode = () => `PLT-${crypto.randomBytes(8).toString('hex')}`;
 
 const userSchema = new mongoose.Schema(
   {
@@ -58,6 +62,12 @@ const userSchema = new mongoose.Schema(
         isDefault: {
           type: Boolean,
           default: false,
+        },
+        // Unique QR token auto-generated per plate; scanned by staff to identify the vehicle.
+        qrCode: {
+          type: String,
+          default: generatePlateQrCode,
+          index: true,
         },
       },
     ],
@@ -124,3 +134,4 @@ userSchema.methods.comparePassword = async function comparePassword(
 const User = mongoose.model('User', userSchema);
 
 module.exports = User;
+module.exports.generatePlateQrCode = generatePlateQrCode;

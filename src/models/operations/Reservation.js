@@ -49,8 +49,10 @@ const reservationSchema = new mongoose.Schema(
     },
     startTime: { type: Date, required: true },
     endTime: { type: Date, default: null },
-    // Amount actually charged to the user's wallet when booking (deposit).
+    // 15% deposit charged from user wallet at booking time.
     fee: { type: Number, default: 0, min: 0 },
+    // Total estimated fee calculated from duration × price policy (100%).
+    estimatedFee: { type: Number, default: 0, min: 0 },
     status: {
       type: String,
       enum: RESERVATION_STATUS,
