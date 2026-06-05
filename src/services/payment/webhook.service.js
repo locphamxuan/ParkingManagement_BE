@@ -17,6 +17,7 @@ const { Payment } = require('../../models');
 const Reservation = require('../../models/operations/Reservation');
 const buildingWalletService = require('../manager/buildingWallet.service');
 const walletService = require('../user/wallet.service');
+const buildingWalletTopupService = require('../manager/buildingWalletTopup.service');
 const parkingSessionService = require('../staff/parkingSession.service');
 const AppError = require('../../utils/AppError');
 
@@ -99,7 +100,12 @@ const handle = async (body) => {
   // Top-up & session each run their own race-safe transaction (shared with their
   // manual verify endpoints), so they're handled outside the reservation txn.
   if (pendingPayment.type === 'topup') {
-    await walletService.settleTopup(orderCode);
+    // Building wallet topup (manager) vs user wallet topup — differentiated by building field
+    if (pendingPayment.building) {
+      await buildingWalletTopupService.settleTopup(orderCode);
+    } else {
+      await walletService.settleTopup(orderCode);
+    }
     return;
   }
   if (pendingPayment.type === 'session') {

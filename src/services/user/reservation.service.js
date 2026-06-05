@@ -3,7 +3,6 @@ const Reservation = require('../../models/operations/Reservation');
 const Building = require('../../models/building/Building');
 const VehicleType = require('../../models/building/VehicleType');
 const ParkingSlot = require('../../models/building/ParkingSlot');
-const Gate = require('../../models/building/Gate');
 const ReservationPolicy = require('../../models/policy/ReservationPolicy');
 const User = require('../../models/user/User');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
@@ -11,52 +10,15 @@ const Payment = require('../../models/finance/Payment');
 const AppError = require('../../utils/AppError');
 const generateBookingCode = require('../../utils/generateBookingCode');
 const buildingWalletService = require('../manager/buildingWallet.service');
+const calculateReservationFee = require('../../utils/calculateReservationFee');
 
 const CANCELLABLE_STATUSES = ['pending', 'confirmed'];
 
-// Reservation fee paid from the user's wallet when booking (not a deposit — it is
-// the actual payment). Falls back to this value when the building's reservation
-// policy has no bookingFee configured.
-const DEFAULT_RESERVATION_FEE = 10000;
+// Deposit is non-refundable — building keeps 100% of deposit on cancellation.
+const REFUND_PERCENT = 0;
 
-// Percentage of the paid amount refunded to the user's wallet on cancellation.
-const REFUND_PERCENT = 85;
-
-/**
- * Resolve the entry gate(s) a user should use for a set of reservations.
- * A gate serves a floor when its `floors` list is empty (serves all floors)
- * or explicitly contains that floor. We surface entry gates ('in'/'both').
- * Returns a Map<reservationId, gates[]>.
- */
-async function resolveGatesFor(reservations) {
-  const buildingIds = [
-    ...new Set(reservations.map((r) => `${r.building?._id || r.building}`).filter(Boolean)),
-  ];
-  if (buildingIds.length === 0) return new Map();
-
-  const gates = await Gate.find({
-    building: { $in: buildingIds },
-    status: 'active',
-    direction: { $in: ['in', 'both'] },
-  })
-    .select('building code name direction floors')
-    .lean();
-
-  const map = new Map();
-  for (const r of reservations) {
-    const buildingId = `${r.building?._id || r.building}`;
-    const slotFloorId = r.slot?.floor
-      ? `${r.slot.floor._id || r.slot.floor}`
-      : null;
-    const matched = gates
-      .filter((g) => `${g.building}` === buildingId)
-      // A gate must be explicitly assigned to this floor — no "serves all floors" fallback.
-      .filter((g) => slotFloorId && Array.isArray(g.floors) && g.floors.some((f) => `${f}` === slotFloorId))
-      .map((g) => ({ _id: g._id, code: g.code, name: g.name, direction: g.direction }));
-    map.set(`${r._id}`, matched);
-  }
-  return map;
-}
+// Percentage of estimated fee charged as deposit at booking.
+const DEPOSIT_RATE = 0.15;
 
 /** Resolve building by ObjectId OR code string. */
 async function resolveBuilding(buildingRef) {
@@ -85,10 +47,7 @@ const list = async (userId, query = {}) => {
     Reservation.countDocuments(filter),
   ]);
 
-  const gateMap = await resolveGatesFor(docs);
-  const items = docs.map((r) => ({ ...r, gates: gateMap.get(`${r._id}`) || [] }));
-
-  return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  return { items: docs, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
 const get = async (userId, id) => {
@@ -98,18 +57,21 @@ const get = async (userId, id) => {
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
     .lean();
   if (!reservation) throw new AppError('Reservation not found', 404);
-  const gateMap = await resolveGatesFor([reservation]);
-  reservation.gates = gateMap.get(`${reservation._id}`) || [];
   return reservation;
 };
 
 const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNumber, startTime, endTime, slotId }) => {
-  // ── 1. Resolve building ────────────────────────────────────────────────────
+  // ── 1. Require endTime ─────────────────────────────────────────────────────
+  if (!endTime) {
+    throw new AppError('endTime is required. Please select your checkout date and time.', 400);
+  }
+
+  // ── 2. Resolve building ────────────────────────────────────────────────────
   const building = await resolveBuilding(buildingId);
   if (!building) throw new AppError('Building not found', 404);
   const resolvedBuildingId = building._id;
 
-  // ── 2. Resolve vehicleTypeId ───────────────────────────────────────────────
+  // ── 3. Resolve vehicleTypeId ───────────────────────────────────────────────
   let resolvedVehicleTypeId = vehicleTypeId;
   if (!resolvedVehicleTypeId && vehicleType) {
     const vt = await VehicleType.findOne({
@@ -132,19 +94,23 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
   const vehicleTypeExists = await VehicleType.exists({ _id: resolvedVehicleTypeId, building: resolvedBuildingId, isActive: true });
   if (!vehicleTypeExists) throw new AppError('Vehicle type not found for this building', 404);
 
-  // ── 3. Validate reservation policy ────────────────────────────────────────
+  // ── 4. Validate reservation policy ────────────────────────────────────────
   const policy = await ReservationPolicy.findOne({ building: resolvedBuildingId, isActive: true });
   if (!policy) throw new AppError('This building has no active reservation policy', 400);
 
   const start = new Date(startTime);
-  // Khách tự chọn thời gian bất kỳ — không giới hạn đặt trước tối thiểu/tối đa.
-  // Chỉ kiểm tra startTime không nằm trong quá khứ quá 1 giờ (tránh lỗi nhập liệu).
+  const end = new Date(endTime);
+
+  if (end <= start) {
+    throw new AppError('endTime must be after startTime', 400);
+  }
+
   const now = new Date();
   if (start < new Date(now.getTime() - 60 * 60 * 1000)) {
     throw new AppError('Start time is too far in the past, please select a valid time.', 400);
   }
 
-  // ── 4. Validate & assign slot ──────────────────────────────────────────────
+  // ── 5. Validate & assign slot ──────────────────────────────────────────────
   let resolvedSlotId = null;
   if (slotId) {
     const slot = await ParkingSlot.findOne({
@@ -155,47 +121,34 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
     if (!slot) throw new AppError('Slot is no longer available or invalid', 409);
     resolvedSlotId = slot._id;
 
-    // Block booking when the slot's floor has no entry gate assigned yet —
-    // the user would otherwise have no gate to enter through.
-    const hasEntryGate = await Gate.exists({
-      building: resolvedBuildingId,
-      status: 'active',
-      direction: { $in: ['in', 'both'] },
-      floors: slot.floor,
-    });
-    if (!hasEntryGate) {
-      throw new AppError('This floor currently has no gate. Please choose another floor.', 409);
-    }
   }
 
-  // ── 5. Reservation fee (paid from the user wallet now) ────────────────────
-  // This is the actual payment for the reservation (not a deposit). Falls back to
-  // a default when the manager has not configured a bookingFee on the policy.
-  const configuredFee = Number(policy.bookingFee);
-  const actualFee = Number.isFinite(configuredFee) && configuredFee > 0
-    ? configuredFee
-    : DEFAULT_RESERVATION_FEE;
+  // ── 6. Calculate estimated fee and 15% deposit ────────────────────────────
+  const { estimatedFee } = await calculateReservationFee(
+    resolvedBuildingId, resolvedVehicleTypeId, start, end,
+  );
+  const depositAmount = Math.ceil(estimatedFee * DEPOSIT_RATE);
 
-  // ── 6. Create reservation + charge wallet (atomic) ────────────────────────
+  // ── 7. Create reservation + charge deposit (atomic) ───────────────────────
   const code = generateBookingCode('RSV');
 
   const mongoSession = await mongoose.startSession();
   try {
     await mongoSession.withTransaction(async () => {
-      // Debit the user wallet — requires sufficient balance.
+      // Debit the deposit from user wallet — requires sufficient balance.
       const updatedUser = await User.findOneAndUpdate(
-        { _id: userId, walletBalance: { $gte: actualFee } },
-        { $inc: { walletBalance: -actualFee } },
+        { _id: userId, walletBalance: { $gte: depositAmount } },
+        { $inc: { walletBalance: -depositAmount } },
         { new: true, session: mongoSession },
       );
       if (!updatedUser) {
         throw new AppError(
-          `Insufficient wallet balance. The reservation fee is ${actualFee.toLocaleString('en-US')} VND — please top up your wallet.`,
+          `Insufficient wallet balance. The deposit (15%) is ${depositAmount.toLocaleString('en-US')} VND — please top up your wallet.`,
           400,
         );
       }
 
-      // Create the reservation already confirmed (fee paid from wallet).
+      // Create the reservation confirmed (deposit paid).
       const [created] = await Reservation.create(
         [{
           code,
@@ -204,9 +157,10 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
           vehicleType: resolvedVehicleTypeId,
           plateNumber: String(plateNumber).trim().toUpperCase(),
           startTime: start,
-          endTime: endTime ? new Date(endTime) : undefined,
+          endTime: end,
           slot: resolvedSlotId,
-          fee: actualFee,
+          fee: depositAmount,
+          estimatedFee,
           status: 'confirmed',
         }],
         { session: mongoSession },
@@ -217,11 +171,11 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
         [{
           user: userId,
           type: 'debit',
-          amount: actualFee,
+          amount: depositAmount,
           balanceAfter: updatedUser.walletBalance,
           status: 'success',
-          reason: 'reservation_fee',
-          metadata: { reservationId: `${created._id}`, code },
+          reason: 'reservation_deposit',
+          metadata: { reservationId: `${created._id}`, code, estimatedFee, depositAmount },
         }],
         { session: mongoSession },
       );
@@ -233,16 +187,16 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
           reservation: created._id,
           type: 'reservation',
           method: 'wallet',
-          amount: actualFee,
+          amount: depositAmount,
           status: 'success',
           user: userId,
         }],
         { session: mongoSession },
       );
 
-      // Credit the building wallet.
+      // Credit the deposit to the building wallet.
       await buildingWalletService.credit(
-        resolvedBuildingId, actualFee, 'reservation_fee', payment._id, mongoSession,
+        resolvedBuildingId, depositAmount, 'reservation_fee', payment._id, mongoSession,
       );
 
       // Reserve the slot.
@@ -264,10 +218,7 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
     .lean();
 
-  const gateMap = await resolveGatesFor([reservation]);
-  reservation.gates = gateMap.get(`${reservation._id}`) || [];
-
-  return { reservation, fee: actualFee };
+  return { reservation, depositAmount, estimatedFee };
 };
 
 const cancel = async (userId, id) => {
@@ -282,7 +233,7 @@ const cancel = async (userId, id) => {
         throw new AppError('Cannot cancel a reservation in this status', 400);
       }
 
-      // Actual amount the user paid (reality), fallback to the stored fee.
+      // Refund 85% of the deposit paid.
       const paidPayment = await Payment.findOne({
         reservation: reservation._id,
         type: 'reservation',
@@ -299,8 +250,7 @@ const cancel = async (userId, id) => {
       reservation.status = 'cancelled';
       await reservation.save({ session: mongoSession });
 
-      // Refund 85% of the paid amount to the user wallet; the building keeps 15%
-      // as a cancellation fee (refund is drawn from the building wallet).
+      // Deposit is non-refundable — building keeps the full deposit on cancellation.
       if (refund > 0) {
         const updatedUser = await User.findByIdAndUpdate(
           userId,
@@ -329,7 +279,7 @@ const cancel = async (userId, id) => {
             amount: refund,
             status: 'success',
             user: userId,
-            note: `Reservation ${reservation.code} cancelled — ${REFUND_PERCENT}% refund`,
+            note: `Reservation ${reservation.code} cancelled — ${REFUND_PERCENT}% refund of deposit`,
           }],
           { session: mongoSession },
         );

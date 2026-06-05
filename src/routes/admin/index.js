@@ -10,6 +10,7 @@ const dashboardRoutes = require("./dashboard.routes");
 const revenueRoutes = require("./revenue.routes");
 const walletRoutes = require("./wallet.routes");
 const pricePolicyRoutes = require("./pricePolicy.routes");
+const subscriptionPackageRoutes = require("./subscriptionPackage.routes");
 
 const router = express.Router();
 
@@ -22,5 +23,6 @@ router.use("/dashboard", dashboardRoutes);
 router.use("/revenue", revenueRoutes);
 router.use("/wallet", walletRoutes);
 router.use("/price-policies", pricePolicyRoutes);
+router.use("/subscription-packages", subscriptionPackageRoutes);
 
 module.exports = router;

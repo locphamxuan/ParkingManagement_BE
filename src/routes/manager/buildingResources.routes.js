@@ -16,6 +16,7 @@ const dashboardController = require("../../controllers/manager/dashboard.control
 const buildingWalletController = require("../../controllers/manager/buildingWallet.controller");
 
 const v = require("../../validators/manager.validator");
+const { requireActiveSubscription } = require("../../middlewares/subscription.middleware");
 
 const router = express.Router({ mergeParams: true });
 
@@ -25,14 +26,24 @@ router.use(
   authorizeBuildingAccess
 );
 
-router.get("/dashboard", dashboardController.getOverview);
-
-// ── Building Wallet ────────────────────────────────────────────────────────────
+// ── Building Wallet ─ (NOT subscription-gated: manager must be able to pay) ─────
 router.get("/wallet", buildingWalletController.getWallet);
 router.get("/wallet/transactions", buildingWalletController.listTransactions);
 router.get("/wallet/daily-revenue", buildingWalletController.getDailyRevenue);
-// 30% revenue is auto-settled to the admin wallet daily; this lists that history.
-router.get("/wallet/settlements", buildingWalletController.listSettlements);
+// Manager manually subscribes to an admin package (transfers package price → system wallet).
+router.post("/wallet/subscribe", buildingWalletController.subscribe);
+router.get("/wallet/subscription-packages", buildingWalletController.listSubscriptionPackages);
+// Subscription status — drives the FE dashboard gate.
+router.get("/subscription", buildingWalletController.getSubscriptionStatus);
+// PayOS top-up for building wallet
+router.post("/wallet/topup", buildingWalletController.initiateTopup);
+router.get("/wallet/topup/:orderCode/verify", buildingWalletController.verifyTopup);
+
+// ── Subscription gate ───────────────────────────────────────────────────────────
+// Everything below requires the building to hold an active admin subscription.
+router.use(requireActiveSubscription);
+
+router.get("/dashboard", dashboardController.getOverview);
 
 router
   .route("/vehicle-types")
@@ -84,7 +95,6 @@ router
   .route("/price-policies/:id")
   .put(v.validatePricePolicy, pricingController.update)
   .delete(pricingController.deactivate);
-router.get("/policy-push-logs", pricingController.listPushLogs);
 
 router
   .route("/packages")

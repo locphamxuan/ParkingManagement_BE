@@ -42,6 +42,9 @@ const longTermPackageSchema = new mongoose.Schema(
       min: 0,
     },
     description: { type: String, trim: true, maxlength: 500, default: "" },
+    // When true, subscribers can reserve a specific dedicated parking slot.
+    allowDedicatedSlot: { type: Boolean, default: false },
+    benefits: { type: [String], default: [] },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

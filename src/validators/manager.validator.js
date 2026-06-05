@@ -31,7 +31,7 @@ const validateVehicleType = wrap((req) => {
 
 const validateFloor = wrap((req) => {
   if (req.method === "POST")
-    requireFields(req.body, ["code", "name", "levelNumber", "capacity"]);
+    requireFields(req.body, ["code", "capacity"]);
   if (req.body.capacity !== undefined && Number(req.body.capacity) < 0)
     throw new AppError("capacity must be >= 0", 400);
 });

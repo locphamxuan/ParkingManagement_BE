@@ -69,4 +69,56 @@ const lookupQr = async (staffUser, qrCode) => {
   };
 };
 
-module.exports = { lookupQr };
+/**
+ * lookupPlateQr
+ * Lookup a license plate by its unique QR token (PLT-...). Returns the matched
+ * plate, its owner, and that owner's active parking sessions. Used by staff to
+ * identify a vehicle by scanning the plate's QR code.
+ */
+const lookupPlateQr = async (staffUser, qrCode) => {
+  if (!qrCode) throw new AppError('qrCode is required', 400);
+
+  const allowedBuildings = assignedBuildingIds(staffUser);
+  if (!allowedBuildings.length) {
+    throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
+  }
+
+  const owner = await User.findOne({ 'licensePlates.qrCode': qrCode }).select(
+    'fullName email phone walletBalance licensePlates isActive'
+  );
+
+  if (!owner) {
+    return { qrCode, found: false, plate: null, user: null, activeSessions: [] };
+  }
+
+  const plate = owner.licensePlates.find((p) => p.qrCode === qrCode);
+
+  const activeSessions = await ParkingSession.find({
+    user: owner._id,
+    status: 'active',
+    building: { $in: allowedBuildings },
+  }).select('_id building plateNumber entryTime fee');
+
+  return {
+    qrCode,
+    found: true,
+    plate: plate ? { plateNumber: plate.plateNumber, vehicleType: plate.vehicleType } : null,
+    user: {
+      id: owner._id,
+      fullName: owner.fullName,
+      email: owner.email,
+      phone: owner.phone || null,
+      walletBalance: owner.walletBalance,
+      isActive: owner.isActive,
+    },
+    activeSessions: activeSessions.map((session) => ({
+      id: session._id,
+      building: session.building,
+      plateNumber: session.plateNumber,
+      entryTime: session.entryTime,
+      fee: session.fee,
+    })),
+  };
+};
+
+module.exports = { lookupQr, lookupPlateQr };

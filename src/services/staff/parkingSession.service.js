@@ -216,7 +216,9 @@ const checkOut = async (user, sessionId, payload = {}) => {
         throw new AppError('sessionId is required', 400, 'SESSION_ID_REQUIRED');
       }
 
-      const parkingSession = await ParkingSession.findById(sessionId).session(mongoSession);
+      const parkingSession = await ParkingSession.findById(sessionId)
+        .populate('reservation')
+        .session(mongoSession);
       if (!parkingSession) {
         throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
       }
@@ -232,45 +234,73 @@ const checkOut = async (user, sessionId, payload = {}) => {
         throw new AppError('Plate mismatch requires bypass confirmation', 409, 'PLATE_MISMATCH_WARNING');
       }
 
-      const feeMethod = payload.paymentMethod || 'cash';
-      let fee = Number(parkingSession.fee || 0);
-      if (!fee) {
-        const ms = Date.now() - new Date(parkingSession.entryTime).getTime();
-        fee = Math.max(1, Math.ceil(ms / (1000 * 60 * 60)));
-      }
+      const linkedReservation = parkingSession.reservation;
+      const isReservationCheckout = Boolean(linkedReservation);
 
-      if (payload.adjustedFee !== undefined && payload.adjustedFee !== null) {
-        if (!payload.adjustmentReason) {
-          throw new AppError('adjustmentReason is required when adjustedFee is provided', 400, 'ADJUSTMENT_REASON_REQUIRED');
+      let fee;
+      let feeMethod;
+      let walletUserId = null;
+
+      if (isReservationCheckout) {
+        // Charge the remaining 85% from the user's wallet (deposit 15% was already charged at booking).
+        const estimatedFee = Number(linkedReservation.estimatedFee || 0);
+        const deposit = Number(linkedReservation.fee || 0);
+        fee = Math.max(0, estimatedFee - deposit);
+        feeMethod = 'wallet';
+        walletUserId = linkedReservation.user;
+      } else {
+        feeMethod = payload.paymentMethod || 'cash';
+        fee = Number(parkingSession.fee || 0);
+        if (!fee) {
+          const ms = Date.now() - new Date(parkingSession.entryTime).getTime();
+          fee = Math.max(1, Math.ceil(ms / (1000 * 60 * 60)));
         }
-        if (Number.isNaN(Number(payload.adjustedFee)) || Number(payload.adjustedFee) < 0) {
-          throw new AppError('adjustedFee must be a non-negative number', 400, 'INVALID_ADJUSTED_FEE');
+
+        if (payload.adjustedFee !== undefined && payload.adjustedFee !== null) {
+          if (!payload.adjustmentReason) {
+            throw new AppError('adjustmentReason is required when adjustedFee is provided', 400, 'ADJUSTMENT_REASON_REQUIRED');
+          }
+          if (Number.isNaN(Number(payload.adjustedFee)) || Number(payload.adjustedFee) < 0) {
+            throw new AppError('adjustedFee must be a non-negative number', 400, 'INVALID_ADJUSTED_FEE');
+          }
+          fee = Number(payload.adjustedFee);
         }
-        fee = Number(payload.adjustedFee);
+
+        if (payload.forceCheckoutReason) {
+          const surcharge = Math.max(1, Math.ceil(fee * 0.25));
+          fee += surcharge;
+        }
       }
 
-      if (payload.forceCheckoutReason) {
-        const surcharge = Math.max(1, Math.ceil(fee * 0.25));
-        fee += surcharge;
-      }
-
-      let walletTx = null;
-      if (feeMethod === 'wallet') {
+      // Debit user wallet for reservation checkouts (remaining fee) or direct wallet payments.
+      if (feeMethod === 'wallet' && fee > 0) {
+        const targetUserId = walletUserId || parkingSession.user;
+        if (!targetUserId) {
+          throw new AppError('No user account linked to this session for wallet payment', 400);
+        }
         const paidUser = await User.findOneAndUpdate(
-          { _id: user._id, walletBalance: { $gte: fee } },
+          { _id: targetUserId, walletBalance: { $gte: fee } },
           { $inc: { walletBalance: -fee } },
           { new: true, session: mongoSession },
         );
-        if (!paidUser) throw new AppError('Insufficient wallet balance', 409, 'INSUFFICIENT_WALLET_BALANCE');
-        walletTx = await WalletTransaction.create(
+        if (!paidUser) {
+          throw new AppError(
+            `Insufficient wallet balance to complete checkout. Remaining amount due: ${fee.toLocaleString('en-US')} VND`,
+            409,
+            'INSUFFICIENT_WALLET_BALANCE',
+          );
+        }
+        await WalletTransaction.create(
           [{
-            user: user._id,
+            user: targetUserId,
             type: 'debit',
             amount: fee,
             balanceAfter: paidUser.walletBalance,
             status: 'success',
-            reason: 'parking_checkout',
-            metadata: { sessionId: `${parkingSession._id}` },
+            reason: isReservationCheckout ? 'reservation_checkout' : 'parking_checkout',
+            metadata: isReservationCheckout
+              ? { sessionId: `${parkingSession._id}`, reservationId: `${linkedReservation._id}`, reservationCode: linkedReservation.code }
+              : { sessionId: `${parkingSession._id}` },
           }],
           { session: mongoSession },
         );
@@ -280,25 +310,38 @@ const checkOut = async (user, sessionId, payload = {}) => {
         [{
           building: parkingSession.building,
           parkingSession: parkingSession._id,
+          reservation: isReservationCheckout ? linkedReservation._id : null,
           type: 'session',
           method: feeMethod,
           amount: fee,
           status: 'success',
-          user: parkingSession.user || null,
+          user: (walletUserId || parkingSession.user) || null,
           staff: user._id,
-          note: [payload.adjustmentReason, payload.forceCheckoutReason].filter(Boolean).join(' | '),
+          note: [
+            isReservationCheckout ? `reservation_remaining:${linkedReservation.code}` : null,
+            payload.adjustmentReason,
+            payload.forceCheckoutReason,
+          ].filter(Boolean).join(' | '),
         }],
         { session: mongoSession },
       );
 
-      // Credit tiền phí gửi xe vào BuildingWallet (áp dụng mọi method thanh toán)
       if (fee > 0) {
         await buildingWalletService.credit(
           parkingSession.building,
           fee,
-          'parking_fee',
+          isReservationCheckout ? 'reservation_fee' : 'parking_fee',
           payment._id,
           mongoSession,
+        );
+      }
+
+      // Mark linked reservation as completed.
+      if (isReservationCheckout) {
+        await Reservation.findByIdAndUpdate(
+          linkedReservation._id,
+          { status: 'completed' },
+          { session: mongoSession },
         );
       }
 
@@ -321,19 +364,23 @@ const checkOut = async (user, sessionId, payload = {}) => {
 
       await logAudit(mongoSession, {
         actor: user._id,
-        action: payload.forceCheckoutReason
-          ? 'FORCE_VEHICLE_CHECKOUT'
-          : payload.adjustedFee !== undefined && payload.adjustedFee !== null
-            ? 'OVERRIDE_FEE_CALCULATION'
-            : payload.bypassMismatch
-              ? 'PLATE_MISMATCH_BYPASS'
-              : 'PARKING_SESSION_CHECK_OUT',
+        action: isReservationCheckout
+          ? 'RESERVATION_CHECK_OUT'
+          : payload.forceCheckoutReason
+            ? 'FORCE_VEHICLE_CHECKOUT'
+            : payload.adjustedFee !== undefined && payload.adjustedFee !== null
+              ? 'OVERRIDE_FEE_CALCULATION'
+              : payload.bypassMismatch
+                ? 'PLATE_MISMATCH_BYPASS'
+                : 'PARKING_SESSION_CHECK_OUT',
         entityType: 'ParkingSession',
         entityId: `${parkingSession._id}`,
         building: parkingSession.building,
         after: parkingSession.toObject(),
         metadata: {
           paymentMethod: feeMethod,
+          isReservationCheckout,
+          reservationId: isReservationCheckout ? `${linkedReservation._id}` : null,
           adjustedFee: payload.adjustedFee ?? null,
           adjustmentReason: payload.adjustmentReason || null,
           forceCheckoutReason: payload.forceCheckoutReason || null,
@@ -359,7 +406,8 @@ const listActive = async (user, query = {}) => {
   return ParkingSession.find({ ...buildingFilter, status: 'active' })
     .sort({ checkIn: -1 })
     .populate('entryGate', 'code name')
-    .populate('vehicleType', 'name code');
+    .populate('vehicleType', 'name code')
+    .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } });
 };
 
 const getById = async (user, id) => {

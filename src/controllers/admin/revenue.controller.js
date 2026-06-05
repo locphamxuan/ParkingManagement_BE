@@ -8,4 +8,10 @@ const getReport = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { getReport };
+const getSubscriptionTransfers = asyncHandler(async (req, res) => {
+  const { from, to, buildingId } = req.query;
+  const data = await service.getSubscriptionTransfers({ from, to, buildingId });
+  sendSuccess(res, { data });
+});
+
+module.exports = { getReport, getSubscriptionTransfers };

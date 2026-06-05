@@ -1,5 +1,4 @@
 ﻿const PricePolicy = require("../../models/policy/PricePolicy");
-const PolicyPushLog = require("../../models/policy/PolicyPushLog");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
@@ -17,14 +16,6 @@ const list = async (user, buildingId, query = {}) => {
 };
 
 const writeLog = async (user, buildingId, policy, action, previousValue, newValue) => {
-  await PolicyPushLog.create({
-    building: buildingId,
-    pricePolicy: policy._id,
-    actor: user._id,
-    action,
-    previousValue,
-    newValue,
-  });
   await writeAuditLog({
     actor: user,
     action: `${action.toUpperCase()}_PRICE_POLICY`,
@@ -119,29 +110,5 @@ const deactivate = async (user, buildingId, id) => {
   return updated;
 };
 
-const listPushLogs = async (user, buildingId, query = {}) => {
-  ensureManagerOwnsBuilding(user, buildingId);
-  const page = Math.max(Number(query.page) || 1, 1);
-  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
-
-  const filter = { building: buildingId };
-  if (query.pricePolicy) filter.pricePolicy = query.pricePolicy;
-
-  const [items, total] = await Promise.all([
-    PolicyPushLog.find(filter)
-      .populate("actor", "fullName email role")
-      .populate("pricePolicy", "name")
-      .sort("-createdAt")
-      .skip((page - 1) * limit)
-      .limit(limit),
-    PolicyPushLog.countDocuments(filter),
-  ]);
-
-  return {
-    items,
-    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
-  };
-};
-
-module.exports = { list, create, update, deactivate, listPushLogs };
+module.exports = { list, create, update, deactivate };
 
