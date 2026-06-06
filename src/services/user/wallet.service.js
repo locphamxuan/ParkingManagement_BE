@@ -34,7 +34,15 @@ const topup = async (userId, amount) => {
   const cancelUrl = `${env.clientUrl}/wallet/topup/cancel`;
 
   // Create PayOS payment link
-  const { checkoutUrl, qrCode, paymentLinkId } = await payosService.createPaymentLink({
+  const {
+    checkoutUrl,
+    qrCode,
+    paymentLinkId,
+    bin,
+    accountNumber,
+    accountName,
+    description: payosDescription,
+  } = await payosService.createPaymentLink({
     orderCode,
     amount,
     description: 'Nap vi PBMS',
@@ -56,7 +64,16 @@ const topup = async (userId, amount) => {
     note: 'Wallet top-up via PayOS',
   });
 
-  return { checkoutUrl, qrCode, orderCode };
+  return {
+    checkoutUrl,
+    qrCode,
+    orderCode,
+    bin,
+    accountNumber,
+    accountName,
+    description: payosDescription,
+    amount,
+  };
 };
 
 const listTransactions = async (userId, query = {}) => {

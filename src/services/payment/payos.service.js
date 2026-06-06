@@ -70,6 +70,11 @@ const createPaymentLink = async ({
     qrCode: response.qrCode,
     paymentLinkId: response.paymentLinkId,
     orderCode: response.orderCode,
+    bin: response.bin,
+    accountNumber: response.accountNumber,
+    accountName: response.accountName,
+    amount: response.amount,
+    description: response.description,
   };
 };
 
