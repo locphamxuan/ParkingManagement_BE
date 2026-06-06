@@ -1,88 +1,74 @@
-﻿const Gate = require("../../models/building/Gate");
+const Gate = require("../../models/building/Gate");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
 
+const GATE_STATUS = ["active", "inactive", "maintenance"];
+
+// Mỗi tòa nhà có 2 cổng cố định: Cổng vào (in) + Cổng ra (out).
+// Manager không CRUD cổng — chỉ xem. Hệ thống tự sinh & duy trì.
+const DEFAULT_GATES = [
+  { code: "IN", name: "Cổng vào", direction: "in" },
+  { code: "OUT", name: "Cổng ra", direction: "out" },
+];
+
+/**
+ * Đảm bảo tòa nhà có sẵn cổng vào + cổng ra (idempotent).
+ * Tạo cổng còn thiếu theo từng `direction`, an toàn khi gọi đồng thời.
+ */
+const ensureDefaultGates = async (buildingId) => {
+  await Promise.all(
+    DEFAULT_GATES.map(async (g) => {
+      const exists = await Gate.findOne({ building: buildingId, direction: g.direction });
+      if (exists) return;
+      try {
+        await Gate.create({
+          building: buildingId,
+          code: g.code,
+          name: g.name,
+          direction: g.direction,
+          allowedVehicleTypes: [],
+          status: "active",
+        });
+      } catch (err) {
+        // Bỏ qua lỗi trùng key (đã được tạo bởi request song song khác).
+        if (err && err.code !== 11000) throw err;
+      }
+    })
+  );
+};
+
 const list = async (user, buildingId) => {
   ensureManagerOwnsBuilding(user, buildingId);
+  await ensureDefaultGates(buildingId);
   return Gate.find({ building: buildingId })
     .populate("allowedVehicleTypes", "code name")
-    .populate("floors", "code name levelNumber")
-    .sort("code");
+    .sort("direction");
 };
 
-const create = async (user, buildingId, payload) => {
+/**
+ * Manager chỉ được phép đổi trạng thái cổng (active/inactive/maintenance),
+ * không thêm/sửa/xóa cổng.
+ */
+const updateStatus = async (user, buildingId, id, status) => {
   ensureManagerOwnsBuilding(user, buildingId);
-  const created = await Gate.create({
-    building: buildingId,
-    code: String(payload.code || "").trim().toUpperCase(),
-    name: String(payload.name || "").trim(),
-    direction: payload.direction || "both",
-    allowedVehicleTypes: Array.isArray(payload.allowedVehicleTypes)
-      ? payload.allowedVehicleTypes
-      : [],
-    floors: Array.isArray(payload.floors) ? payload.floors : [],
-    status: payload.status || "active",
-  });
-  await writeAuditLog({
-    actor: user,
-    action: "CREATE_GATE",
-    targetTable: "gates",
-    targetId: created._id,
-    building: buildingId,
-    newValue: created.toObject(),
-  });
-  return created;
-};
-
-const update = async (user, buildingId, id, payload) => {
-  ensureManagerOwnsBuilding(user, buildingId);
+  if (!GATE_STATUS.includes(status)) {
+    throw new AppError(`status must be one of: ${GATE_STATUS.join(", ")}`, 400);
+  }
   const current = await Gate.findOne({ _id: id, building: buildingId });
   if (!current) throw new AppError("Gate not found", 404);
 
-  const update = {};
-  ["name", "direction", "status"].forEach((k) => {
-    if (payload[k] !== undefined) update[k] = payload[k];
-  });
-  if (payload.code !== undefined)
-    update.code = String(payload.code).trim().toUpperCase();
-  if (Array.isArray(payload.allowedVehicleTypes))
-    update.allowedVehicleTypes = payload.allowedVehicleTypes;
-  if (Array.isArray(payload.floors))
-    update.floors = payload.floors;
-
-  const updated = await Gate.findByIdAndUpdate(id, update, {
-    new: true,
-    runValidators: true,
-  });
+  const updated = await Gate.findByIdAndUpdate(id, { status }, { new: true });
   await writeAuditLog({
     actor: user,
-    action: "UPDATE_GATE",
+    action: "UPDATE_GATE_STATUS",
     targetTable: "gates",
     targetId: id,
     building: buildingId,
-    previousValue: current.toObject(),
-    newValue: updated.toObject(),
+    previousValue: { status: current.status },
+    newValue: { status },
   });
   return updated;
 };
 
-const remove = async (user, buildingId, id) => {
-  ensureManagerOwnsBuilding(user, buildingId);
-  const current = await Gate.findOne({ _id: id, building: buildingId });
-  if (!current) throw new AppError("Gate not found", 404);
-  await Gate.deleteOne({ _id: id });
-  await writeAuditLog({
-    actor: user,
-    action: "DELETE_GATE",
-    targetTable: "gates",
-    targetId: id,
-    building: buildingId,
-    previousValue: current.toObject(),
-    severity: "medium",
-  });
-  return { id };
-};
-
-module.exports = { list, create, update, remove };
-
+module.exports = { list, ensureDefaultGates, updateStatus };

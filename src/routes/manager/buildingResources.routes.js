@@ -64,14 +64,9 @@ router
   .put(v.validateFloor, floorController.update)
   .delete(floorController.remove);
 
-router
-  .route("/gates")
-  .get(gateController.list)
-  .post(v.validateGate, gateController.create);
-router
-  .route("/gates/:id")
-  .put(v.validateGate, gateController.update)
-  .delete(gateController.remove);
+// Cổng ra/vào là hạ tầng cố định của tòa nhà — manager chỉ xem + đổi trạng thái.
+router.get("/gates", gateController.list);
+router.patch("/gates/:id/status", gateController.updateStatus);
 
 router
   .route("/slots")

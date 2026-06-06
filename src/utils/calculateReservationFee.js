@@ -29,10 +29,14 @@ const sameDay = (a, b) =>
  *
  * @returns {Promise<{ estimatedFee, hourlyRate, hours, regularHours, peakHours, peakRate }>}
  */
+// Khi policy không cấu hình minRate, áp sàn tối thiểu tương đương số phút này.
+const MIN_BILLABLE_MINUTES = 30;
+
 const calculateReservationFee = async (buildingId, vehicleTypeId, startTime, endTime) => {
   const start = new Date(startTime);
   const end = new Date(endTime);
-  const hours = Math.max(1, Math.ceil((end - start) / 3_600_000));
+  // Tổng thời gian thực (phút) — không làm tròn lên theo giờ nữa.
+  const totalMinutes = Math.max(0, (end - start) / 60_000);
 
   // Load every active policy for this building + vehicle type.
   const policies = await PricePolicy.find({
@@ -81,36 +85,55 @@ const calculateReservationFee = async (buildingId, vehicleTypeId, startTime, end
     return regularRate;
   };
 
-  // Walk each billed hour from the start, summing its applicable rate.
+  // Pro-rate theo phút: đi qua từng block 1 giờ (giữ đúng peak/holiday theo giờ
+  // bắt đầu block), block cuối chỉ tính phần phút còn lại.
   let estimatedFee = 0;
-  let regularHours = 0;
-  let peakHours = 0;
+  let regularMinutes = 0;
+  let peakMinutes = 0;
   let peakRateApplied = null;
-  for (let i = 0; i < hours; i++) {
+  let remaining = totalMinutes;
+  let i = 0;
+  while (remaining > 0) {
     const blockStart = new Date(start.getTime() + i * 3_600_000);
     const rate = rateForHour(blockStart);
-    estimatedFee += rate;
+    const mins = Math.min(60, remaining);
+    estimatedFee += rate * (mins / 60);
     if (rate > regularRate) {
-      peakHours += 1;
+      peakMinutes += mins;
       peakRateApplied = rate;
     } else {
-      regularHours += 1;
+      regularMinutes += mins;
     }
+    remaining -= mins;
+    i++;
+  }
+
+  // Phí tối thiểu: ưu tiên minRate của policy, nếu không có thì lấy ~30 phút giá thường.
+  const minCharge =
+    regularPolicy?.minRate && regularPolicy.minRate > 0
+      ? regularPolicy.minRate
+      : Math.ceil(regularRate * (MIN_BILLABLE_MINUTES / 60));
+  let minimumApplied = false;
+  if (totalMinutes > 0 && estimatedFee < minCharge) {
+    estimatedFee = minCharge;
+    minimumApplied = true;
   }
 
   // Apply a daily cap (regular policy) across the whole stay if set.
   if (dailyCap != null && dailyCap > 0) {
-    const days = Math.ceil(hours / 24);
+    const days = Math.max(1, Math.ceil(totalMinutes / 1440));
     estimatedFee = Math.min(estimatedFee, dailyCap * days);
   }
 
   return {
     estimatedFee: Math.ceil(estimatedFee),
     hourlyRate: regularRate,
-    hours,
-    regularHours,
-    peakHours,
+    durationMinutes: Math.round(totalMinutes),
+    hours: Math.ceil(totalMinutes / 60), // giữ để tương thích phần gọi cũ
+    regularHours: regularMinutes / 60,
+    peakHours: peakMinutes / 60,
     peakRate: peakRateApplied,
+    minimumApplied,
   };
 };
 

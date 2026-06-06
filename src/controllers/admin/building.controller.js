@@ -3,6 +3,7 @@ const { sendSuccess } = require("../../utils/response");
 const buildingService = require("../../services/building.service");
 const buildingManagerService = require("../../services/buildingManager.service");
 const subscriptionService = require("../../services/manager/subscription.service");
+const gateService = require("../../services/manager/gate.service");
 
 const listBuildings = asyncHandler(async (req, res) => {
   const data = await buildingService.listBuildings(req.query);
@@ -16,6 +17,8 @@ const getBuilding = asyncHandler(async (req, res) => {
 
 const createBuilding = asyncHandler(async (req, res) => {
   const building = await buildingService.createBuilding(req.body);
+  // Tự sinh 2 cổng cố định (Cổng vào / Cổng ra) cho tòa nhà mới.
+  await gateService.ensureDefaultGates(building._id);
   sendSuccess(res, {
     statusCode: 201,
     message: "Building created successfully",
