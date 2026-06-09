@@ -38,6 +38,26 @@ const lookupPlate = asyncHandler(async (req, res) => {
 });
 
 /**
+ * POST /api/staff/parking-sessions/scan
+ * AI camera (Camera 1): reads plate + brand from a captured frame and resolves
+ * the owner account by plate. Body: { image } (base64, data-URL prefix allowed).
+ */
+const scan = asyncHandler(async (req, res) => {
+  const data = await parkingSessionService.scanVehicle(req.user, req.body?.image);
+  sendSuccess(res, { data });
+});
+
+/**
+ * POST /api/staff/parking-sessions/reject
+ * Staff từ chối check-in/out; gửi thông báo cho chủ biển số.
+ * Body: { plateNumber, stage: 'check-in'|'check-out', reason, building? }
+ */
+const reject = asyncHandler(async (req, res) => {
+  const data = await parkingSessionService.rejectEntry(req.user, req.body);
+  sendSuccess(res, { message: 'Đã từ chối và gửi thông báo cho khách (nếu có tài khoản).', data });
+});
+
+/**
  * POST /api/staff/parking-sessions/:id/initiate-payment
  * Tạo PayOS payment link (QR + checkoutUrl) để thu phí gửi xe.
  * Staff hiển thị QR cho khách quét bằng app ngân hàng.
@@ -57,4 +77,4 @@ const verifyPayment = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, initiatePayment, verifyPayment };
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, scan, reject, initiatePayment, verifyPayment };

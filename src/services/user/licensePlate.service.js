@@ -21,7 +21,7 @@ const list = async (userId) => {
   return user.licensePlates;
 };
 
-const add = async (userId, { plateNumber, vehicleType }) => {
+const add = async (userId, { plateNumber, vehicleType, brand }) => {
   const user = await User.findById(userId).select('licensePlates');
   if (!user) throw new AppError('User not found', 404);
 
@@ -35,7 +35,7 @@ const add = async (userId, { plateNumber, vehicleType }) => {
 
   const updated = await User.findByIdAndUpdate(
     userId,
-    { $push: { licensePlates: { plateNumber: normalized, vehicleType: vehicleType || 'car', isDefault: false, qrCode: generatePlateQrCode() } } },
+    { $push: { licensePlates: { plateNumber: normalized, vehicleType: vehicleType || 'car', brand: brand || null, isDefault: false, qrCode: generatePlateQrCode() } } },
     { new: true, runValidators: true }
   ).select('licensePlates');
 

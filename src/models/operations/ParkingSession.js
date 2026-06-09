@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { isValidVietnamPlate } = require("../../utils/plate.util");
 
 const SESSION_STATUS = ["active", "completed", "cancelled"];
 
@@ -26,6 +27,16 @@ const parkingSessionSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
       maxlength: 20,
+      validate: {
+        validator: isValidVietnamPlate,
+        message: "Biển số không hợp lệ (định dạng Việt Nam, ví dụ: 59G2-038.80)",
+      },
+    },
+    // Vehicle make recognized by the AI camera at check-in (e.g. Toyota, VinFast).
+    vehicleBrand: {
+      type: String,
+      trim: true,
+      default: null,
     },
     user: {
       type: mongoose.Schema.Types.ObjectId,

@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { ROLE_LIST, ROLES } = require('../../constants/roles');
+const { isValidVietnamPlate } = require('../../utils/plate.util');
 
 // Unique opaque QR token for a license plate (staff scans this to identify the vehicle/owner).
 const generatePlateQrCode = () => `PLT-${crypto.randomBytes(8).toString('hex')}`;
@@ -53,11 +54,22 @@ const userSchema = new mongoose.Schema(
           required: true,
           uppercase: true,
           trim: true,
+          validate: {
+            validator: isValidVietnamPlate,
+            message: 'Biển số không hợp lệ (định dạng Việt Nam, ví dụ: 59G2-038.80)',
+          },
         },
         vehicleType: {
           type: String,
           enum: ['motorcycle', 'car', 'suv', 'truck', 'other'],
           default: 'car',
+        },
+        // Vehicle make chosen by the user (e.g. Toyota, Honda, VinFast). Optional.
+        brand: {
+          type: String,
+          trim: true,
+          maxlength: [50, 'Brand cannot exceed 50 characters'],
+          default: null,
         },
         isDefault: {
           type: Boolean,

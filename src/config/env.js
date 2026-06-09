@@ -11,6 +11,9 @@ const env = {
   payosApiKey: process.env.PAYOS_API_KEY,
   payosChecksumKey: process.env.PAYOS_CHECKSUM_KEY,
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
+  // Google Gemini — AI camera plate/brand recognition (free tier).
+  // Optional: the app boots without it; the /scan endpoint returns 503 if unset.
+  geminiApiKey: process.env.GEMINI_API_KEY || null,
 };
 
 const required = ['mongodbUri', 'jwtSecret', 'payosClientId', 'payosApiKey', 'payosChecksumKey'];

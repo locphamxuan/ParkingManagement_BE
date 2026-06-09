@@ -9,12 +9,41 @@ const {
   Payment,
   WalletTransaction,
   User,
+  Notification,
+  VehicleType,
 } = require('../../models');
 const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../utils/staffScope');
 const payosService = require('../payment/payos.service');
 const buildingWalletService = require('../manager/buildingWallet.service');
+const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../utils/plate.util');
+const { calculateParkingFee } = require('../../utils/feeCalculator');
+const visionScanService = require('./visionScan.service');
 
-const normalizePlate = (plate) => `${plate || ''}`.trim().toUpperCase();
+// Fallback hourly rate (VND) by vehicle kind, used when no PricePolicy is configured.
+const DEFAULT_HOURLY_RATE = { car: 20000, motorcycle: 5000 };
+
+// Resolve a 'car'|'motorcycle' kind (or an ObjectId) to the building's VehicleType _id.
+const resolveVehicleTypeId = async (buildingId, kind, session = null) => {
+  if (!kind) return null;
+  if (mongoose.Types.ObjectId.isValid(kind)) return kind;
+  const k = `${kind}`.toLowerCase();
+  const codes = k === 'motorcycle'
+    ? ['MOTORCYCLE', 'MOTORBIKE', 'XE_MAY', 'BIKE', 'MOTO']
+    : ['CAR', 'OTO', 'AUTO', 'XE_OTO'];
+  const nameRx = k === 'motorcycle' ? /xe m|motor|máy/i : /ô t|oto|car|auto/i;
+  const vt = await VehicleType.findOne({
+    building: buildingId,
+    $or: [{ code: { $in: codes } }, { name: nameRx }],
+  }).session(session);
+  return vt?._id || null;
+};
+
+// Map a VehicleType code/name to our two kinds for fallback pricing.
+const vehicleKindFromType = (vt) => {
+  const s = `${vt?.code || ''} ${vt?.name || ''}`.toLowerCase();
+  if (/motor|xe m|máy|bike|moto/.test(s)) return 'motorcycle';
+  return 'car';
+};
 
 const asObjectId = (value) =>
   mongoose.Types.ObjectId.isValid(value) ? value : null;
@@ -88,9 +117,14 @@ const checkIn = async (user, payload) => {
     const result = await session.withTransaction(async () => {
       const buildingId = payload?.building;
       const plateNumber = normalizePlate(payload?.plateNumber);
-      const vehicleType = asObjectId(payload?.vehicleType);
+      // FE sends 'car'/'motorcycle'; resolve to the building's VehicleType _id so
+      // pricing (by vehicle type) and reporting work. Falls back to null if unset.
+      const vehicleType = await resolveVehicleTypeId(buildingId, payload?.vehicleType, session);
       const gate = asObjectId(payload?.gate);
       const forceCheckIn = Boolean(payload?.forceCheckIn);
+      const vehicleBrand = payload?.vehicleBrand
+        ? `${payload.vehicleBrand}`.trim()
+        : null;
 
       if (!buildingId) {
         throw new AppError('building is required', 400);
@@ -126,6 +160,7 @@ const checkIn = async (user, payload) => {
             fee: 0,
             paymentMethod: 'long_term',
             vehicleType,
+            vehicleBrand,
             entryGate: gate,
             note: `long_term:${longTerm._id}`,
           }],
@@ -146,6 +181,15 @@ const checkIn = async (user, payload) => {
       }
 
       const reservation = await resolveReservation(plateNumber, allowedBuildings);
+
+      // Link the session to the plate's owner account when one exists (account is
+      // the secondary identifier). Format-tolerant so 59G2-03880 / 59G2-038.80 match.
+      const registeredOwner = await User.findOne({
+        'licensePlates.plateNumber': plateMatchRegex(plateNumber) || plateNumber,
+      })
+        .select('_id')
+        .session(session);
+
       const slotId = reservation?.slot?._id || reservation?.slot || null;
       if (slotId) {
         const slot = await ParkingSlot.findById(slotId).session(session);
@@ -166,10 +210,11 @@ const checkIn = async (user, payload) => {
           plateNumber,
           building: buildingId,
           staff: user._id,
-          user: reservation?.user || registerUser?._id || null,
+          user: reservation?.user || registeredOwner?._id || null,
           reservation: reservation?._id || null,
           slot: slotId,
           vehicleType,
+          vehicleBrand,
           entryGate: gate,
           note: reservation
             ? 'reservation_check_in'
@@ -218,6 +263,8 @@ const checkOut = async (user, sessionId, payload = {}) => {
 
       const parkingSession = await ParkingSession.findById(sessionId)
         .populate('reservation')
+        .populate('vehicleType', 'code name')
+        .populate({ path: 'slot', select: 'floor', populate: { path: 'floor', select: '_id' } })
         .session(mongoSession);
       if (!parkingSession) {
         throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
@@ -252,8 +299,17 @@ const checkOut = async (user, sessionId, payload = {}) => {
         feeMethod = payload.paymentMethod || 'cash';
         fee = Number(parkingSession.fee || 0);
         if (!fee) {
-          const ms = Date.now() - new Date(parkingSession.entryTime).getTime();
-          fee = Math.max(1, Math.ceil(ms / (1000 * 60 * 60)));
+          const now = new Date();
+          const floorId = parkingSession.slot?.floor?._id || parkingSession.slot?.floor || null;
+          const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
+          // Price by vehicle type via PricePolicy (peak/holiday/floor aware).
+          fee = await calculateParkingFee(parkingSession.building, vtId, floorId, parkingSession.entryTime, now);
+          if (!fee || fee <= 0) {
+            // No PricePolicy configured → fallback to a flat hourly rate by vehicle kind.
+            const kind = vehicleKindFromType(parkingSession.vehicleType);
+            const hours = Math.max(1, Math.ceil((now.getTime() - new Date(parkingSession.entryTime).getTime()) / (1000 * 60 * 60)));
+            fee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
+          }
         }
 
         if (payload.adjustedFee !== undefined && payload.adjustedFee !== null) {
@@ -403,11 +459,24 @@ const listActive = async (user, query = {}) => {
     ? { building: query.buildingId || query.building }
     : { building: { $in: allowedBuildings } };
 
-  return ParkingSession.find({ ...buildingFilter, status: 'active' })
-    .sort({ checkIn: -1 })
+  const sessions = await ParkingSession.find({ ...buildingFilter, status: 'active' })
+    .sort({ entryTime: -1 })
     .populate('entryGate', 'code name')
+    .populate('exitGate', 'code name')
     .populate('vehicleType', 'name code')
+    .populate('user', 'fullName email')
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } });
+
+  // Attach the current fee (per manager's PricePolicy, fallback by kind) + member flag
+  // so the staff UI can show the amount and who owns the vehicle.
+  return Promise.all(
+    sessions.map(async (s) => {
+      const obj = s.toObject();
+      obj.currentFee = await calculateFee(s);
+      obj.isMember = Boolean(s.user);
+      return obj;
+    })
+  );
 };
 
 const getById = async (user, id) => {
@@ -462,16 +531,31 @@ const lookupPlate = async (staffUser, plateNumber) => {
     throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
   }
 
+  // Separator-insensitive match so a plate stored in any equivalent format
+  // (e.g. 59G2-03880 / 59G2-038.80) still resolves to its owner.
+  const plateRx = plateMatchRegex(plate) || plate;
+
   const [user, activeSession] = await Promise.all([
-    User.findOne({ 'licensePlates.plateNumber': plate })
-      .select('fullName email phone walletBalance'),
-    ParkingSession.findOne({ plateNumber: plate, status: 'active' })
+    User.findOne({ 'licensePlates.plateNumber': plateRx })
+      .select('fullName email phone walletBalance licensePlates'),
+    ParkingSession.findOne({ plateNumber: plateRx, status: 'active' })
       .select('_id building entryTime'),
   ]);
+
+  // The vehicle type registered for THIS plate (normalized to car|motorcycle),
+  // so the gate can verify the actual vehicle matches what was registered.
+  let registeredVehicleType = null;
+  if (user) {
+    const matched = (user.licensePlates || []).find((p) => plateRx.test ? plateRx.test(p.plateNumber) : p.plateNumber === plate);
+    const t = `${matched?.vehicleType || ''}`.toLowerCase();
+    if (t === 'motorcycle') registeredVehicleType = 'motorcycle';
+    else if (t) registeredVehicleType = 'car'; // car/suv/truck/other → car
+  }
 
   return {
     plateNumber: plate,
     hasAccount: Boolean(user),
+    registeredVehicleType,
     user: user
       ? {
           id: user._id,
@@ -488,19 +572,116 @@ const lookupPlate = async (staffUser, plateNumber) => {
 };
 
 /* ─────────────────────────────────────────────
+   scanVehicle (AI camera — Camera 1)
+   Runs one Gemini vision call to read the plate + brand, then resolves the
+   owner account by plate (account is the secondary identifier). When the plate
+   is unreadable, the FE falls back to the QR camera (Camera 2).
+───────────────────────────────────────────── */
+
+const scanVehicle = async (staffUser, image) => {
+  const allowedBuildings = assignedBuildingIds(staffUser);
+  if (!allowedBuildings.length) {
+    throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
+  }
+
+  const { plateNumber, plateConfidence, vehicleType, brand, brandConfidence } =
+    await visionScanService.scanVehicleImage(image);
+
+  // Resolve the owner account only when we have a valid plate.
+  let account = { hasAccount: false, registeredVehicleType: null, user: null, activeSession: null };
+  if (isValidVietnamPlate(plateNumber)) {
+    const lookup = await lookupPlate(staffUser, plateNumber);
+    account = {
+      hasAccount: lookup.hasAccount,
+      registeredVehicleType: lookup.registeredVehicleType,
+      user: lookup.user,
+      activeSession: lookup.activeSession,
+    };
+  }
+
+  // Whether the camera-detected type contradicts the registered type.
+  const vehicleTypeMismatch = Boolean(
+    account.registeredVehicleType && vehicleType && account.registeredVehicleType !== vehicleType
+  );
+
+  return {
+    plateNumber, // canonical VN form, or '' if unreadable
+    plateConfidence,
+    vehicleType, // detected by AI (car|motorcycle|null)
+    brand,
+    brandConfidence,
+    vehicleTypeMismatch,
+    ...account,
+  };
+};
+
+/* ─────────────────────────────────────────────
+   rejectEntry
+   Staff rejects a check-in / check-out (e.g. vehicle type doesn't match the
+   registered one). Notifies the plate's owner with the reason so they can
+   verify/update their vehicle info. Does NOT create/modify a session.
+───────────────────────────────────────────── */
+
+const rejectEntry = async (staffUser, { plateNumber, stage, reason, building } = {}) => {
+  const plate = normalizePlate(plateNumber);
+  if (!plate) throw new AppError('plateNumber is required', 400);
+  if (!reason || !`${reason}`.trim()) throw new AppError('reason is required', 400, 'REJECT_REASON_REQUIRED');
+
+  const allowedBuildings = assignedBuildingIds(staffUser);
+  if (!allowedBuildings.length) {
+    throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
+  }
+
+  const isCheckout = stage === 'check-out';
+  const owner = await User.findOne({ 'licensePlates.plateNumber': plateMatchRegex(plate) || plate }).select('_id');
+
+  let notified = false;
+  if (owner) {
+    await Notification.create({
+      user: owner._id,
+      type: isCheckout ? 'checkout_rejected' : 'checkin_rejected',
+      title: isCheckout ? 'Check-out bị từ chối' : 'Check-in bị từ chối',
+      message: `Biển số ${plate} bị từ chối ${isCheckout ? 'cho xe ra' : 'cho xe vào'}. Lý do: ${`${reason}`.trim()}. Vui lòng kiểm tra/cập nhật lại thông tin phương tiện.`,
+      plateNumber: plate,
+      building: asObjectId(building) || null,
+    });
+    notified = true;
+  }
+
+  await logAudit(null, {
+    actor: staffUser._id,
+    action: isCheckout ? 'CHECK_OUT_REJECTED' : 'CHECK_IN_REJECTED',
+    entityType: 'ParkingSession',
+    entityId: plate,
+    building: asObjectId(building) || null,
+    metadata: { plateNumber: plate, reason: `${reason}`.trim(), notified },
+  });
+
+  return { plateNumber: plate, stage: isCheckout ? 'check-out' : 'check-in', notified };
+};
+
+/* ─────────────────────────────────────────────
    initiateStripePayment
    Creates a Stripe Payment Intent for the parking session fee.
    The session stays "active" until the webhook confirms payment.
 ───────────────────────────────────────────── */
 
 /**
- * Calculate fee (hours elapsed, minimum 1 hour).
- * Mirrors the logic inside checkOut so both paths agree.
+ * Compute the parking fee (VND) for a session — price by vehicle type via
+ * PricePolicy, falling back to a flat hourly rate by kind. Mirrors checkOut.
  */
-const calculateFee = (parkingSession) => {
+const calculateFee = async (parkingSession) => {
   if (parkingSession.fee && parkingSession.fee > 0) return parkingSession.fee;
-  const ms = Date.now() - new Date(parkingSession.entryTime).getTime();
-  return Math.max(1, Math.ceil(ms / (1000 * 60 * 60)));
+  const now = new Date();
+  const floorId = parkingSession.slot?.floor?._id || parkingSession.slot?.floor || null;
+  const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
+  let fee = await calculateParkingFee(parkingSession.building, vtId, floorId, parkingSession.entryTime, now);
+  if (!fee || fee <= 0) {
+    const kind = vehicleKindFromType(parkingSession.vehicleType);
+    const hours = Math.max(1, Math.ceil((now.getTime() - new Date(parkingSession.entryTime).getTime()) / (1000 * 60 * 60)));
+    fee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
+  }
+  return fee;
 };
 
 /**
@@ -511,7 +692,9 @@ const calculateFee = (parkingSession) => {
 const initiatePayment = async (staffUser, sessionId) => {
   if (!sessionId) throw new AppError('sessionId is required', 400);
 
-  const parkingSession = await ParkingSession.findById(sessionId);
+  const parkingSession = await ParkingSession.findById(sessionId)
+    .populate('vehicleType', 'code name')
+    .populate({ path: 'slot', select: 'floor', populate: { path: 'floor', select: '_id' } });
   if (!parkingSession) throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
 
   assertBuildingScope(staffUser, parkingSession.building);
@@ -520,7 +703,7 @@ const initiatePayment = async (staffUser, sessionId) => {
     throw new AppError('Session is not active', 400, 'SESSION_NOT_ACTIVE');
   }
 
-  const fee = calculateFee(parkingSession);
+  const fee = await calculateFee(parkingSession);
   const orderCode = payosService.generateOrderCode();
 
   const { checkoutUrl, qrCode, paymentLinkId } = await payosService.createPaymentLink({
@@ -643,4 +826,4 @@ const verifySessionPayment = async (staffUser, orderCode) => {
   return { status: payosStatus.toLowerCase() || 'pending', settled: false };
 };
 
-module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, initiatePayment, settleSessionPayment, verifySessionPayment };
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, scanVehicle, rejectEntry, initiatePayment, settleSessionPayment, verifySessionPayment };
