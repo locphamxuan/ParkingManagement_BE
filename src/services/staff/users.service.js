@@ -102,7 +102,7 @@ const lookupPlateQr = async (staffUser, qrCode) => {
   return {
     qrCode,
     found: true,
-    plate: plate ? { plateNumber: plate.plateNumber, vehicleType: plate.vehicleType } : null,
+    plate: plate ? { plateNumber: plate.plateNumber, vehicleType: plate.vehicleType, brand: plate.brand || null } : null,
     user: {
       id: owner._id,
       fullName: owner.fullName,
@@ -121,4 +121,29 @@ const lookupPlateQr = async (staffUser, qrCode) => {
   };
 };
 
-module.exports = { lookupQr, lookupPlateQr };
+/**
+ * resolveQr
+ * Unified entry point for the staff "Camera 2" QR scanner. Dispatches by token
+ * shape so the frontend doesn't have to guess which lookup to call:
+ *   - 'PLT-...'        → license-plate QR  (lookupPlateQr)
+ *   - valid ObjectId   → account/user QR   (lookupQr)
+ * Returns the underlying result tagged with `kind` ('plate' | 'user').
+ */
+const resolveQr = async (staffUser, code) => {
+  const value = `${code || ''}`.trim();
+  if (!value) throw new AppError('qrCode is required', 400);
+
+  if (value.toUpperCase().startsWith('PLT-')) {
+    const data = await lookupPlateQr(staffUser, value);
+    return { kind: 'plate', ...data };
+  }
+
+  if (mongoose.Types.ObjectId.isValid(value)) {
+    const data = await lookupQr(staffUser, value);
+    return { kind: 'user', ...data };
+  }
+
+  throw new AppError('Mã QR không hợp lệ (cần mã biển số PLT- hoặc ID tài khoản).', 400, 'INVALID_QR_CODE');
+};
+
+module.exports = { lookupQr, lookupPlateQr, resolveQr };

@@ -22,4 +22,14 @@ const lookupPlateQr = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { lookupQr, lookupPlateQr };
+/**
+ * GET /api/staff/users/resolve-qr/:code
+ * Unified QR resolver for the staff Camera 2 scanner — dispatches a PLT- plate
+ * token or an account ObjectId to the right lookup.
+ */
+const resolveQr = asyncHandler(async (req, res) => {
+  const data = await usersService.resolveQr(req.user, req.params.code);
+  sendSuccess(res, { data });
+});
+
+module.exports = { lookupQr, lookupPlateQr, resolveQr };
