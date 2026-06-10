@@ -141,7 +141,13 @@ const listFeedbacks = async (userContext, filters = {}) => {
 
   if (userContext?.role === ROLES.USER) {
     filter.user = userContext._id;
-  } else if ([ROLES.STAFF, ROLES.MANAGER].includes(userContext?.role)) {
+  } else if (userContext?.role === ROLES.STAFF) {
+    throw new AppError(
+      'Staff are not allowed to access feedback',
+      403,
+      'STAFF_FEEDBACK_ACCESS_DENIED',
+    );
+  } else if (userContext?.role === ROLES.MANAGER) {
     const buildingId = normalizeStaffBuildingId(filters.buildingId || filters.building);
     assertBuildingScope(userContext, buildingId);
     filter.building = buildingId;
@@ -193,8 +199,12 @@ const listFeedbacks = async (userContext, filters = {}) => {
 };
 
 const resolveFeedback = async (staffContext, feedbackId, replyPayload = {}) => {
-  if (![ROLES.STAFF, ROLES.MANAGER].includes(staffContext?.role)) {
-    throw new AppError('Only staff or managers can resolve feedback', 403, 'STAFF_FEEDBACK_RESOLVE_ONLY');
+  if (staffContext?.role !== ROLES.MANAGER) {
+    throw new AppError(
+      'Only managers can resolve feedback',
+      403,
+      'MANAGER_FEEDBACK_RESOLVE_ONLY',
+    );
   }
   if (!mongoose.Types.ObjectId.isValid(feedbackId)) {
     throw new AppError('Invalid feedbackId', 400, 'INVALID_FEEDBACK_ID');
