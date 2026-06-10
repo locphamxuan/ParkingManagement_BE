@@ -72,11 +72,6 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
   let resolvedSlotId = null;
 
   if (slotId) {
-    // Verify the package supports dedicated slots
-    if (!pkg.allowDedicatedSlot) {
-      throw new AppError('Gói này không hỗ trợ chỗ đỗ cố định', 400);
-    }
-
     // Verify the slot exists, is in the same building, matches vehicle type, and is available
     const slot = await ParkingSlot.findById(slotId).populate('vehicleType', 'code');
     if (!slot) {
