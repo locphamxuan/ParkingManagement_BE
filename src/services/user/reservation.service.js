@@ -77,11 +77,36 @@ const list = async (userId, query = {}) => {
     : [];
   const refundAmtByRes = new Map(refundPayments.map((p) => [String(p.reservation), p.amount]));
 
-  const items = docs.map((d) => ({
-    ...d,
-    refundPercent: refundPctByBuilding.get(String(d.building?._id || d.building)) ?? 0,
-    refundAmount: refundAmtByRes.get(String(d._id)) ?? 0,
-  }));
+  // Query associated parking sessions for these reservations
+  const ParkingSession = require('../../models/operations/ParkingSession');
+  const reservationIds = docs.map((d) => d._id);
+  const sessions = await ParkingSession.find({ reservation: { $in: reservationIds } }).lean();
+
+  const sessionsMap = {};
+  sessions.forEach((s) => {
+    if (s.reservation) {
+      sessionsMap[s.reservation.toString()] = s;
+    }
+  });
+
+  const items = docs.map((d) => {
+    const session = sessionsMap[d._id.toString()] || null;
+    return {
+      ...d,
+      refundPercent: refundPctByBuilding.get(String(d.building?._id || d.building)) ?? 0,
+      refundAmount: refundAmtByRes.get(String(d._id)) ?? 0,
+      parkingSession: session
+        ? {
+            _id: session._id,
+            fee: session.fee,
+            status: session.status,
+            entryTime: session.entryTime,
+            exitTime: session.exitTime,
+            paymentStatus: session.paymentStatus,
+          }
+        : null,
+    };
+  });
 
   return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
@@ -93,6 +118,20 @@ const get = async (userId, id) => {
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
     .lean();
   if (!reservation) throw new AppError('Reservation not found', 404);
+
+  const ParkingSession = require('../../models/operations/ParkingSession');
+  const session = await ParkingSession.findOne({ reservation: id }).lean();
+  reservation.parkingSession = session
+    ? {
+        _id: session._id,
+        fee: session.fee,
+        status: session.status,
+        entryTime: session.entryTime,
+        exitTime: session.exitTime,
+        paymentStatus: session.paymentStatus,
+      }
+    : null;
+
   return reservation;
 };
 
