@@ -95,18 +95,75 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
     resolvedSlotId = slot._id;
   }
 
-  // ── Debit wallet ─────────────────────────────────────────────────────────
-  const updatedUser = await User.findOneAndUpdate(
-    { _id: userId, walletBalance: { $gte: pkg.price } },
-    { $inc: { walletBalance: -pkg.price } },
-    { new: true }
-  ).select('walletBalance');
-  if (!updatedUser) throw new AppError('Số dư ví không đủ', 400);
+  // ── Check user wallet balance ────────────────────────────────────────────
+  const user = await User.findById(userId);
+  if (!user) throw new AppError('User not found', 404);
 
-  // ── Create subscription ──────────────────────────────────────────────────
-  let subscription;
-  try {
-    subscription = await LongTermSubscription.create({
+  const isSufficient = user.walletBalance >= pkg.price;
+
+  if (isSufficient) {
+    // ── Pay via Wallet ──
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: userId, walletBalance: { $gte: pkg.price } },
+      { $inc: { walletBalance: -pkg.price } },
+      { new: true }
+    ).select('walletBalance');
+    if (!updatedUser) throw new AppError('Số dư ví không đủ', 400);
+
+    let subscription;
+    try {
+      subscription = await LongTermSubscription.create({
+        user: userId,
+        package: packageId,
+        building: pkg.building,
+        plateNumber: String(plateNumber).trim().toUpperCase(),
+        slot: resolvedSlotId,
+        startDate: resolvedStart,
+        endDate,
+        status: 'active',
+      });
+
+      // Reserve the slot if one was assigned
+      if (resolvedSlotId) {
+        await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'reserved' });
+      }
+    } catch (err) {
+      // Rollback wallet debit on failure
+      await User.findByIdAndUpdate(userId, { $inc: { walletBalance: pkg.price } });
+      if (resolvedSlotId) {
+        await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'available' });
+      }
+      throw err;
+    }
+
+    // Wallet transaction record
+    try {
+      await WalletTransaction.create({
+        user: userId,
+        type: 'debit',
+        amount: pkg.price,
+        balanceAfter: updatedUser.walletBalance,
+        status: 'success',
+        reason: 'long_term_subscription',
+        metadata: { packageId: pkg._id, subscriptionId: subscription._id },
+      });
+    } catch (txErr) {
+      console.error('[longTerm.subscribe] WalletTransaction record failed:', txErr.message);
+    }
+
+    return { subscription };
+  } else {
+    // ── Pay via PayOS (Insufficient wallet balance) ──
+    const payosService = require('../payment/payos.service');
+    const Payment = require('../../models/finance/Payment');
+    const env = require('../../config/env');
+
+    const orderCode = payosService.generateOrderCode();
+    const returnUrl = `${env.clientUrl}/reservations?openHistory=true`;
+    const cancelUrl = `${env.clientUrl}/reservations`;
+
+    // Create subscription in 'pending' status
+    const subscription = await LongTermSubscription.create({
       user: userId,
       package: packageId,
       building: pkg.building,
@@ -114,39 +171,52 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
       slot: resolvedSlotId,
       startDate: resolvedStart,
       endDate,
-      status: 'active',
+      status: 'pending',
     });
 
-    // Reserve the slot if one was assigned
+    // Reserve the slot to hold it during payment
     if (resolvedSlotId) {
       await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'reserved' });
     }
-  } catch (err) {
-    // Rollback wallet debit on failure
-    await User.findByIdAndUpdate(userId, { $inc: { walletBalance: pkg.price } });
-    // Rollback slot status if it was changed
-    if (resolvedSlotId) {
-      await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'available' });
+
+    let checkoutUrl, paymentLinkId;
+    try {
+      const payosResponse = await payosService.createPaymentLink({
+        orderCode,
+        amount: pkg.price,
+        description: `Thanh toan goi ${pkg.code}`.slice(0, 25),
+        buyerName: user.fullName,
+        buyerEmail: user.email,
+        returnUrl,
+        cancelUrl,
+      });
+      checkoutUrl = payosResponse.checkoutUrl;
+      paymentLinkId = payosResponse.paymentLinkId;
+    } catch (err) {
+      // Rollback subscription creation & slot reservation
+      await LongTermSubscription.findByIdAndDelete(subscription._id);
+      if (resolvedSlotId) {
+        await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'available' });
+      }
+      throw new AppError(`Không thể tạo liên kết thanh toán PayOS: ${err.message}`, 500);
     }
-    throw err;
-  }
 
-  // ── Wallet transaction record ────────────────────────────────────────────
-  try {
-    await WalletTransaction.create({
+    // Persist pending Payment
+    await Payment.create({
       user: userId,
-      type: 'debit',
+      building: pkg.building,
+      type: 'subscription',
+      method: 'payos',
       amount: pkg.price,
-      balanceAfter: updatedUser.walletBalance,
-      status: 'success',
-      reason: 'long_term_subscription',
-      metadata: { packageId: pkg._id, subscriptionId: subscription._id },
+      status: 'pending',
+      subscription: subscription._id,
+      payosOrderCode: orderCode,
+      payosPaymentLinkId: paymentLinkId,
+      note: `Đăng ký gói dài hạn ${pkg.name} qua PayOS`,
     });
-  } catch (txErr) {
-    console.error('[longTerm.subscribe] WalletTransaction record failed:', txErr.message);
-  }
 
-  return subscription;
+    return { subscription, checkoutUrl };
+  }
 };
 
 /**
