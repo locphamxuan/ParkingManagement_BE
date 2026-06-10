@@ -47,7 +47,36 @@ const list = async (userId, query = {}) => {
     Reservation.countDocuments(filter),
   ]);
 
-  return { items: docs, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  // Query associated parking sessions for these reservations
+  const ParkingSession = require('../../models/operations/ParkingSession');
+  const reservationIds = docs.map((d) => d._id);
+  const sessions = await ParkingSession.find({ reservation: { $in: reservationIds } }).lean();
+
+  const sessionsMap = {};
+  sessions.forEach((s) => {
+    if (s.reservation) {
+      sessionsMap[s.reservation.toString()] = s;
+    }
+  });
+
+  const items = docs.map((d) => {
+    const session = sessionsMap[d._id.toString()] || null;
+    return {
+      ...d,
+      parkingSession: session
+        ? {
+            _id: session._id,
+            fee: session.fee,
+            status: session.status,
+            entryTime: session.entryTime,
+            exitTime: session.exitTime,
+            paymentStatus: session.paymentStatus,
+          }
+        : null,
+    };
+  });
+
+  return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
 const get = async (userId, id) => {
@@ -57,6 +86,20 @@ const get = async (userId, id) => {
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
     .lean();
   if (!reservation) throw new AppError('Reservation not found', 404);
+
+  const ParkingSession = require('../../models/operations/ParkingSession');
+  const session = await ParkingSession.findOne({ reservation: id }).lean();
+  reservation.parkingSession = session
+    ? {
+        _id: session._id,
+        fee: session.fee,
+        status: session.status,
+        entryTime: session.entryTime,
+        exitTime: session.exitTime,
+        paymentStatus: session.paymentStatus,
+      }
+    : null;
+
   return reservation;
 };
 
