@@ -38,6 +38,18 @@ const parkingSessionSchema = new mongoose.Schema(
       trim: true,
       default: null,
     },
+    // Snapshot of the license-plate camera (Camera 1) captured at check-in.
+    // Stored as a base64 data-URL so it can be rendered directly by the FE.
+    plateImage: {
+      type: String,
+      default: null,
+    },
+    // Snapshot of the QR / account camera (Camera 2) — the driver portrait
+    // captured at check-in for evidence / business logic.
+    portraitImage: {
+      type: String,
+      default: null,
+    },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

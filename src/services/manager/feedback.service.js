@@ -4,7 +4,7 @@ const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
 
-const FEEDBACK_STATUS = ["pending", "resolved"];
+const { FEEDBACK_STATUS } = Feedback;
 
 const list = async (user, buildingId, query = {}) => {
   ensureManagerOwnsBuilding(user, buildingId);
@@ -67,12 +67,19 @@ const respond = async (user, buildingId, id, payload = {}) => {
       } else if (update.staffReply) {
         update.status = "resolved";
       }
+      if (update.staffReply || update.status === "resolved") {
+        update.repliedBy = user._id;
+      }
 
       updated = await Feedback.findByIdAndUpdate(id, update, {
         new: true,
         runValidators: true,
         session: mongoSession,
-      }).populate("user", "fullName email phone");
+      })
+        .populate("user", "fullName email phone")
+        .populate("building", "name code address")
+        .populate("parkingSession", "plateNumber entryTime exitTime fee status")
+        .populate("repliedBy", "fullName email role");
     });
 
     await writeAuditLog({

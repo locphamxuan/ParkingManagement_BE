@@ -20,6 +20,7 @@ const listMyShifts = async (user, query = {}) => {
   return StaffShift.find(filter)
     .populate('shift', 'code name startTime endTime')
     .populate('building', 'name code')
+    .populate('gate', 'code name direction status')
     .sort({ workDate: -1 });
 };
 

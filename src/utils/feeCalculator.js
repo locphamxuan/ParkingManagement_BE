@@ -2,7 +2,7 @@
  * feeCalculator.js
  * Tính phí gửi xe với split-time pricing: tách khoảng thời gian thành peak / regular.
  * Ví dụ: 06:00–10:00 với peak 07:00–09:00 → 60 phút thường + 120 phút cao điểm + 60 phút thường.
- * Priority override: holiday > peak > regular
+ * Ưu tiên: peak > regular.
  * Floor-level pricePolicy override toàn bộ building-level policy (1 mức giá duy nhất).
  */
 
@@ -15,20 +15,6 @@ const Floor = require('../models/building/Floor');
 function parseHHMM(str) {
   const [h, m] = (str || '00:00').split(':').map(Number);
   return (h || 0) * 60 + (m || 0);
-}
-
-/**
- * Kiểm tra 1 ngày có nằm trong holidayDates không (so sánh YYYY-MM-DD local date)
- */
-function isHoliday(date, holidayDates = []) {
-  if (!holidayDates || holidayDates.length === 0) return false;
-  const d = new Date(date);
-  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return holidayDates.some((hd) => {
-    const hDate = new Date(hd);
-    const hKey = `${hDate.getFullYear()}-${String(hDate.getMonth() + 1).padStart(2, '0')}-${String(hDate.getDate()).padStart(2, '0')}`;
-    return key === hKey;
-  });
 }
 
 /**
@@ -127,10 +113,7 @@ async function calculateParkingFee(buildingId, vehicleTypeId, floorId, entryTime
     const floor = await Floor.findById(floorId).populate('pricePolicy');
     if (floor?.pricePolicy?.isActive) {
       const fp = floor.pricePolicy;
-      let fee = (fp.hourlyRate / 60) * totalMinutes;
-      if (fp.minRate && fee < fp.minRate) fee = fp.minRate;
-      if (fp.dailyCap && fee > fp.dailyCap) fee = fp.dailyCap;
-      return Math.ceil(fee);
+      return Math.ceil((fp.hourlyRate / 60) * totalMinutes);
     }
   }
 
@@ -144,21 +127,11 @@ async function calculateParkingFee(buildingId, vehicleTypeId, floorId, entryTime
 
   if (policies.length === 0) return 0;
 
-  // Phân loại
+  // Phân loại: chỉ còn giờ thường (regular) + cao điểm (peak).
   const regularPolicy = policies.find((p) => p.type === 'regular') || null;
   const peakPolicies = policies.filter((p) => p.type === 'peak');
-  const holidayPolicies = policies.filter((p) => p.type === 'holiday');
 
-  // ── 3. Holiday — áp dụng nếu ngày bắt đầu là ngày lễ ──────────────────────
-  const holidayPolicy = holidayPolicies.find((p) => isHoliday(entry, p.holidayDates));
-  if (holidayPolicy) {
-    let fee = (holidayPolicy.hourlyRate / 60) * totalMinutes;
-    if (holidayPolicy.minRate && fee < holidayPolicy.minRate) fee = holidayPolicy.minRate;
-    if (holidayPolicy.dailyCap && fee > holidayPolicy.dailyCap) fee = holidayPolicy.dailyCap;
-    return Math.ceil(fee);
-  }
-
-  // ── 4. Split-time: tách khoảng thời gian thành peak / regular ──────────────
+  // ── Split-time: tách khoảng thời gian thành peak / regular ─────────────────
   let totalPeakMinutes = 0;
   let effectivePeakPolicy = null;
 
@@ -192,12 +165,7 @@ async function calculateParkingFee(buildingId, vehicleTypeId, floorId, entryTime
     fee += ratePerMin * regularMinutes;
   }
 
-  // ── 6. Áp minRate và dailyCap từ regular policy (nếu có) ───────────────────
-  const capPolicy = regularPolicy || effectivePeakPolicy;
-  if (capPolicy?.minRate && fee < capPolicy.minRate) fee = capPolicy.minRate;
-  if (capPolicy?.dailyCap && fee > capPolicy.dailyCap) fee = capPolicy.dailyCap;
-
   return Math.ceil(fee);
 }
 
-module.exports = { calculateParkingFee, calculateTotalPeakMinutes, isHoliday };
+module.exports = { calculateParkingFee, calculateTotalPeakMinutes };

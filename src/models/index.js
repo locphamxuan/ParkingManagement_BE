@@ -22,7 +22,6 @@ module.exports = {
   Shift,
   StaffShift,
   ShiftRevenue,
-  Feedback,
   AuditLog,
   Incident,
   Notification,

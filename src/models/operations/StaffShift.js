@@ -21,6 +21,12 @@ const staffShiftSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // Cổng được manager phân công cho nhân viên trong ca này (ra / vào).
+    gate: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Gate",
+      default: null,
+    },
     workDate: {
       type: Date,
       required: [true, "workDate is required"],

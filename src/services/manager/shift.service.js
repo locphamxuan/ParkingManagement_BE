@@ -2,6 +2,7 @@
 const StaffShift = require("../../models/operations/StaffShift");
 const ShiftRevenue = require("../../models/finance/ShiftRevenue");
 const BuildingManager = require("../../models/building/BuildingManager");
+const Gate = require("../../models/building/Gate");
 const User = require("../../models/user/User");
 const AppError = require("../../utils/AppError");
 const { ROLES } = require("../../constants/roles");
@@ -84,6 +85,16 @@ const removeShift = async (user, buildingId, id) => {
   return { id };
 };
 
+// Validate (when provided) that the gate belongs to the manager's building.
+// Empty string / null clears the assignment.
+const resolveGate = async (buildingId, gateId) => {
+  if (gateId === undefined) return undefined;
+  if (gateId === null || gateId === "") return null;
+  const gate = await Gate.findOne({ _id: gateId, building: buildingId });
+  if (!gate) throw new AppError("Gate not found in this building", 404);
+  return gate._id;
+};
+
 const listStaffShifts = async (user, buildingId, query = {}) => {
   ensureManagerOwnsBuilding(user, buildingId);
   const filter = { building: buildingId };
@@ -96,10 +107,19 @@ const listStaffShifts = async (user, buildingId, query = {}) => {
   if (query.staff) filter.staff = query.staff;
   if (query.status) filter.status = query.status;
 
-  return StaffShift.find(filter)
+  const items = await StaffShift.find(filter)
     .populate("staff", "fullName email phone role")
     .populate("shift", "code name startTime endTime")
+    .populate("gate", "code name direction status")
     .sort({ workDate: -1, "shift.startTime": 1 });
+
+  // Defensive: skip rows whose staff/shift was deleted (orphaned references) so
+  // the manager "Gán ca" page never breaks on stale data. Clean them up lazily.
+  const orphanIds = items.filter((s) => !s.staff || !s.shift).map((s) => s._id);
+  if (orphanIds.length) {
+    await StaffShift.deleteMany({ _id: { $in: orphanIds } });
+  }
+  return items.filter((s) => s.staff && s.shift);
 };
 
 const assignStaffShift = async (user, buildingId, payload) => {
@@ -116,10 +136,13 @@ const assignStaffShift = async (user, buildingId, payload) => {
     throw new AppError("Selected user must have role staff", 400);
   }
 
+  const gate = await resolveGate(buildingId, payload.gate);
+
   const created = await StaffShift.create({
     building: buildingId,
     shift: payload.shift,
     staff: payload.staff,
+    gate: gate ?? null,
     workDate: new Date(payload.workDate),
     status: payload.status || "scheduled",
     note: payload.note || "",
@@ -146,6 +169,7 @@ const updateStaffShift = async (user, buildingId, id, payload) => {
   if (payload.note !== undefined) update.note = payload.note;
   if (payload.shift !== undefined) update.shift = payload.shift;
   if (payload.staff !== undefined) update.staff = payload.staff;
+  if (payload.gate !== undefined) update.gate = await resolveGate(buildingId, payload.gate);
 
   const updated = await StaffShift.findByIdAndUpdate(id, update, {
     new: true,

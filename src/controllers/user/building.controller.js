@@ -41,10 +41,16 @@ const listFloorsWithAvailability = asyncHandler(async (req, res) => {
 
   const { vehicleTypeId } = req.query;
 
-  // Lấy tầng active, filter theo loại xe nếu có
+  // Lấy tầng active, filter theo loại xe nếu có.
+  // allowedVehicleTypes rỗng/không cấu hình ⇒ tầng nhận MỌI loại xe (không giới hạn),
+  // nên vẫn phải bao gồm các tầng này — nếu không, building có tầng vẫn ra rỗng.
   const floorFilter = { building: building._id, status: 'active' };
   if (vehicleTypeId && mongoose.isValidObjectId(vehicleTypeId)) {
-    floorFilter.allowedVehicleTypes = vehicleTypeId;
+    floorFilter.$or = [
+      { allowedVehicleTypes: vehicleTypeId },
+      { allowedVehicleTypes: { $size: 0 } },
+      { allowedVehicleTypes: { $exists: false } },
+    ];
   }
 
   const floors = await Floor.find(floorFilter)
@@ -93,15 +99,37 @@ const listSlotsForFloor = asyncHandler(async (req, res) => {
   const { floorId } = req.params;
   if (!mongoose.isValidObjectId(floorId)) throw new AppError('Invalid floorId', 400);
 
-  const floor = await Floor.findOne({ _id: floorId, building: building._id });
+  const floor = await Floor.findOne({ _id: floorId, building: building._id })
+    .populate('allowedVehicleTypes', 'name code');
   if (!floor) throw new AppError('Floor not found', 404);
 
-  const slots = await ParkingSlot.find({ floor: floorId, building: building._id })
-    .select('_id code status vehicleType reservable')
-    .populate('vehicleType', 'name code')
+  // Lọc theo floor là đủ (floor đã thuộc building). KHÔNG thêm điều kiện building
+  // vào slot — nếu trường building của slot bị lệch dữ liệu, danh sách sẽ rỗng dù
+  // tầng vẫn đếm ra số ô (aggregate đếm theo floor). Đây là nguyên nhân "ô không hiện".
+  const slots = await ParkingSlot.find({ floor: floorId })
+    .select('_id code status reservable')
     .sort('code');
 
-  sendSuccess(res, { data: { floor: { _id: floor._id, name: floor.name, code: floor.code }, slots } });
+  // Loại xe của Ô ĐỖ được suy ra từ TẦNG (manager set loại xe ở tầng, không set ở ô).
+  //  - tầng cho phép đúng 1 loại  → ô nhận loại đó
+  //  - tầng cho phép nhiều loại    → ô nhận mọi loại (null)
+  const floorVTs = floor.allowedVehicleTypes || [];
+  const slotVehicleType =
+    floorVTs.length === 1
+      ? { _id: floorVTs[0]._id, name: floorVTs[0].name, code: floorVTs[0].code }
+      : null;
+
+  const slotsOut = slots.map((s) => ({
+    _id: s._id,
+    code: s.code,
+    status: s.status,
+    reservable: s.reservable,
+    vehicleType: slotVehicleType,
+  }));
+
+  sendSuccess(res, {
+    data: { floor: { _id: floor._id, name: floor.name, code: floor.code }, slots: slotsOut },
+  });
 });
 
 /**
@@ -109,8 +137,9 @@ const listSlotsForFloor = asyncHandler(async (req, res) => {
  * Returns all active buildings for the reservation wizard.
  */
 const listBuildings = asyncHandler(async (req, res) => {
+  // operatingHours + status cho phép FE hiển thị "đang mở / đang đóng cửa".
   const buildings = await Building.find({ status: 'active' })
-    .select('_id code name address')
+    .select('_id code name address operatingHours status')
     .sort('name');
   sendSuccess(res, { data: { items: buildings } });
 });

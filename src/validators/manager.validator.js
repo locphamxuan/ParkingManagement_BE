@@ -90,6 +90,11 @@ const validateReservationPolicy = wrap((req) => {
     (req.body.refundPercent < 0 || req.body.refundPercent > 100)
   )
     throw new AppError("refundPercent must be 0..100", 400);
+  if (
+    req.body.depositPercent !== undefined &&
+    (req.body.depositPercent < 0 || req.body.depositPercent > 100)
+  )
+    throw new AppError("depositPercent must be 0..100", 400);
 });
 
 const validateShift = wrap((req) => {
@@ -102,13 +107,17 @@ const validateStaffShift = wrap((req) => {
     requireFields(req.body, ["shift", "staff", "workDate"]);
 });
 
-const FEEDBACK_STATUS = ["pending", "resolved"];
+const { FEEDBACK_STATUS } = require("../models/operations/Feedback");
 
 const validateFeedbackResponse = wrap((req) => {
   if (req.body.response !== undefined && !isNonEmptyString(req.body.response))
     throw new AppError("response cannot be empty", 400);
+  if (req.body.response !== undefined && req.body.response.trim().length > 1000)
+    throw new AppError("response cannot exceed 1000 characters", 400);
   if (req.body.staffReply !== undefined && !isNonEmptyString(req.body.staffReply))
     throw new AppError("staffReply cannot be empty", 400);
+  if (req.body.staffReply !== undefined && req.body.staffReply.trim().length > 1000)
+    throw new AppError("staffReply cannot exceed 1000 characters", 400);
   if (
     req.body.status !== undefined &&
     !FEEDBACK_STATUS.includes(req.body.status)

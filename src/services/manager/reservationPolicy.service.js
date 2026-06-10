@@ -5,6 +5,7 @@ const { writeAuditLog } = require("../../utils/audit");
 const DEFAULT_POLICY = {
   maxHoldMinutes: 30,
   refundPercent: 80,
+  depositPercent: 15,
   isActive: true,
 };
 
@@ -25,7 +26,7 @@ const upsert = async (user, buildingId, payload) => {
   const current = await ReservationPolicy.findOne({ building: buildingId });
 
   const update = {};
-  ["maxHoldMinutes", "refundPercent"].forEach((k) => {
+  ["maxHoldMinutes", "refundPercent", "depositPercent"].forEach((k) => {
     if (payload[k] !== undefined) update[k] = Number(payload[k]);
   });
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
