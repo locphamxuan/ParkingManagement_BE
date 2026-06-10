@@ -11,6 +11,7 @@ const pricingController = require("../../controllers/manager/pricing.controller"
 const packageController = require("../../controllers/manager/package.controller");
 const reservationPolicyController = require("../../controllers/manager/reservationPolicy.controller");
 const shiftController = require("../../controllers/manager/shift.controller");
+const feedbackController = require("../../controllers/manager/feedback.controller");
 const dashboardController = require("../../controllers/manager/dashboard.controller");
 const buildingWalletController = require("../../controllers/manager/buildingWallet.controller");
 const buildingController = require("../../controllers/manager/building.controller");
@@ -135,5 +136,12 @@ router
   .delete(shiftController.removeStaffShift);
 router.get("/staff", shiftController.listAvailableStaff);
 router.get("/shift-revenues", shiftController.listShiftRevenues);
+
+router.get("/feedbacks", feedbackController.list);
+router.patch(
+  "/feedbacks/:id",
+  v.validateFeedbackResponse,
+  feedbackController.respond
+);
 
 module.exports = router;
