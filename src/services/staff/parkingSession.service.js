@@ -18,6 +18,7 @@ const buildingWalletService = require('../manager/buildingWallet.service');
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../utils/plate.util');
 const { calculateParkingFee } = require('../../utils/feeCalculator');
 const visionScanService = require('./visionScan.service');
+const { releaseSubscriptionSlot } = require('../user/longTerm.service');
 
 // Fallback hourly rate (VND) by vehicle kind, used when no PricePolicy is configured.
 const DEFAULT_HOURLY_RATE = { car: 20000, motorcycle: 5000 };
@@ -68,6 +69,8 @@ const resolveLongTermSubscription = async (plateNumber, allowedBuildings) => {
       { _id: subscription._id },
       { $set: { status: 'expired' } },
     );
+    // Release dedicated slot when subscription expires
+    await releaseSubscriptionSlot(subscription);
     return null;
   }
 
@@ -162,6 +165,7 @@ const checkIn = async (user, payload) => {
             vehicleType,
             vehicleBrand,
             entryGate: gate,
+            slot: longTerm.slot || null,
             note: `long_term:${longTerm._id}`,
           }],
           { session },
