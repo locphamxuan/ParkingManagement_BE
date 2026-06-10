@@ -110,6 +110,12 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
     throw new AppError('Start time is too far in the past, please select a valid time.', 400);
   }
 
+  // ── Enforce 7-day maximum advance booking window ──────────────────────────
+  const maxAllowedStart = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  if (start > maxAllowedStart) {
+    throw new AppError('Chỉ được phép đặt trước chỗ đỗ theo giờ tối đa 7 ngày', 400);
+  }
+
   // ── 5. Validate & assign slot ──────────────────────────────────────────────
   let resolvedSlotId = null;
   if (slotId) {

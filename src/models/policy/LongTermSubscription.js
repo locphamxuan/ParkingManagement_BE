@@ -28,6 +28,11 @@ const longTermSubscriptionSchema = new mongoose.Schema(
       trim: true,
       maxlength: 20,
     },
+    slot: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ParkingSlot",
+      default: null,
+    },
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
     status: {
