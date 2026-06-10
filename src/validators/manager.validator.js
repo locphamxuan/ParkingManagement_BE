@@ -90,6 +90,11 @@ const validateReservationPolicy = wrap((req) => {
     (req.body.refundPercent < 0 || req.body.refundPercent > 100)
   )
     throw new AppError("refundPercent must be 0..100", 400);
+  if (
+    req.body.depositPercent !== undefined &&
+    (req.body.depositPercent < 0 || req.body.depositPercent > 100)
+  )
+    throw new AppError("depositPercent must be 0..100", 400);
 });
 
 const validateShift = wrap((req) => {
@@ -100,21 +105,6 @@ const validateShift = wrap((req) => {
 const validateStaffShift = wrap((req) => {
   if (req.method === "POST")
     requireFields(req.body, ["shift", "staff", "workDate"]);
-});
-
-const FEEDBACK_STATUS = ["open", "in_progress", "resolved", "closed"];
-
-const validateFeedbackResponse = wrap((req) => {
-  if (req.body.response !== undefined && !isNonEmptyString(req.body.response))
-    throw new AppError("response cannot be empty", 400);
-  if (
-    req.body.status !== undefined &&
-    !FEEDBACK_STATUS.includes(req.body.status)
-  )
-    throw new AppError(
-      `status must be one of: ${FEEDBACK_STATUS.join(", ")}`,
-      400
-    );
 });
 
 module.exports = {
@@ -128,5 +118,4 @@ module.exports = {
   validateReservationPolicy,
   validateShift,
   validateStaffShift,
-  validateFeedbackResponse,
 };

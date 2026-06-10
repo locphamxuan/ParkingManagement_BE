@@ -2,6 +2,7 @@ const asyncHandler = require('../../utils/asyncHandler');
 const { sendSuccess } = require('../../utils/response');
 const service = require('../../services/user/reservation.service');
 const calculateReservationFee = require('../../utils/calculateReservationFee');
+const ReservationPolicy = require('../../models/policy/ReservationPolicy');
 const AppError = require('../../utils/AppError');
 
 const list = asyncHandler(async (req, res) => {
@@ -21,10 +22,10 @@ const create = asyncHandler(async (req, res) => {
 });
 
 const cancel = asyncHandler(async (req, res) => {
-  const { reservation, refund, amountPaid } = await service.cancel(req.user._id, req.params.id);
+  const { reservation, refund, amountPaid, refundPercent } = await service.cancel(req.user._id, req.params.id);
   sendSuccess(res, {
-    message: 'Reservation cancelled. Deposit is non-refundable.',
-    data: { reservation, refund, amountPaid },
+    message: `Đã hủy đặt chỗ. Hoàn ${refundPercent ?? 0}% tiền cọc.`,
+    data: { reservation, refund, amountPaid, refundPercent: refundPercent ?? 0 },
   });
 });
 
@@ -34,12 +35,26 @@ const estimate = asyncHandler(async (req, res) => {
   if (!buildingId || !vehicleTypeId || !startTime || !endTime) {
     throw new AppError('buildingId, vehicleTypeId, startTime, endTime are required', 400);
   }
+  const startDate = new Date(startTime);
+  const endDate = new Date(endTime);
+  if (endDate <= startDate) {
+    throw new AppError('endTime must be after startTime', 400);
+  }
+  // Chỉ cho phép ước tính theo giờ nguyên (1, 2, 3... giờ).
+  service.assertWholeHourDuration(startDate, endDate);
   const { estimatedFee, hourlyRate, hours, regularHours, peakHours, peakRate } =
-    await calculateReservationFee(buildingId, vehicleTypeId, new Date(startTime), new Date(endTime));
-  const depositAmount = Math.ceil(estimatedFee * 0.15);
+    await calculateReservationFee(buildingId, vehicleTypeId, startDate, endDate);
+  // % cọc theo chính sách của tòa nhà (mặc định 15%). Phần còn lại thu sau checkout.
+  const policy = await ReservationPolicy.findOne({ building: buildingId });
+  const depositPercent = Math.min(Math.max(Number(policy?.depositPercent ?? 15), 0), 100);
+  const depositAmount = Math.ceil((estimatedFee * depositPercent) / 100);
   sendSuccess(res, {
     data: {
-      estimatedFee, depositAmount, remainingFee: estimatedFee - depositAmount,
+      estimatedFee,
+      depositAmount,
+      remainingFee: estimatedFee - depositAmount,
+      depositPercent,
+      remainingPercent: 100 - depositPercent,
       hourlyRate, hours, regularHours, peakHours, peakRate,
     },
   });

@@ -128,6 +128,11 @@ const checkIn = async (user, payload) => {
       const vehicleBrand = payload?.vehicleBrand
         ? `${payload.vehicleBrand}`.trim()
         : null;
+      // Camera snapshots saved for business-logic/evidence:
+      //  - plateImage    : license-plate camera (Camera 1)
+      //  - portraitImage : QR / account camera (Camera 2 — driver portrait)
+      const plateImage = payload?.plateImage || null;
+      const portraitImage = payload?.portraitImage || null;
 
       if (!buildingId) {
         throw new AppError('building is required', 400);
@@ -164,6 +169,8 @@ const checkIn = async (user, payload) => {
             paymentMethod: 'long_term',
             vehicleType,
             vehicleBrand,
+            plateImage,
+            portraitImage,
             entryGate: gate,
             slot: longTerm.slot || null,
             note: `long_term:${longTerm._id}`,
@@ -219,6 +226,8 @@ const checkIn = async (user, payload) => {
           slot: slotId,
           vehicleType,
           vehicleBrand,
+          plateImage,
+          portraitImage,
           entryGate: gate,
           note: reservation
             ? 'reservation_check_in'
@@ -293,7 +302,9 @@ const checkOut = async (user, sessionId, payload = {}) => {
       let walletUserId = null;
 
       if (isReservationCheckout) {
-        // Charge the remaining 85% from the user's wallet (deposit 15% was already charged at booking).
+        // Thu phần CÒN LẠI từ ví khách = tổng phí đã ghi khi đặt − tiền cọc đã thu.
+        // (cọc = depositPercent% do manager set; còn lại = 100 − depositPercent%).
+        // Đặt bao nhiêu tiếng thu đủ bấy nhiêu — checkout sớm vẫn thu đủ tiền đã đặt.
         const estimatedFee = Number(linkedReservation.estimatedFee || 0);
         const deposit = Number(linkedReservation.fee || 0);
         fee = Math.max(0, estimatedFee - deposit);
@@ -465,10 +476,11 @@ const listActive = async (user, query = {}) => {
 
   const sessions = await ParkingSession.find({ ...buildingFilter, status: 'active' })
     .sort({ entryTime: -1 })
-    .populate('entryGate', 'code name')
-    .populate('exitGate', 'code name')
+    .populate('entryGate', 'code name direction')
+    .populate('exitGate', 'code name direction')
     .populate('vehicleType', 'name code')
     .populate('user', 'fullName email')
+    .populate('staff', 'fullName email')
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } });
 
   // Attach the current fee (per manager's PricePolicy, fallback by kind) + member flag

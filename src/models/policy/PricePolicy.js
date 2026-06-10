@@ -24,21 +24,16 @@ const pricePolicySchema = new mongoose.Schema(
       required: [true, "hourlyRate is required"],
       min: 0,
     },
-    dailyCap: { type: Number, default: null, min: 0 },
-    minRate: { type: Number, default: 0, min: 0 },
-    maxRate: { type: Number, default: null, min: 0 },
-    // Loại giá: regular = giờ thường, peak = giờ cao điểm, holiday = ngày lễ
+    // Loại giá: regular = giờ thường, peak = giờ cao điểm.
     type: {
       type: String,
-      enum: ['regular', 'peak', 'holiday'],
+      enum: ['regular', 'peak'],
       default: 'regular',
     },
     timeWindow: {
       from: { type: String, default: "00:00" }, // Dùng cho peak: giờ bắt đầu cao điểm
       to: { type: String, default: "23:59" },   // Dùng cho peak: giờ kết thúc cao điểm
     },
-    // Chỉ dùng khi type='holiday': danh sách ngày lễ áp dụng (YYYY-MM-DD)
-    holidayDates: [{ type: Date }],
     effectiveFrom: { type: Date, default: () => new Date() },
     effectiveTo: { type: Date, default: null },
     isActive: { type: Boolean, default: true },

@@ -26,11 +26,12 @@ const create = async (user, buildingId, payload) => {
   if (!payload.floor) throw new AppError("floor is required", 400);
   await ensureFloorBelongsToBuilding(payload.floor, buildingId);
 
+  // Loại xe được set ở TẦNG (allowedVehicleTypes), không set ở ô đỗ nữa.
   const created = await ParkingSlot.create({
     building: buildingId,
     floor: payload.floor,
     code: String(payload.code || "").trim().toUpperCase(),
-    vehicleType: payload.vehicleType || null,
+    vehicleType: null,
     status: payload.status || "available",
     reservable: payload.reservable !== false,
     note: payload.note || "",
@@ -57,8 +58,7 @@ const update = async (user, buildingId, id, payload) => {
   const update = {};
   if (payload.code !== undefined)
     update.code = String(payload.code).trim().toUpperCase();
-  if (payload.vehicleType !== undefined)
-    update.vehicleType = payload.vehicleType || null;
+  // Loại xe do TẦNG quyết định — không cập nhật vehicleType ở ô đỗ.
   if (payload.status !== undefined) update.status = payload.status;
   if (payload.reservable !== undefined) update.reservable = !!payload.reservable;
   if (payload.note !== undefined) update.note = payload.note;

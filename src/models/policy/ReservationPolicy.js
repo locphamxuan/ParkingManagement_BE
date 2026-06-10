@@ -25,6 +25,14 @@ const reservationPolicySchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+    // % tổng phí ước tính được thu làm tiền CỌC khi đặt chỗ. Phần còn lại
+    // (100 - depositPercent) hệ thống tự thu sau khi checkout.
+    depositPercent: {
+      type: Number,
+      default: 15,
+      min: 0,
+      max: 100,
+    },
     // minAdvanceMinutes và maxAdvanceHours đã bỏ —
     // khách tự chọn thời gian bất kỳ, hệ thống tính phí tự động.
     isActive: { type: Boolean, default: true },

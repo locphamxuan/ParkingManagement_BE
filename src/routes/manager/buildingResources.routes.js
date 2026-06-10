@@ -11,9 +11,9 @@ const pricingController = require("../../controllers/manager/pricing.controller"
 const packageController = require("../../controllers/manager/package.controller");
 const reservationPolicyController = require("../../controllers/manager/reservationPolicy.controller");
 const shiftController = require("../../controllers/manager/shift.controller");
-const feedbackController = require("../../controllers/manager/feedback.controller");
 const dashboardController = require("../../controllers/manager/dashboard.controller");
 const buildingWalletController = require("../../controllers/manager/buildingWallet.controller");
+const buildingController = require("../../controllers/manager/building.controller");
 
 const v = require("../../validators/manager.validator");
 const { requireActiveSubscription } = require("../../middlewares/subscription.middleware");
@@ -35,6 +35,9 @@ router.post("/wallet/subscribe", buildingWalletController.subscribe);
 router.get("/wallet/subscription-packages", buildingWalletController.listSubscriptionPackages);
 // Subscription status — drives the FE dashboard gate.
 router.get("/subscription", buildingWalletController.getSubscriptionStatus);
+
+// Giờ mở/đóng cửa của tòa nhà — tab riêng, không bị khóa bởi subscription gate.
+router.put("/operating-hours", buildingController.updateOperatingHours);
 // PayOS top-up for building wallet
 router.post("/wallet/topup", buildingWalletController.initiateTopup);
 router.get("/wallet/topup/:orderCode/verify", buildingWalletController.verifyTopup);
@@ -64,8 +67,15 @@ router
   .put(v.validateFloor, floorController.update)
   .delete(floorController.remove);
 
-// Cổng ra/vào là hạ tầng cố định của tòa nhà — manager chỉ xem + đổi trạng thái.
-router.get("/gates", gateController.list);
+// Manager CRUD cổng và tự đặt thể loại (ra / vào / hai chiều).
+router
+  .route("/gates")
+  .get(gateController.list)
+  .post(v.validateGate, gateController.create);
+router
+  .route("/gates/:id")
+  .put(v.validateGate, gateController.update)
+  .delete(gateController.remove);
 router.patch("/gates/:id/status", gateController.updateStatus);
 
 router
@@ -125,12 +135,5 @@ router
   .delete(shiftController.removeStaffShift);
 router.get("/staff", shiftController.listAvailableStaff);
 router.get("/shift-revenues", shiftController.listShiftRevenues);
-
-router.get("/feedbacks", feedbackController.list);
-router.patch(
-  "/feedbacks/:id",
-  v.validateFeedbackResponse,
-  feedbackController.respond
-);
 
 module.exports = router;

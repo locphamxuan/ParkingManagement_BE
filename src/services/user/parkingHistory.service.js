@@ -1,7 +1,9 @@
 const ParkingSession = require('../../models/operations/ParkingSession');
 
 const list = async (userId, query = {}) => {
-  const filter = { user: userId };
+  // Trang "Lịch sử gửi xe" chỉ hiển thị phiên gửi xe TRỰC TIẾP (không qua đặt chỗ).
+  // Phiên gắn với reservation được thể hiện ở trang "Lịch sử đặt chỗ".
+  const filter = { user: userId, reservation: null };
   if (query.buildingId) filter.building = query.buildingId;
 
   const page = Math.max(Number(query.page) || 1, 1);

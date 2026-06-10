@@ -1,5 +1,7 @@
 ﻿const User = require("../../models/user/User");
 const BuildingManager = require("../../models/building/BuildingManager");
+const StaffShift = require("../../models/operations/StaffShift");
+const ParkingSession = require("../../models/operations/ParkingSession");
 const AppError = require("../../utils/AppError");
 const { ROLES, ROLE_LIST } = require("../../constants/roles");
 const { writeAuditLog } = require("../../utils/audit");
@@ -189,6 +191,16 @@ const remove = async (actor, id, { force = false } = {}) => {
       }
     }
   }
+
+  // Cascade-clean operational references so we never leave orphaned documents
+  // pointing at a deleted user (which would break the manager "Gán ca" page):
+  //  - StaffShift: the user can no longer be on any shift → remove the rows.
+  //  - ParkingSession: keep historical records, just detach the staff ref.
+  //  - BuildingManager: drop any leftover mappings (active ones revoked above).
+  await StaffShift.deleteMany({ staff: id });
+  await ParkingSession.updateMany({ staff: id }, { $set: { staff: null } });
+  await BuildingManager.deleteMany({ user: id });
+
   await User.deleteOne({ _id: id });
   await writeAuditLog({
     actor,

@@ -4,7 +4,6 @@ const Payment = require("../../models/finance/Payment");
 const Floor = require("../../models/building/Floor");
 const Gate = require("../../models/building/Gate");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
-const Feedback = require("../../models/log/Feedback");
 const ShiftRevenue = require("../../models/finance/ShiftRevenue");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 
@@ -32,7 +31,6 @@ const getOverview = async (user, buildingId) => {
     todaySessions,
     revenueAgg,
     activeSubscriptions,
-    openFeedbacks,
     weeklyRevenue,
   ] = await Promise.all([
     ParkingSlot.aggregate([
@@ -68,10 +66,6 @@ const getOverview = async (user, buildingId) => {
     LongTermSubscription.countDocuments({
       building: buildingId,
       status: "active",
-    }),
-    Feedback.countDocuments({
-      building: buildingId,
-      status: { $in: ["open", "in_progress"] },
     }),
     ShiftRevenue.aggregate([
       {
@@ -124,7 +118,6 @@ const getOverview = async (user, buildingId) => {
       today: todaySessions,
     },
     subscriptions: { active: activeSubscriptions },
-    feedbacks: { pending: openFeedbacks },
     revenue: {
       today: todayRevenueTotal,
       byMethod: revenueByMethod,
