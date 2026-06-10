@@ -9,6 +9,7 @@ const router = express.Router();
 router.use("/admin", adminRoutes);
 router.use("/manager", managerRoutes);
 router.use("/staff", staffRoutes);
+router.use("/user", userRoutes);
 router.use("/users", userRoutes);
 
 // NOTE: /payments/webhook is registered in app.js (PayOS uses JSON body, no raw-body constraint).

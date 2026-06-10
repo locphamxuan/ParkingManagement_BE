@@ -102,11 +102,13 @@ const validateStaffShift = wrap((req) => {
     requireFields(req.body, ["shift", "staff", "workDate"]);
 });
 
-const FEEDBACK_STATUS = ["open", "in_progress", "resolved", "closed"];
+const FEEDBACK_STATUS = ["pending", "resolved"];
 
 const validateFeedbackResponse = wrap((req) => {
   if (req.body.response !== undefined && !isNonEmptyString(req.body.response))
     throw new AppError("response cannot be empty", 400);
+  if (req.body.staffReply !== undefined && !isNonEmptyString(req.body.staffReply))
+    throw new AppError("staffReply cannot be empty", 400);
   if (
     req.body.status !== undefined &&
     !FEEDBACK_STATUS.includes(req.body.status)

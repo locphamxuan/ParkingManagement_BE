@@ -71,7 +71,7 @@ const getOverview = async (user, buildingId) => {
     }),
     Feedback.countDocuments({
       building: buildingId,
-      status: { $in: ["open", "in_progress"] },
+      status: "pending",
     }),
     ShiftRevenue.aggregate([
       {

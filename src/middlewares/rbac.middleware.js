@@ -13,37 +13,46 @@ const authorize =
     next();
   };
 
-const extractBuildingId = (req) =>
-  req.params.buildingId ||
-  req.params.id ||
-  req.query.buildingId ||
-  req.query.building ||
-  req.body.buildingId ||
-  req.body.building;
+// 🛠️ FIX TỬ HUYỆN: Kiểm tra an toàn sự tồn tại của req và req.body/query/params
+const extractBuildingId = (req) => {
+  if (!req) return null;
+  return (
+    req.params?.buildingId ||
+    req.params?.id ||
+    req.query?.buildingId ||
+    req.query?.building ||
+    req.body?.buildingId ||
+    req.body?.building
+  );
+};
 
 const authorizeBuildingAccess = (req, _res, next) => {
   if (!req.user) {
     return next(new AppError("Authentication required", 401));
   }
 
-  if (req.user.role === ROLES.ADMIN) {
+  // Nếu là ADMIN tối cao thì cho qua luôn, không cần check building
+  if (req.user.role === 'admin' || req.user.role === ROLES.ADMIN) {
     return next();
   }
 
   const buildingId = extractBuildingId(req);
+  
+  // 🎯 THẮT CHẶT: Nếu không truyền buildingId, ném lỗi 400 rõ ràng chứ không để crash sập app
   if (!buildingId) {
-    return next(new AppError("buildingId is required", 400));
+    return next(new AppError("Validation Failed: buildingId is required in params/query/body to verify access scope.", 400));
   }
 
   const assignedBuildings = Array.isArray(req.user.assignedBuildings)
     ? req.user.assignedBuildings
     : [];
+    
   const allowed = assignedBuildings.some(
     (building) => `${building._id || building}` === `${buildingId}`,
   );
 
   if (!allowed) {
-    return next(new AppError("Forbidden for this building", 403));
+    return next(new AppError("Forbidden: You do not have permission to manage this specific building.", 403));
   }
 
   next();

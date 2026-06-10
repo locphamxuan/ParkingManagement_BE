@@ -11,12 +11,17 @@ const parkingHistoryRoutes = require('./parkingHistory.routes');
 const walletRoutes = require('./wallet.routes');
 const longTermRoutes = require('./longTerm.routes');
 const notificationRoutes = require('./notification.routes');
+const feedbackRoutes = require('./feedback.routes');
 const buildingController = require('../../controllers/user/building.controller');
 const router = express.Router();
 
 router.use('/auth', authRoutes);
 
-router.use(authenticate, authorize(ROLES.USER));
+router.use(authenticate);
+
+router.use('/feedbacks', feedbackRoutes);
+
+router.use(authorize(ROLES.USER));
 
 router.use('/profile', profileRoutes);
 router.use('/license-plates', licensePlateRoutes);
