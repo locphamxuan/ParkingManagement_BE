@@ -32,6 +32,7 @@ docs/api-doc.md
 docs/api-doc-current.md
 docs/session-operations-test-report.md
 docs/staff-api-data-structures.md
+docs/reports/
 
 # Generated exports / reports
 postman/
@@ -45,3 +46,4 @@ Admin API Contract Draft....txt
 Requirements.docx.txt
 Scope + database.txt
 .claude/commands/opsx/pbms-be.md
+scratch_check.js

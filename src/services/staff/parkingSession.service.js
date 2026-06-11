@@ -91,13 +91,17 @@ const resolveReservation = async (plateNumber, allowedBuildings) => {
   }
 
   const now = Date.now();
-  const expiresAt = reservation.endTime ? new Date(reservation.endTime) : null;
-  const expired =
-    expiresAt && expiresAt.getTime() < now;
+  const expiresAt = reservation.startTime ? new Date(reservation.startTime).getTime() + 30 * 60 * 1000 : null;
+  const expired = expiresAt && expiresAt < now;
 
   if (expired) {
     reservation.status = 'expired';
     await reservation.save();
+    // Nếu có giữ ô đỗ, hãy chuyển trạng thái ô đỗ về 'available'
+    if (reservation.slot) {
+      const ParkingSlot = require('../../models/building/ParkingSlot');
+      await ParkingSlot.findByIdAndUpdate(reservation.slot, { status: 'available' });
+    }
     return null;
   }
 

@@ -6,7 +6,12 @@ const { ROLES } = require("../../constants/roles");
 
 const router = express.Router();
 
-router.use(authenticate, authorize(ROLES.STAFF));
+router.use(authenticate);
+
+const feedbackRoutes = require("./feedback.routes");
+router.use("/feedbacks", authorize(ROLES.STAFF, ROLES.MANAGER), feedbackRoutes);
+
+router.use(authorize(ROLES.STAFF));
 
 router.get("/dashboard", buildingAccessController.getDashboard);
 router.get("/buildings", buildingAccessController.listAssignedBuildings);

@@ -20,11 +20,10 @@ const processReservationCheckIn = async (staffUser, payload = {}) => {
       }
 
       assertBuildingScope(staffUser, reservation.building);
-
       const now = Date.now();
-      const endTime = reservation.endTime ? new Date(reservation.endTime).getTime() : null;
-      if (endTime && endTime < now) {
-        throw new AppError('Reservation expired', 409, 'RESERVATION_EXPIRED');
+      const expirationTime = reservation.startTime ? new Date(reservation.startTime).getTime() + 30 * 60 * 1000 : null;
+      if (expirationTime && expirationTime < now) {
+        throw new AppError('Reservation expired (past 30 mins after start time)', 409, 'RESERVATION_EXPIRED');
       }
 
       const slotId = reservation.slot?._id || reservation.slot || null;

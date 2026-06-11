@@ -40,6 +40,15 @@ const longTermSubscriptionSchema = new mongoose.Schema(
       enum: SUBSCRIPTION_STATUS,
       default: "active",
     },
+    cancelReason: {
+      type: String,
+      enum: ['change_slot', 'change_vehicle', 'no_longer_needed', 'pricing_issue', 'other'],
+      default: null,
+    },
+    cancelNote: {
+      type: String,
+      default: null,
+    },
   },
   { timestamps: true }
 );
