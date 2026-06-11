@@ -140,7 +140,51 @@ const updateManagerBuilding = async (user, buildingId, payload) => {
     throw new AppError("Can only update buildings with status=active", 403);
   }
 
-  return updateBuilding(buildingId, payload);
+  // Manager chỉ sửa các trường cơ bản. Giá do tab "Giá" (PricePolicy) quản lý;
+  // giờ hoạt động có tab riêng (updateManagerOperatingHours).
+  const ALLOWED_FIELDS = ["name", "totalFloors", "status"];
+  const safePayload = {};
+  for (const key of ALLOWED_FIELDS) {
+    if (payload[key] !== undefined) safePayload[key] = payload[key];
+  }
+
+  return updateBuilding(buildingId, safePayload);
+};
+
+// Validate "HH:MM" (24h) time strings used for operating hours.
+const isValidTime = (value) =>
+  typeof value === "string" && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value.trim());
+
+/**
+ * Manager cập nhật giờ mở/đóng cửa của tòa nhà (tab riêng "Giờ hoạt động").
+ */
+const updateManagerOperatingHours = async (user, buildingId, payload = {}) => {
+  if (!buildingId) {
+    throw new AppError("buildingId is required", 400);
+  }
+
+  const assignedBuildings = Array.isArray(user.assignedBuildings)
+    ? user.assignedBuildings
+    : [];
+  const assignedIds = assignedBuildings.map(
+    (building) => `${building._id || building}`,
+  );
+  if (!assignedIds.includes(`${buildingId}`)) {
+    throw new AppError("Forbidden for this building", 403);
+  }
+
+  await getBuildingOrFail(buildingId);
+
+  const open = `${payload.open || ""}`.trim();
+  const close = `${payload.close || ""}`.trim();
+  if (!isValidTime(open) || !isValidTime(close)) {
+    throw new AppError("open/close phải có định dạng HH:MM (24h)", 400);
+  }
+  if (open === close) {
+    throw new AppError("Giờ mở và giờ đóng không được trùng nhau", 400);
+  }
+
+  return updateBuilding(buildingId, { operatingHours: { open, close } });
 };
 
 module.exports = {
@@ -152,4 +196,5 @@ module.exports = {
   removeBuilding,
   getManagerBuilding,
   updateManagerBuilding,
+  updateManagerOperatingHours,
 };

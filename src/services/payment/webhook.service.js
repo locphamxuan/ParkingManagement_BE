@@ -66,6 +66,40 @@ const handleReservationFee = async (pendingPayment, amount, mongoSession) => {
 };
 
 /* ─────────────────────────────────────────────
+   Subscription payment handler (PayOS payment)
+   ───────────────────────────────────────────── */
+
+const handleSubscriptionPayment = async (pendingPayment, amount, mongoSession) => {
+  const LongTermSubscription = require('../../models/policy/LongTermSubscription');
+  const ParkingSlot = require('../../models/building/ParkingSlot');
+
+  const subscription = await LongTermSubscription.findById(pendingPayment.subscription).session(mongoSession);
+  if (!subscription) throw new AppError('Subscription not found', 404);
+
+  if (subscription.status === 'active') return; // already active
+
+  // Activate subscription
+  subscription.status = 'active';
+  await subscription.save({ session: mongoSession });
+
+  // Reserve slot if assigned
+  if (subscription.slot) {
+    await ParkingSlot.findByIdAndUpdate(
+      subscription.slot,
+      { status: 'reserved' },
+      { session: mongoSession }
+    );
+  }
+
+  // Mark payment success
+  await Payment.findByIdAndUpdate(
+    pendingPayment._id,
+    { status: 'success' },
+    { session: mongoSession },
+  );
+};
+
+/* ─────────────────────────────────────────────
    Main dispatcher
 ───────────────────────────────────────────── */
 
@@ -118,6 +152,8 @@ const handle = async (body) => {
     await mongoSession.withTransaction(async () => {
       if (pendingPayment.type === 'reservation') {
         await handleReservationFee(pendingPayment, amount, mongoSession);
+      } else if (pendingPayment.type === 'subscription') {
+        await handleSubscriptionPayment(pendingPayment, amount, mongoSession);
       }
     });
   } finally {

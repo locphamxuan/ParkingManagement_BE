@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Reservation = require('../../models/operations/Reservation');
 const Building = require('../../models/building/Building');
 const VehicleType = require('../../models/building/VehicleType');
+const Floor = require('../../models/building/Floor');
 const ParkingSlot = require('../../models/building/ParkingSlot');
 const ReservationPolicy = require('../../models/policy/ReservationPolicy');
 const User = require('../../models/user/User');
@@ -14,11 +15,24 @@ const calculateReservationFee = require('../../utils/calculateReservationFee');
 
 const CANCELLABLE_STATUSES = ['pending', 'confirmed'];
 
-// Deposit is non-refundable — building keeps 100% of deposit on cancellation.
-const REFUND_PERCENT = 0;
+// % hoàn tiền khi hủy do MANAGER cấu hình trong ReservationPolicy.refundPercent.
+// % cọc khi đặt chỗ do MANAGER cấu hình trong ReservationPolicy.depositPercent
+// (mỗi building riêng). Phần còn lại (100 - depositPercent) thu sau khi checkout.
 
-// Percentage of estimated fee charged as deposit at booking.
-const DEPOSIT_RATE = 0.15;
+// Đặt chỗ chỉ theo số giờ NGUYÊN (1, 2, 3... giờ) — không cho phép 1h30 hay 45 phút.
+// Dùng chung cho cả create và estimate để FE/BE thống nhất.
+const assertWholeHourDuration = (start, end) => {
+  const durationMs = end.getTime() - start.getTime();
+  const durationHours = durationMs / 3_600_000;
+  if (!Number.isInteger(durationHours) || durationHours < 1) {
+    throw new AppError(
+      'Thời lượng đặt chỗ phải là số giờ nguyên (1, 2, 3... giờ). Không hỗ trợ 30 hay 45 phút.',
+      400,
+      'INVALID_RESERVATION_DURATION',
+    );
+  }
+  return durationHours;
+};
 
 /** Resolve building by ObjectId OR code string. */
 async function resolveBuilding(buildingRef) {
@@ -47,7 +61,54 @@ const list = async (userId, query = {}) => {
     Reservation.countDocuments(filter),
   ]);
 
-  return { items: docs, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  // Gắn % hoàn tiền (theo chính sách của từng tòa nhà) + số tiền đã hoàn thực tế
+  // (với lượt đã hủy) để FE hiển thị đúng thay vì 0%.
+  const buildingIds = [...new Set(docs.map((d) => String(d.building?._id || d.building)))];
+  const policies = buildingIds.length
+    ? await ReservationPolicy.find({ building: { $in: buildingIds } }).select('building refundPercent').lean()
+    : [];
+  const refundPctByBuilding = new Map(policies.map((p) => [String(p.building), p.refundPercent ?? 0]));
+
+  const cancelledIds = docs.filter((d) => d.status === 'cancelled').map((d) => d._id);
+  const refundPayments = cancelledIds.length
+    ? await Payment.find({ reservation: { $in: cancelledIds }, type: 'refund', status: 'success' })
+        .select('reservation amount')
+        .lean()
+    : [];
+  const refundAmtByRes = new Map(refundPayments.map((p) => [String(p.reservation), p.amount]));
+
+  // Query associated parking sessions for these reservations
+  const ParkingSession = require('../../models/operations/ParkingSession');
+  const reservationIds = docs.map((d) => d._id);
+  const sessions = await ParkingSession.find({ reservation: { $in: reservationIds } }).lean();
+
+  const sessionsMap = {};
+  sessions.forEach((s) => {
+    if (s.reservation) {
+      sessionsMap[s.reservation.toString()] = s;
+    }
+  });
+
+  const items = docs.map((d) => {
+    const session = sessionsMap[d._id.toString()] || null;
+    return {
+      ...d,
+      refundPercent: refundPctByBuilding.get(String(d.building?._id || d.building)) ?? 0,
+      refundAmount: refundAmtByRes.get(String(d._id)) ?? 0,
+      parkingSession: session
+        ? {
+            _id: session._id,
+            fee: session.fee,
+            status: session.status,
+            entryTime: session.entryTime,
+            exitTime: session.exitTime,
+            paymentStatus: session.paymentStatus,
+          }
+        : null,
+    };
+  });
+
+  return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
 const get = async (userId, id) => {
@@ -57,6 +118,20 @@ const get = async (userId, id) => {
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
     .lean();
   if (!reservation) throw new AppError('Reservation not found', 404);
+
+  const ParkingSession = require('../../models/operations/ParkingSession');
+  const session = await ParkingSession.findOne({ reservation: id }).lean();
+  reservation.parkingSession = session
+    ? {
+        _id: session._id,
+        fee: session.fee,
+        status: session.status,
+        entryTime: session.entryTime,
+        exitTime: session.exitTime,
+        paymentStatus: session.paymentStatus,
+      }
+    : null;
+
   return reservation;
 };
 
@@ -105,6 +180,9 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
     throw new AppError('endTime must be after startTime', 400);
   }
 
+  // Chỉ cho phép đặt theo giờ nguyên (1, 2, 3... giờ).
+  assertWholeHourDuration(start, end);
+
   const now = new Date();
   if (start < new Date(now.getTime() - 60 * 60 * 1000)) {
     throw new AppError('Start time is too far in the past, please select a valid time.', 400);
@@ -119,21 +197,40 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
   // ── 5. Validate & assign slot ──────────────────────────────────────────────
   let resolvedSlotId = null;
   if (slotId) {
-    const slot = await ParkingSlot.findOne({
-      _id: slotId,
-      building: resolvedBuildingId,
-      status: 'available',
-    });
+    // Tìm theo _id + status; xác thực thuộc tòa nhà qua FLOOR (không lọc trực tiếp
+    // bằng slot.building để tránh lệch dữ liệu khiến đặt chỗ thất bại).
+    const slot = await ParkingSlot.findOne({ _id: slotId, status: 'available' });
     if (!slot) throw new AppError('Slot is no longer available or invalid', 409);
+    const slotFloor = await Floor.findOne({ _id: slot.floor, building: resolvedBuildingId }).select('_id');
+    if (!slotFloor) throw new AppError('Ô đỗ không thuộc tòa nhà này', 409, 'SLOT_BUILDING_MISMATCH');
+    // Ô đỗ phải cho phép đặt trước.
+    if (slot.reservable === false) {
+      throw new AppError('Ô đỗ này không cho phép đặt trước', 409, 'SLOT_NOT_RESERVABLE');
+    }
+    // Ô đỗ có giới hạn loại xe (vehicleType != null) thì phải khớp loại xe đặt.
+    // vehicleType == null nghĩa là ô nhận mọi loại xe.
+    if (
+      slot.vehicleType &&
+      resolvedVehicleTypeId &&
+      `${slot.vehicleType}` !== `${resolvedVehicleTypeId}`
+    ) {
+      throw new AppError(
+        'Ô đỗ không phù hợp với loại xe của bạn. Vui lòng chọn ô khác.',
+        409,
+        'SLOT_VEHICLE_TYPE_MISMATCH',
+      );
+    }
     resolvedSlotId = slot._id;
-
   }
 
-  // ── 6. Calculate estimated fee and 15% deposit ────────────────────────────
+  // ── 6. Calculate estimated fee + deposit theo % do MANAGER cấu hình ──────────
   const { estimatedFee } = await calculateReservationFee(
     resolvedBuildingId, resolvedVehicleTypeId, start, end,
   );
-  const depositAmount = Math.ceil(estimatedFee * DEPOSIT_RATE);
+  // % cọc lấy từ chính sách của tòa nhà (mỗi building set riêng). Phần còn lại
+  // (100 - depositPercent) sẽ được thu sau khi checkout.
+  const depositRate = Math.min(Math.max(Number(policy.depositPercent ?? 15), 0), 100) / 100;
+  const depositAmount = Math.ceil(estimatedFee * depositRate);
 
   // ── 7. Create reservation + charge deposit (atomic) ───────────────────────
   const code = generateBookingCode('RSV');
@@ -239,14 +336,18 @@ const cancel = async (userId, id) => {
         throw new AppError('Cannot cancel a reservation in this status', 400);
       }
 
-      // Refund 85% of the deposit paid.
+      // Số tiền cọc đã thu khi đặt.
       const paidPayment = await Payment.findOne({
         reservation: reservation._id,
         type: 'reservation',
         status: 'success',
       }).session(mongoSession);
       const amountPaid = paidPayment?.amount ?? (Number(reservation.fee) || 0);
-      const refund = Math.round((amountPaid * REFUND_PERCENT) / 100);
+
+      // % hoàn tiền do MANAGER cấu hình trong ReservationPolicy của tòa nhà.
+      const policy = await ReservationPolicy.findOne({ building: reservation.building }).session(mongoSession);
+      const refundPercent = Math.min(Math.max(Number(policy?.refundPercent ?? 0), 0), 100);
+      const refund = Math.round((amountPaid * refundPercent) / 100);
 
       // Release the reserved slot.
       if (reservation.slot) {
@@ -256,7 +357,7 @@ const cancel = async (userId, id) => {
       reservation.status = 'cancelled';
       await reservation.save({ session: mongoSession });
 
-      // Deposit is non-refundable — building keeps the full deposit on cancellation.
+      // Hoàn lại refundPercent% tiền cọc vào ví khách (phần còn lại tòa nhà giữ).
       if (refund > 0) {
         const updatedUser = await User.findByIdAndUpdate(
           userId,
@@ -271,7 +372,7 @@ const cancel = async (userId, id) => {
             balanceAfter: updatedUser.walletBalance,
             status: 'success',
             reason: 'reservation_refund',
-            metadata: { reservationId: `${reservation._id}`, code: reservation.code, percent: REFUND_PERCENT },
+            metadata: { reservationId: `${reservation._id}`, code: reservation.code, percent: refundPercent },
           }],
           { session: mongoSession },
         );
@@ -285,7 +386,7 @@ const cancel = async (userId, id) => {
             amount: refund,
             status: 'success',
             user: userId,
-            note: `Reservation ${reservation.code} cancelled — ${REFUND_PERCENT}% refund of deposit`,
+            note: `Reservation ${reservation.code} cancelled — ${refundPercent}% refund of deposit`,
           }],
           { session: mongoSession },
         );
@@ -295,7 +396,7 @@ const cancel = async (userId, id) => {
         );
       }
 
-      outcome = { reservation, refund, amountPaid };
+      outcome = { reservation, refund, amountPaid, refundPercent };
     });
     return outcome;
   } finally {
@@ -303,4 +404,4 @@ const cancel = async (userId, id) => {
   }
 };
 
-module.exports = { list, get, create, cancel };
+module.exports = { list, get, create, cancel, assertWholeHourDuration };

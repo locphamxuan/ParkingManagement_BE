@@ -15,23 +15,13 @@ const inWindow = (minute, from, to) => {
   return minute >= from || minute < to;
 };
 
-const sameDay = (a, b) =>
-  a.getFullYear() === b.getFullYear() &&
-  a.getMonth() === b.getMonth() &&
-  a.getDate() === b.getDate();
-
 /**
  * Calculate the estimated total fee for a reservation.
  *
- * Pricing is resolved per parked hour so a single booking can span both regular
- * and peak windows: each hour is billed at the rate of the policy that applies
- * at the start of that hour. Precedence per hour: holiday > peak > regular.
+ * Mỗi giờ tính theo policy áp dụng tại thời điểm bắt đầu giờ đó: peak > regular.
  *
  * @returns {Promise<{ estimatedFee, hourlyRate, hours, regularHours, peakHours, peakRate }>}
  */
-// Khi policy không cấu hình minRate, áp sàn tối thiểu tương đương số phút này.
-const MIN_BILLABLE_MINUTES = 30;
-
 const calculateReservationFee = async (buildingId, vehicleTypeId, startTime, endTime) => {
   const start = new Date(startTime);
   const end = new Date(endTime);
@@ -49,30 +39,17 @@ const calculateReservationFee = async (buildingId, vehicleTypeId, startTime, end
 
   const regularPolicy = policies.find((p) => p.type === 'regular');
   const peakPolicies = policies.filter((p) => p.type === 'peak');
-  const holidayPolicies = policies.filter((p) => p.type === 'holiday');
 
-  // Regular (base) rate + dailyCap, falling back to building pricing then a floor.
+  // Regular (base) rate, falling back to building pricing.
   let regularRate = regularPolicy?.hourlyRate ?? null;
-  let dailyCap = regularPolicy?.dailyCap ?? null;
   if (regularRate == null) {
     const building = await Building.findById(buildingId).select('pricing').lean();
     regularRate = building?.pricing?.hourlyRate ?? 5000;
-    if (dailyCap == null) dailyCap = building?.pricing?.dailyCap ?? null;
   }
 
-  // Resolve the rate for the hour-block that begins at Date `d`.
+  // Resolve the rate for the hour-block that begins at Date `d` (peak > regular).
   const rateForHour = (d) => {
     const minute = d.getHours() * 60 + d.getMinutes();
-
-    // 1) Holiday policies take precedence on matching dates.
-    for (const h of holidayPolicies) {
-      const matchesDate = (h.holidayDates || []).some((hd) => sameDay(new Date(hd), d));
-      if (matchesDate && inWindow(minute, toMinutes(h.timeWindow?.from), toMinutes(h.timeWindow?.to))) {
-        return h.hourlyRate;
-      }
-    }
-
-    // 2) Peak policies — if several match, charge the highest peak rate.
     let peak = null;
     for (const p of peakPolicies) {
       if (inWindow(minute, toMinutes(p.timeWindow?.from), toMinutes(p.timeWindow?.to))) {
@@ -80,13 +57,11 @@ const calculateReservationFee = async (buildingId, vehicleTypeId, startTime, end
       }
     }
     if (peak != null) return peak;
-
-    // 3) Default regular rate.
     return regularRate;
   };
 
-  // Pro-rate theo phút: đi qua từng block 1 giờ (giữ đúng peak/holiday theo giờ
-  // bắt đầu block), block cuối chỉ tính phần phút còn lại.
+  // Pro-rate theo phút: đi qua từng block 1 giờ (giữ đúng peak theo giờ bắt đầu
+  // block), block cuối chỉ tính phần phút còn lại.
   let estimatedFee = 0;
   let regularMinutes = 0;
   let peakMinutes = 0;
@@ -108,23 +83,6 @@ const calculateReservationFee = async (buildingId, vehicleTypeId, startTime, end
     i++;
   }
 
-  // Phí tối thiểu: ưu tiên minRate của policy, nếu không có thì lấy ~30 phút giá thường.
-  const minCharge =
-    regularPolicy?.minRate && regularPolicy.minRate > 0
-      ? regularPolicy.minRate
-      : Math.ceil(regularRate * (MIN_BILLABLE_MINUTES / 60));
-  let minimumApplied = false;
-  if (totalMinutes > 0 && estimatedFee < minCharge) {
-    estimatedFee = minCharge;
-    minimumApplied = true;
-  }
-
-  // Apply a daily cap (regular policy) across the whole stay if set.
-  if (dailyCap != null && dailyCap > 0) {
-    const days = Math.max(1, Math.ceil(totalMinutes / 1440));
-    estimatedFee = Math.min(estimatedFee, dailyCap * days);
-  }
-
   return {
     estimatedFee: Math.ceil(estimatedFee),
     hourlyRate: regularRate,
@@ -133,7 +91,7 @@ const calculateReservationFee = async (buildingId, vehicleTypeId, startTime, end
     regularHours: regularMinutes / 60,
     peakHours: peakMinutes / 60,
     peakRate: peakRateApplied,
-    minimumApplied,
+    minimumApplied: false,
   };
 };
 

@@ -36,13 +36,9 @@ const create = async (user, buildingId, payload) => {
     building: buildingId,
     vehicleType: payload.vehicleType,
     name: String(payload.name || "").trim(),
-    type: payload.type || 'regular',
+    type: payload.type === 'peak' ? 'peak' : 'regular',
     hourlyRate: Number(payload.hourlyRate),
-    dailyCap: payload.dailyCap !== undefined ? Number(payload.dailyCap) : null,
-    minRate: payload.minRate !== undefined ? Number(payload.minRate) : 0,
-    maxRate: payload.maxRate !== undefined ? Number(payload.maxRate) : null,
     timeWindow: payload.timeWindow || undefined,
-    holidayDates: payload.holidayDates || [],
     effectiveFrom: payload.effectiveFrom || new Date(),
     effectiveTo: payload.effectiveTo || null,
     isActive: payload.isActive !== false,
@@ -57,21 +53,11 @@ const update = async (user, buildingId, id, payload) => {
   if (!current) throw new AppError("Price policy not found", 404);
 
   const update = {};
-  [
-    "name",
-    "vehicleType",
-    "type",
-    "timeWindow",
-    "holidayDates",
-    "effectiveFrom",
-    "effectiveTo",
-  ].forEach((k) => {
+  ["name", "vehicleType", "type", "timeWindow", "effectiveFrom", "effectiveTo"].forEach((k) => {
     if (payload[k] !== undefined) update[k] = payload[k];
   });
-  ["hourlyRate", "dailyCap", "minRate", "maxRate"].forEach((k) => {
-    if (payload[k] !== undefined)
-      update[k] = payload[k] === null ? null : Number(payload[k]);
-  });
+  if (payload.type !== undefined) update.type = payload.type === 'peak' ? 'peak' : 'regular';
+  if (payload.hourlyRate !== undefined) update.hourlyRate = Number(payload.hourlyRate);
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
 
   const updated = await PricePolicy.findByIdAndUpdate(id, update, {

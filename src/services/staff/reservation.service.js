@@ -2,29 +2,68 @@ const mongoose = require('mongoose');
 const AppError = require('../../utils/AppError');
 const { Reservation, ParkingSession, ParkingSlot } = require('../../models');
 const { assertBuildingScope, logAudit } = require('../../utils/staffScope');
+const { normalizePlate } = require('../../utils/plate.util');
 
 const normalizeCode = (value) => `${value || ''}`.trim().toUpperCase();
+
+// Tìm reservation linh hoạt: chấp nhận _id (ObjectId), mã code (RSV-...), hoặc
+// biển số xe — vì màn hình hiển thị _id cho khách, còn QR có thể là code/_id/biển.
+const CHECKINABLE_STATUSES = ['pending', 'confirmed'];
+const findReservationByAnyRef = async (raw, session) => {
+  const value = `${raw || ''}`.trim();
+  if (!value) return null;
+
+  if (mongoose.Types.ObjectId.isValid(value)) {
+    const byId = await Reservation.findById(value).session(session);
+    if (byId) return byId;
+  }
+  const byCode = await Reservation.findOne({ code: normalizeCode(value) }).session(session);
+  if (byCode) return byCode;
+
+  // Thử theo biển số (lượt đặt còn hiệu lực gần nhất).
+  const plate = normalizePlate(value);
+  if (plate) {
+    return Reservation.findOne({ plateNumber: plate, status: { $in: CHECKINABLE_STATUSES } })
+      .sort({ startTime: 1 })
+      .session(session);
+  }
+  return null;
+};
 
 const processReservationCheckIn = async (staffUser, payload = {}) => {
   const session = await mongoose.startSession();
   try {
     const result = await session.withTransaction(async () => {
-      const code = normalizeCode(payload.code || payload.reservationCode);
-      if (!code) {
+      const raw = `${payload.code || payload.reservationCode || ''}`.trim();
+      if (!raw) {
         throw new AppError('reservationCode is required', 400, 'RESERVATION_CODE_REQUIRED');
       }
 
-      const reservation = await Reservation.findOne({ code }).session(session);
+      const reservation = await findReservationByAnyRef(raw, session);
       if (!reservation) {
-        throw new AppError('Reservation not found', 404, 'RESERVATION_NOT_FOUND');
+        throw new AppError('Không tìm thấy lượt đặt chỗ', 404, 'RESERVATION_NOT_FOUND');
       }
 
       assertBuildingScope(staffUser, reservation.building);
 
+      // Chỉ check-in được lượt đang chờ/đã xác nhận.
+      if (reservation.status === 'checked_in') {
+        throw new AppError('Lượt đặt chỗ này đã được check-in trước đó', 409, 'RESERVATION_ALREADY_CHECKED_IN');
+      }
+      if (!CHECKINABLE_STATUSES.includes(reservation.status)) {
+        throw new AppError(
+          `Không thể check-in lượt đặt ở trạng thái "${reservation.status}"`,
+          409,
+          'RESERVATION_NOT_CHECKINABLE',
+        );
+      }
+
       const now = Date.now();
       const endTime = reservation.endTime ? new Date(reservation.endTime).getTime() : null;
       if (endTime && endTime < now) {
-        throw new AppError('Reservation expired', 409, 'RESERVATION_EXPIRED');
+        reservation.status = 'expired';
+        await reservation.save({ session });
+        throw new AppError('Lượt đặt chỗ đã hết hạn', 409, 'RESERVATION_EXPIRED');
       }
 
       const slotId = reservation.slot?._id || reservation.slot || null;
