@@ -48,8 +48,9 @@ function validateStartDateConstraint(startDate, durationDays) {
     }
   }
 
-  // startDate should not be in the past (allow up to 1 hour tolerance)
-  if (startDate < new Date(now.getTime() - 60 * 60 * 1000)) {
+  // startDate should not be before today (allow today and future dates)
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  if (startDate < todayStart) {
     throw new AppError('Ngày bắt đầu không được nằm trong quá khứ', 400);
   }
 }
