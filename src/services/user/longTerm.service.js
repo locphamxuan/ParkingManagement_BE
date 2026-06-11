@@ -4,6 +4,7 @@ const ParkingSlot = require('../../models/building/ParkingSlot');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const User = require('../../models/user/User');
 const AppError = require('../../utils/AppError');
+const mongoose = require('mongoose');
 
 const Building = require('../../models/building/Building');
 
@@ -54,6 +55,18 @@ function validateStartDateConstraint(startDate, durationDays) {
 }
 
 const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) => {
+  const normalizedPlate = String(plateNumber).trim().toUpperCase();
+
+  // Kiểm tra xem biển số này đã đăng ký gói dài hạn nào đang hoạt động hoặc chờ thanh toán chưa
+  const existingActiveSub = await LongTermSubscription.findOne({
+    plateNumber: normalizedPlate,
+    status: { $in: ['pending', 'active'] }
+  });
+
+  if (existingActiveSub) {
+    throw new AppError('Biển số xe này đã đăng ký một gói dài hạn khác đang hoạt động hoặc chờ thanh toán', 400);
+  }
+
   const pkg = await LongTermPackage.findById(packageId);
   if (!pkg || !pkg.isActive) throw new AppError('Package not found or inactive', 404);
 
@@ -72,6 +85,11 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
   let resolvedSlotId = null;
 
   if (slotId) {
+    // Verify the package supports dedicated slots
+    if (!pkg.allowDedicatedSlot) {
+      throw new AppError('Gói này không hỗ trợ chỗ đỗ cố định', 400);
+    }
+
     // Verify the slot exists, is in the same building, matches vehicle type, and is available
     const slot = await ParkingSlot.findById(slotId).populate('vehicleType', 'code');
     if (!slot) {
@@ -90,75 +108,18 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
     resolvedSlotId = slot._id;
   }
 
-  // ── Check user wallet balance ────────────────────────────────────────────
-  const user = await User.findById(userId);
-  if (!user) throw new AppError('User not found', 404);
+  // ── Debit wallet ─────────────────────────────────────────────────────────
+  const updatedUser = await User.findOneAndUpdate(
+    { _id: userId, walletBalance: { $gte: pkg.price } },
+    { $inc: { walletBalance: -pkg.price } },
+    { new: true }
+  ).select('walletBalance');
+  if (!updatedUser) throw new AppError('Số dư ví không đủ', 400);
 
-  const isSufficient = user.walletBalance >= pkg.price;
-
-  if (isSufficient) {
-    // ── Pay via Wallet ──
-    const updatedUser = await User.findOneAndUpdate(
-      { _id: userId, walletBalance: { $gte: pkg.price } },
-      { $inc: { walletBalance: -pkg.price } },
-      { new: true }
-    ).select('walletBalance');
-    if (!updatedUser) throw new AppError('Số dư ví không đủ', 400);
-
-    let subscription;
-    try {
-      subscription = await LongTermSubscription.create({
-        user: userId,
-        package: packageId,
-        building: pkg.building,
-        plateNumber: String(plateNumber).trim().toUpperCase(),
-        slot: resolvedSlotId,
-        startDate: resolvedStart,
-        endDate,
-        status: 'active',
-      });
-
-      // Reserve the slot if one was assigned
-      if (resolvedSlotId) {
-        await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'reserved' });
-      }
-    } catch (err) {
-      // Rollback wallet debit on failure
-      await User.findByIdAndUpdate(userId, { $inc: { walletBalance: pkg.price } });
-      if (resolvedSlotId) {
-        await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'available' });
-      }
-      throw err;
-    }
-
-    // Wallet transaction record
-    try {
-      await WalletTransaction.create({
-        user: userId,
-        type: 'debit',
-        amount: pkg.price,
-        balanceAfter: updatedUser.walletBalance,
-        status: 'success',
-        reason: 'long_term_subscription',
-        metadata: { packageId: pkg._id, subscriptionId: subscription._id },
-      });
-    } catch (txErr) {
-      console.error('[longTerm.subscribe] WalletTransaction record failed:', txErr.message);
-    }
-
-    return { subscription };
-  } else {
-    // ── Pay via PayOS (Insufficient wallet balance) ──
-    const payosService = require('../payment/payos.service');
-    const Payment = require('../../models/finance/Payment');
-    const env = require('../../config/env');
-
-    const orderCode = payosService.generateOrderCode();
-    const returnUrl = `${env.clientUrl}/reservations?openHistory=true`;
-    const cancelUrl = `${env.clientUrl}/reservations`;
-
-    // Create subscription in 'pending' status
-    const subscription = await LongTermSubscription.create({
+  // ── Create subscription ──────────────────────────────────────────────────
+  let subscription;
+  try {
+    subscription = await LongTermSubscription.create({
       user: userId,
       package: packageId,
       building: pkg.building,
@@ -166,52 +127,39 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
       slot: resolvedSlotId,
       startDate: resolvedStart,
       endDate,
-      status: 'pending',
+      status: 'active',
     });
 
-    // Reserve the slot to hold it during payment
+    // Reserve the slot if one was assigned
     if (resolvedSlotId) {
       await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'reserved' });
     }
-
-    let checkoutUrl, paymentLinkId;
-    try {
-      const payosResponse = await payosService.createPaymentLink({
-        orderCode,
-        amount: pkg.price,
-        description: `Thanh toan goi ${pkg.code}`.slice(0, 25),
-        buyerName: user.fullName,
-        buyerEmail: user.email,
-        returnUrl,
-        cancelUrl,
-      });
-      checkoutUrl = payosResponse.checkoutUrl;
-      paymentLinkId = payosResponse.paymentLinkId;
-    } catch (err) {
-      // Rollback subscription creation & slot reservation
-      await LongTermSubscription.findByIdAndDelete(subscription._id);
-      if (resolvedSlotId) {
-        await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'available' });
-      }
-      throw new AppError(`Không thể tạo liên kết thanh toán PayOS: ${err.message}`, 500);
+  } catch (err) {
+    // Rollback wallet debit on failure
+    await User.findByIdAndUpdate(userId, { $inc: { walletBalance: pkg.price } });
+    // Rollback slot status if it was changed
+    if (resolvedSlotId) {
+      await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'available' });
     }
-
-    // Persist pending Payment
-    await Payment.create({
-      user: userId,
-      building: pkg.building,
-      type: 'subscription',
-      method: 'payos',
-      amount: pkg.price,
-      status: 'pending',
-      subscription: subscription._id,
-      payosOrderCode: orderCode,
-      payosPaymentLinkId: paymentLinkId,
-      note: `Đăng ký gói dài hạn ${pkg.name} qua PayOS`,
-    });
-
-    return { subscription, checkoutUrl };
+    throw err;
   }
+
+  // ── Wallet transaction record ────────────────────────────────────────────
+  try {
+    await WalletTransaction.create({
+      user: userId,
+      type: 'debit',
+      amount: pkg.price,
+      balanceAfter: updatedUser.walletBalance,
+      status: 'success',
+      reason: 'long_term_subscription',
+      metadata: { packageId: pkg._id, subscriptionId: subscription._id },
+    });
+  } catch (txErr) {
+    console.error('[longTerm.subscribe] WalletTransaction record failed:', txErr.message);
+  }
+
+  return subscription;
 };
 
 /**
@@ -227,18 +175,96 @@ const releaseSubscriptionSlot = async (subscription) => {
   }
 };
 
-const cancelSubscription = async (userId, subscriptionId) => {
-  const subscription = await LongTermSubscription.findOne({ _id: subscriptionId, user: userId });
-  if (!subscription) throw new AppError('Subscription not found', 404);
-  if (subscription.status === 'cancelled') throw new AppError('Subscription already cancelled', 400);
+const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancelNote } = {}) => {
+  const validReasons = ['change_slot', 'change_vehicle', 'no_longer_needed', 'pricing_issue', 'other'];
+  if (!cancelReason || !validReasons.includes(cancelReason)) {
+    throw new AppError('Lý do hủy không hợp lệ', 400);
+  }
+  if (cancelReason === 'other' && (!cancelNote || !cancelNote.trim())) {
+    throw new AppError('Ghi chú chi tiết là bắt buộc khi chọn lý do khác', 400);
+  }
 
-  subscription.status = 'cancelled';
-  await subscription.save();
+  const mongoSession = await mongoose.startSession();
+  try {
+    let result;
+    await mongoSession.withTransaction(async () => {
+      const subscription = await LongTermSubscription.findOne({ _id: subscriptionId, user: userId })
+        .populate('package')
+        .session(mongoSession);
 
-  // Release the dedicated slot if one was assigned
-  await releaseSubscriptionSlot(subscription);
+      if (!subscription) {
+        throw new AppError('Không tìm thấy gói đăng ký dài hạn', 404);
+      }
 
-  return subscription;
+      if (subscription.status === 'cancelled') {
+        throw new AppError('Gói đăng ký đã được hủy trước đó', 400);
+      }
+
+      if (subscription.status !== 'active' && subscription.status !== 'pending') {
+        throw new AppError('Chỉ được phép hủy gói ở trạng thái active hoặc pending', 400);
+      }
+
+      const now = new Date();
+      const startDate = new Date(subscription.startDate);
+      const diffMs = now.getTime() - startDate.getTime();
+      const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+
+      if (now.getTime() > startDate.getTime() && diffMs > threeDaysMs) {
+        throw new AppError('Gói dài hạn đã vượt quá thời hạn cho phép tự hủy (3 ngày)', 400);
+      }
+
+      subscription.status = 'cancelled';
+      subscription.cancelReason = cancelReason;
+      subscription.cancelNote = cancelNote || '';
+      await subscription.save({ session: mongoSession });
+
+      if (subscription.slot) {
+        await ParkingSlot.findByIdAndUpdate(
+          subscription.slot,
+          { status: 'available' },
+          { session: mongoSession }
+        );
+      }
+
+      const packagePrice = subscription.package.price;
+      const refundAmount = Math.round(packagePrice * 0.95);
+
+      const updatedUser = await User.findByIdAndUpdate(
+        userId,
+        { $inc: { walletBalance: refundAmount } },
+        { new: true, session: mongoSession }
+      ).select('walletBalance');
+
+      if (!updatedUser) {
+        throw new AppError('Không thể cập nhật số dư tài khoản người dùng', 500);
+      }
+
+      await WalletTransaction.create(
+        [{
+          user: userId,
+          type: 'refund',
+          amount: refundAmount,
+          balanceAfter: updatedUser.walletBalance,
+          status: 'success',
+          reason: 'long_term_subscription_cancellation',
+          metadata: {
+            subscriptionId: subscription._id,
+            cancelReason,
+            cancelNote,
+            refundAmount,
+            originalPrice: packagePrice,
+          },
+        }],
+        { session: mongoSession }
+      );
+
+      result = subscription;
+    });
+
+    return result;
+  } finally {
+    await mongoSession.endSession();
+  }
 };
 
 const listSubscriptions = async (userId, query = {}) => {

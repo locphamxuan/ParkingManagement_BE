@@ -45,7 +45,6 @@ const processReservationCheckIn = async (staffUser, payload = {}) => {
       }
 
       assertBuildingScope(staffUser, reservation.building);
-
       // Chỉ check-in được lượt đang chờ/đã xác nhận.
       if (reservation.status === 'checked_in') {
         throw new AppError('Lượt đặt chỗ này đã được check-in trước đó', 409, 'RESERVATION_ALREADY_CHECKED_IN');
@@ -59,11 +58,11 @@ const processReservationCheckIn = async (staffUser, payload = {}) => {
       }
 
       const now = Date.now();
-      const endTime = reservation.endTime ? new Date(reservation.endTime).getTime() : null;
-      if (endTime && endTime < now) {
+      const expirationTime = reservation.startTime ? new Date(reservation.startTime).getTime() + 30 * 60 * 1000 : null;
+      if (expirationTime && expirationTime < now) {
         reservation.status = 'expired';
         await reservation.save({ session });
-        throw new AppError('Lượt đặt chỗ đã hết hạn', 409, 'RESERVATION_EXPIRED');
+        throw new AppError('Lượt đặt chỗ đã hết hạn (quá 30 phút so với giờ bắt đầu)', 409, 'RESERVATION_EXPIRED');
       }
 
       const slotId = reservation.slot?._id || reservation.slot || null;

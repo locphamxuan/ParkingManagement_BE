@@ -89,6 +89,22 @@ const list = async (userId, query = {}) => {
     }
   });
 
+  // Gắn % hoàn tiền (theo chính sách của từng tòa nhà) + số tiền đã hoàn thực tế
+  // (với lượt đã hủy) để FE hiển thị đúng thay vì 0%.
+  const buildingIds = [...new Set(docs.map((d) => String(d.building?._id || d.building)))];
+  const policies = buildingIds.length
+    ? await ReservationPolicy.find({ building: { $in: buildingIds } }).select('building refundPercent').lean()
+    : [];
+  const refundPctByBuilding = new Map(policies.map((p) => [String(p.building), p.refundPercent ?? 0]));
+
+  const cancelledIds = docs.filter((d) => d.status === 'cancelled').map((d) => d._id);
+  const refundPayments = cancelledIds.length
+    ? await Payment.find({ reservation: { $in: cancelledIds }, type: 'refund', status: 'success' })
+        .select('reservation amount')
+        .lean()
+    : [];
+  const refundAmtByRes = new Map(refundPayments.map((p) => [String(p.reservation), p.amount]));
+
   const items = docs.map((d) => {
     const session = sessionsMap[d._id.toString()] || null;
     return {
@@ -105,6 +121,8 @@ const list = async (userId, query = {}) => {
             paymentStatus: session.paymentStatus,
           }
         : null,
+      refundPercent: refundPctByBuilding.get(String(d.building?._id || d.building)) ?? 0,
+      refundAmount: refundAmtByRes.get(String(d._id)) ?? 0,
     };
   });
 
@@ -118,20 +136,6 @@ const get = async (userId, id) => {
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
     .lean();
   if (!reservation) throw new AppError('Reservation not found', 404);
-
-  const ParkingSession = require('../../models/operations/ParkingSession');
-  const session = await ParkingSession.findOne({ reservation: id }).lean();
-  reservation.parkingSession = session
-    ? {
-        _id: session._id,
-        fee: session.fee,
-        status: session.status,
-        entryTime: session.entryTime,
-        exitTime: session.exitTime,
-        paymentStatus: session.paymentStatus,
-      }
-    : null;
-
   return reservation;
 };
 

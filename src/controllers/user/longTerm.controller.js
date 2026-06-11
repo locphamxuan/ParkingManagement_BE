@@ -8,12 +8,8 @@ const listPackages = asyncHandler(async (req, res) => {
 });
 
 const subscribe = asyncHandler(async (req, res) => {
-  const result = await service.subscribe(req.user._id, req.body);
-  sendSuccess(res, {
-    statusCode: 201,
-    message: result.checkoutUrl ? 'Redirecting to payment' : 'Subscription created',
-    data: result,
-  });
+  const subscription = await service.subscribe(req.user._id, req.body);
+  sendSuccess(res, { statusCode: 201, message: 'Subscription created', data: { subscription } });
 });
 
 const listSubscriptions = asyncHandler(async (req, res) => {
@@ -21,4 +17,9 @@ const listSubscriptions = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { listPackages, subscribe, listSubscriptions };
+const cancelSubscription = asyncHandler(async (req, res) => {
+  const subscription = await service.cancelSubscription(req.user._id, req.params.id, req.body);
+  sendSuccess(res, { message: 'Subscription cancelled successfully', data: { subscription } });
+});
+
+module.exports = { listPackages, subscribe, listSubscriptions, cancelSubscription };
