@@ -4,8 +4,9 @@ const Payment = require("../../models/finance/Payment");
 const Floor = require("../../models/building/Floor");
 const Gate = require("../../models/building/Gate");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
-const Feedback = require("../../models/log/Feedback");
+const Feedback = require("../../models/operations/Feedback");
 const ShiftRevenue = require("../../models/finance/ShiftRevenue");
+const mongoose = require("mongoose");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 
 const startOfDay = (date) => {
@@ -137,7 +138,6 @@ const getOverview = async (user, buildingId) => {
   };
 };
 
-const mongoose = require("mongoose");
 function toObjectId(id) {
   return new mongoose.Types.ObjectId(String(id));
 }

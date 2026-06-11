@@ -22,4 +22,9 @@ const cancelSubscription = asyncHandler(async (req, res) => {
   sendSuccess(res, { message: 'Subscription cancelled successfully', data: { subscription } });
 });
 
-module.exports = { listPackages, subscribe, listSubscriptions, cancelSubscription };
+const renewSubscription = asyncHandler(async (req, res) => {
+  const subscription = await service.renewSubscription(req.user._id, req.params.id);
+  sendSuccess(res, { message: 'Subscription renewed successfully', data: { subscription } });
+});
+
+module.exports = { listPackages, subscribe, listSubscriptions, cancelSubscription, renewSubscription };

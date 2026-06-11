@@ -1,10 +1,12 @@
 const LongTermPackage = require('../../models/policy/LongTermPackage');
+const logger = require("../../utils/logger");
 const LongTermSubscription = require('../../models/policy/LongTermSubscription');
 const ParkingSlot = require('../../models/building/ParkingSlot');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const User = require('../../models/user/User');
 const AppError = require('../../utils/AppError');
 const mongoose = require('mongoose');
+const { normalizePlate } = require('../../utils/plate.util');
 
 const Building = require('../../models/building/Building');
 
@@ -55,7 +57,12 @@ function validateStartDateConstraint(startDate, durationDays) {
 }
 
 const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) => {
-  const normalizedPlate = String(plateNumber).trim().toUpperCase();
+  // Chuẩn hoá biển số về dạng canonical (giống lúc check-in) để gói luôn được
+  // nhận diện khi staff quét xe — tránh lệch '59G2-81000' vs '59G2-810.00'.
+  const normalizedPlate = normalizePlate(plateNumber);
+  if (!normalizedPlate) {
+    throw new AppError('Biển số xe không hợp lệ', 400);
+  }
 
   // Kiểm tra xem biển số này đã đăng ký gói dài hạn nào đang hoạt động hoặc chờ thanh toán chưa
   const existingActiveSub = await LongTermSubscription.findOne({
@@ -85,7 +92,10 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
   let resolvedSlotId = null;
 
   if (slotId) {
-
+    // Gói phải cho phép chỗ đỗ cố định mới được chọn slot.
+    if (!pkg.allowDedicatedSlot) {
+      throw new AppError('Gói này không hỗ trợ chỗ đỗ cố định', 400);
+    }
 
     // Verify the slot exists, is in the same building, matches vehicle type, and is available
     const slot = await ParkingSlot.findById(slotId).populate('vehicleType', 'code');
@@ -120,7 +130,7 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
       user: userId,
       package: packageId,
       building: pkg.building,
-      plateNumber: String(plateNumber).trim().toUpperCase(),
+      plateNumber: normalizedPlate,
       slot: resolvedSlotId,
       startDate: resolvedStart,
       endDate,
@@ -153,7 +163,7 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
       metadata: { packageId: pkg._id, subscriptionId: subscription._id },
     });
   } catch (txErr) {
-    console.error('[longTerm.subscribe] WalletTransaction record failed:', txErr.message);
+    logger.error('[longTerm.subscribe] WalletTransaction record failed:', txErr.message);
   }
 
   return subscription;
@@ -168,7 +178,7 @@ const releaseSubscriptionSlot = async (subscription) => {
   try {
     await ParkingSlot.findByIdAndUpdate(subscription.slot, { status: 'available' });
   } catch (err) {
-    console.error('[longTerm.releaseSlot] Failed to release slot:', err.message);
+    logger.error('[longTerm.releaseSlot] Failed to release slot:', err.message);
   }
 };
 
@@ -264,6 +274,89 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
   }
 };
 
+const GRACE_DAYS = 7;
+
+/**
+ * Gia hạn một gói dài hạn: cộng dồn thêm 1 kỳ (durationDays của package) và
+ * giữ nguyên slot cố định. Cho phép khi gói đang 'active', hoặc đã 'expired'
+ * nhưng vẫn trong grace 7 ngày (slot chưa bị thu hồi).
+ */
+const renewSubscription = async (userId, subscriptionId) => {
+  const mongoSession = await mongoose.startSession();
+  try {
+    let result;
+    await mongoSession.withTransaction(async () => {
+      const subscription = await LongTermSubscription.findOne({ _id: subscriptionId, user: userId })
+        .populate('package')
+        .session(mongoSession);
+
+      if (!subscription) {
+        throw new AppError('Không tìm thấy gói đăng ký dài hạn', 404);
+      }
+      if (!subscription.package) {
+        throw new AppError('Gói gốc không còn tồn tại, không thể gia hạn', 400);
+      }
+
+      const now = new Date();
+      const endDate = new Date(subscription.endDate);
+      const graceCutoff = new Date(now.getTime() - GRACE_DAYS * 24 * 60 * 60 * 1000);
+
+      if (subscription.status === 'active') {
+        // ok
+      } else if (subscription.status === 'expired') {
+        // Chỉ cho gia hạn khi còn trong grace và slot chưa bị thu hồi.
+        if (subscription.slotReleased || endDate < graceCutoff) {
+          throw new AppError(
+            'Gói đã quá thời hạn gia hạn (quá 7 ngày). Vui lòng mua gói mới.',
+            400,
+          );
+        }
+      } else {
+        throw new AppError('Chỉ được gia hạn gói ở trạng thái active hoặc vừa hết hạn', 400);
+      }
+
+      const pkg = subscription.package;
+
+      // Trừ ví (atomic) — pattern giống subscribe.
+      const updatedUser = await User.findOneAndUpdate(
+        { _id: userId, walletBalance: { $gte: pkg.price } },
+        { $inc: { walletBalance: -pkg.price } },
+        { new: true, session: mongoSession },
+      ).select('walletBalance');
+      if (!updatedUser) throw new AppError('Số dư ví không đủ', 400);
+
+      // Cộng dồn từ endDate nếu còn hạn, hoặc từ now nếu đã hết hạn.
+      const newStart = endDate.getTime() > now.getTime() ? endDate : now;
+      const newEnd = new Date(newStart.getTime() + pkg.durationDays * 24 * 60 * 60 * 1000);
+
+      subscription.endDate = newEnd;
+      subscription.status = 'active';
+      subscription.remindersSent = [];
+      subscription.slotReleased = false;
+      await subscription.save({ session: mongoSession });
+
+      await WalletTransaction.create(
+        [{
+          user: userId,
+          type: 'debit',
+          amount: pkg.price,
+          balanceAfter: updatedUser.walletBalance,
+          status: 'success',
+          reason: 'long_term_subscription_renewal',
+          metadata: { packageId: pkg._id, subscriptionId: subscription._id, newEndDate: newEnd },
+        }],
+        { session: mongoSession },
+      );
+
+      result = subscription;
+    });
+
+    return result;
+  } finally {
+    await mongoSession.endSession();
+  }
+};
+
 const listSubscriptions = async (userId, query = {}) => {
   const filter = { user: userId };
   if (query.status) filter.status = query.status;
@@ -285,4 +378,4 @@ const listSubscriptions = async (userId, query = {}) => {
   return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
-module.exports = { listPackages, subscribe, listSubscriptions, cancelSubscription, releaseSubscriptionSlot };
+module.exports = { listPackages, subscribe, listSubscriptions, cancelSubscription, renewSubscription, releaseSubscriptionSlot };

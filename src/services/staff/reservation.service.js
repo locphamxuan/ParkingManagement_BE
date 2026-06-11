@@ -3,6 +3,7 @@ const AppError = require('../../utils/AppError');
 const { Reservation, ParkingSession, ParkingSlot } = require('../../models');
 const { assertBuildingScope, logAudit } = require('../../utils/staffScope');
 const { normalizePlate } = require('../../utils/plate.util');
+const { getMaxHoldMs } = require('../../utils/reservationHold');
 
 const normalizeCode = (value) => `${value || ''}`.trim().toUpperCase();
 
@@ -57,12 +58,32 @@ const processReservationCheckIn = async (staffUser, payload = {}) => {
         );
       }
 
+      // Chặn tạo phiên trùng: biển số đang có phiên đỗ active.
+      const activeDup = await ParkingSession.findOne({
+        plateNumber: reservation.plateNumber,
+        status: 'active',
+      }).session(session);
+      if (activeDup) {
+        throw new AppError('Biển số đang có phiên đỗ active', 409, 'DUPLICATE_PLATE_WARNING');
+      }
+
       const now = Date.now();
-      const expirationTime = reservation.startTime ? new Date(reservation.startTime).getTime() + 30 * 60 * 1000 : null;
+      const holdMs = await getMaxHoldMs(reservation.building, session);
+
+      // Chặn check-in quá sớm: chỉ cho vào trong khoảng holdMs trước startTime.
+      if (reservation.startTime) {
+        const earliest = new Date(reservation.startTime).getTime() - holdMs;
+        if (now < earliest) {
+          throw new AppError('Chưa tới giờ check-in cho lượt đặt này', 409, 'RESERVATION_TOO_EARLY');
+        }
+      }
+
+      const expirationTime = reservation.startTime ? new Date(reservation.startTime).getTime() + holdMs : null;
       if (expirationTime && expirationTime < now) {
         reservation.status = 'expired';
         await reservation.save({ session });
-        throw new AppError('Lượt đặt chỗ đã hết hạn (quá 30 phút so với giờ bắt đầu)', 409, 'RESERVATION_EXPIRED');
+        const holdMin = Math.round(holdMs / 60000);
+        throw new AppError(`Lượt đặt chỗ đã hết hạn (quá ${holdMin} phút so với giờ bắt đầu)`, 409, 'RESERVATION_EXPIRED');
       }
 
       const slotId = reservation.slot?._id || reservation.slot || null;
@@ -79,6 +100,7 @@ const processReservationCheckIn = async (staffUser, payload = {}) => {
 
       const previousValue = reservation.toObject();
       reservation.status = 'checked_in';
+      reservation.checkedInAt = new Date();
       await reservation.save({ session });
 
       const createdSession = await ParkingSession.create([

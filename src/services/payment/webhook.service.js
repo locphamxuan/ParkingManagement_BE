@@ -15,6 +15,7 @@ const mongoose = require('mongoose');
 const payosService = require('./payos.service');
 const { Payment } = require('../../models');
 const Reservation = require('../../models/operations/Reservation');
+const ParkingSlot = require('../../models/building/ParkingSlot');
 const buildingWalletService = require('../manager/buildingWallet.service');
 const walletService = require('../user/wallet.service');
 const buildingWalletTopupService = require('../manager/buildingWalletTopup.service');
@@ -43,8 +44,7 @@ const handleReservationFee = async (pendingPayment, amount, mongoSession) => {
 
   // Mark slot reserved if assigned
   if (reservation.slot) {
-    const ParkingSlotModel = require('../../models/building/ParkingSlot');
-    await ParkingSlotModel.findByIdAndUpdate(
+    await ParkingSlot.findByIdAndUpdate(
       reservation.slot,
       { status: 'reserved' },
       { session: mongoSession },

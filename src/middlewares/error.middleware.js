@@ -1,3 +1,4 @@
+const logger = require("../utils/logger");
 const notFound = (req, res, next) => {
   const error = new Error(`Not Found - ${req.originalUrl}`);
   error.statusCode = 404;
@@ -27,7 +28,7 @@ const errorHandler = (err, req, res, _next) => {
   }
 
   if (process.env.NODE_ENV === 'development') {
-    console.error('[Error]', err);
+    logger.error('[Error]', err);
   }
 
   res.status(statusCode).json({

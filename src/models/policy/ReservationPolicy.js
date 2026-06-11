@@ -14,10 +14,24 @@ const reservationPolicySchema = new mongoose.Schema(
       default: 30,
       min: 0,
     },
-    bookingFee: {
+    // Số ngày giữ slot cố định của gói dài hạn sau khi hết hạn (grace) trước khi
+    // hệ thống thu hồi slot về pool. Manager quyết định theo từng tòa nhà.
+    longTermGraceDays: {
       type: Number,
-      default: 0,
-      min: 0,
+      default: 7,
+      min: 1,
+    },
+    // Cửa sổ đặt trước tối đa (số ngày) — manager quyết định được đặt trước bao xa.
+    maxAdvanceDays: {
+      type: Number,
+      default: 7,
+      min: 1,
+    },
+    // Thời lượng đỗ tối đa cho mỗi lượt đặt (số giờ) — manager giới hạn mỗi lượt.
+    maxDurationHours: {
+      type: Number,
+      default: 24,
+      min: 1,
     },
     refundPercent: {
       type: Number,
@@ -33,8 +47,6 @@ const reservationPolicySchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
-    // minAdvanceMinutes và maxAdvanceHours đã bỏ —
-    // khách tự chọn thời gian bất kỳ, hệ thống tính phí tự động.
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

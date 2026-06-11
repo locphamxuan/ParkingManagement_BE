@@ -1,8 +1,14 @@
 ﻿const LongTermPackage = require("../../models/policy/LongTermPackage");
+const logger = require("../../utils/logger");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
+const ParkingSlot = require("../../models/building/ParkingSlot");
+const Notification = require("../../models/log/Notification");
+const User = require("../../models/user/User");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
+const { defaultMaxHoursByDuration } = require("../../utils/longTermUsage");
+const { sendNotificationEmail } = require("../../utils/email");
 
 const listPackages = async (user, buildingId, query = {}) => {
   ensureManagerOwnsBuilding(user, buildingId);
@@ -25,6 +31,12 @@ const createPackage = async (user, buildingId, payload) => {
     code: String(payload.code || "").trim().toUpperCase(),
     durationDays: Number(payload.durationDays),
     price: Number(payload.price),
+    // Giờ/ngày: dùng giá trị manager nhập, nếu bỏ trống thì mặc định theo thời hạn
+    // (tuần 5h, tháng 7h, năm 10h).
+    maxHoursPerDay:
+      payload.maxHoursPerDay !== undefined && payload.maxHoursPerDay !== null && payload.maxHoursPerDay !== ''
+        ? Number(payload.maxHoursPerDay)
+        : defaultMaxHoursByDuration(payload.durationDays),
     reservedSlots: payload.reservedSlots ? Number(payload.reservedSlots) : 0,
     description: payload.description || "",
     allowDedicatedSlot: payload.allowDedicatedSlot === true || payload.allowDedicatedSlot === 'true',
@@ -56,7 +68,7 @@ const updatePackage = async (user, buildingId, id, payload) => {
   });
   if (payload.code !== undefined)
     update.code = String(payload.code).trim().toUpperCase();
-  ["durationDays", "price", "reservedSlots"].forEach((k) => {
+  ["durationDays", "price", "reservedSlots", "maxHoursPerDay"].forEach((k) => {
     if (payload[k] !== undefined) update[k] = Number(payload[k]);
   });
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
@@ -141,11 +153,72 @@ const listSubscriptions = async (user, buildingId, query = {}) => {
   };
 };
 
+/**
+ * Manager chủ động thu hồi slot cố định của một subscription (vd giải quyết tranh
+ * chấp, hoặc thu hồi sớm). Thả slot về 'available', đánh dấu slotReleased, ghi
+ * audit và báo cho user. KHÔNG đổi trạng thái gói (không tự hủy).
+ */
+const releaseSubscriptionSlot = async (user, buildingId, subscriptionId) => {
+  ensureManagerOwnsBuilding(user, buildingId);
+
+  const sub = await LongTermSubscription.findOne({
+    _id: subscriptionId,
+    building: buildingId,
+  }).populate("package", "name");
+  if (!sub) throw new AppError("Subscription not found", 404);
+  if (!sub.slot) throw new AppError("Gói này không có chỗ đỗ cố định để thu hồi", 400);
+  if (sub.slotReleased) throw new AppError("Chỗ đỗ đã được thu hồi trước đó", 400);
+
+  await ParkingSlot.findByIdAndUpdate(sub.slot, { status: "available" });
+  await LongTermSubscription.updateOne({ _id: sub._id }, { $set: { slotReleased: true } });
+
+  await writeAuditLog({
+    actor: user,
+    action: "MANAGER_RELEASE_SUBSCRIPTION_SLOT",
+    targetTable: "long_term_subscriptions",
+    targetId: sub._id,
+    building: buildingId,
+    previousValue: { slot: sub.slot, slotReleased: false },
+    newValue: { slotReleased: true },
+    severity: "medium",
+  });
+
+  const pkgName = sub.package?.name || "gói dài hạn";
+  const message =
+    `Chỗ đỗ cố định của gói "${pkgName}" (biển số ${sub.plateNumber}) đã được ban quản lý thu hồi. ` +
+    `Bạn vẫn có thể đỗ xe theo lượt và mua gói mới bất cứ lúc nào.`;
+  try {
+    await Notification.create({
+      user: sub.user,
+      type: "subscription_slot_released",
+      title: "Chỗ đỗ cố định đã được thu hồi",
+      message,
+      plateNumber: sub.plateNumber || null,
+      building: buildingId,
+    });
+    const owner = await User.findById(sub.user).select("email fullName");
+    if (owner?.email) {
+      await sendNotificationEmail({
+        to: owner.email,
+        fullName: owner.fullName,
+        subject: "Chỗ đỗ cố định đã được thu hồi",
+        heading: "Chỗ đỗ cố định đã được thu hồi",
+        bodyHtml: `<p>${message}</p>`,
+      });
+    }
+  } catch (err) {
+    logger.error("[package.releaseSubscriptionSlot] notify failed:", err.message);
+  }
+
+  return sub;
+};
+
 module.exports = {
   listPackages,
   createPackage,
   updatePackage,
   removePackage,
   listSubscriptions,
+  releaseSubscriptionSlot,
 };
 

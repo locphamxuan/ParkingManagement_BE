@@ -25,4 +25,12 @@ const validateSubscribe = (req, _res, next) => {
   next();
 };
 
-module.exports = { validateSubscribe };
+const validateRenew = (req, _res, next) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError('subscriptionId không hợp lệ', 400));
+  }
+  next();
+};
+
+module.exports = { validateSubscribe, validateRenew };

@@ -14,7 +14,16 @@ const notificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['checkin_rejected', 'checkout_rejected', 'general'],
+      enum: [
+        'checkin_rejected',
+        'checkout_rejected',
+        'subscription_expiring',
+        'subscription_expired',
+        'subscription_slot_released',
+        'subscription_overage',
+        'reservation_expired',
+        'general',
+      ],
       default: 'general',
     },
     title: { type: String, required: true, trim: true, maxlength: 160 },

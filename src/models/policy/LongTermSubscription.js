@@ -49,6 +49,21 @@ const longTermSubscriptionSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Các mốc ngày nhắc (7/5/3/1) đã gửi cho gói này, tránh gửi trùng.
+    remindersSent: {
+      type: [Number],
+      default: [],
+    },
+    // Đánh dấu slot cố định đã được thu hồi sau khi hết grace.
+    slotReleased: {
+      type: Boolean,
+      default: false,
+    },
+    // Mốc lần cuối gửi cảnh báo "gói đã hết hạn" trong thời gian grace (gửi tối đa 1 lần/ngày).
+    lastGraceReminderAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );
