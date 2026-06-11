@@ -111,6 +111,7 @@ router
   .put(v.validatePackage, packageController.updatePackage)
   .delete(packageController.removePackage);
 router.get("/subscriptions", packageController.listSubscriptions);
+router.post("/subscriptions/:id/release-slot", packageController.releaseSubscriptionSlot);
 
 router
   .route("/reservation-policy")

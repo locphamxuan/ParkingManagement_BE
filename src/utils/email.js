@@ -73,4 +73,28 @@ const sendOtpEmail = async ({ to, otp, fullName }) => {
   });
 };
 
-module.exports = { sendResetPasswordEmail, sendOtpEmail };
+/**
+ * Generic email cho các thông báo hệ thống (gói dài hạn sắp/đã hết hạn, thu hồi
+ * slot, reservation hết hạn, ...). `bodyHtml` là phần nội dung chính (đã được
+ * build sẵn bởi nơi gọi).
+ */
+const sendNotificationEmail = async ({ to, fullName, subject, heading, bodyHtml }) => {
+  const transporter = createTransporter();
+
+  await transporter.sendMail({
+    from: `"PBMS - Parking Management" <${process.env.EMAIL_USER}>`,
+    to,
+    subject,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px">
+        <h2 style="color:#f97316">${heading}</h2>
+        <p>Xin chào <strong>${fullName || 'Quý khách'}</strong>,</p>
+        ${bodyHtml}
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin-top:32px"/>
+        <p style="color:#94a3b8;font-size:12px">PBMS — Parking Building Management System</p>
+      </div>
+    `,
+  });
+};
+
+module.exports = { sendResetPasswordEmail, sendOtpEmail, sendNotificationEmail };

@@ -1,4 +1,5 @@
 ﻿const AuditLog = require("../models/log/AuditLog");
+const logger = require("./logger");
 
 const writeAuditLog = async ({
   actor,
@@ -26,7 +27,7 @@ const writeAuditLog = async ({
       description,
     });
   } catch (err) {
-    console.error("[audit] failed to write log:", err.message);
+    logger.error("[audit] failed to write log:", err.message);
     return null;
   }
 };

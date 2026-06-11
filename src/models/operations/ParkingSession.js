@@ -44,9 +44,20 @@ const parkingSessionSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    // Snapshot of the QR / account camera (Camera 2) — the driver portrait
-    // captured at check-in for evidence / business logic.
+    // Snapshot of the portrait camera — the driver portrait captured at check-in
+    // for evidence / so staff can compare the person at check-out.
     portraitImage: {
+      type: String,
+      default: null,
+    },
+    // Snapshots captured at CHECK-OUT (xe ra) for evidence / đối chiếu:
+    //  - exitPlateImage    : license-plate camera lúc ra
+    //  - exitPortraitImage : portrait camera (người lấy xe) lúc ra
+    exitPlateImage: {
+      type: String,
+      default: null,
+    },
+    exitPortraitImage: {
       type: String,
       default: null,
     },

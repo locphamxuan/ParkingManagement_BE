@@ -42,6 +42,10 @@ const longTermPackageSchema = new mongoose.Schema(
       min: 0,
     },
     description: { type: String, trim: true, maxlength: 500, default: "" },
+    // Số giờ đỗ tối đa/ngày được miễn phí của gói. Đậu quá sẽ tính phí phần dư
+    // theo PricePolicy thường (manager set). 0 = không giới hạn.
+    // Gợi ý mặc định theo thời hạn: tuần 5h, tháng 7h, năm 10h (cả xe máy & ô tô).
+    maxHoursPerDay: { type: Number, default: 0, min: 0 },
     // When true, subscribers can reserve a specific dedicated parking slot.
     allowDedicatedSlot: { type: Boolean, default: false },
     benefits: { type: [String], default: [] },

@@ -1,4 +1,5 @@
 const webhookService = require('../../services/payment/webhook.service');
+const logger = require("../../utils/logger");
 
 /**
  * POST /api/payments/webhook
@@ -11,7 +12,7 @@ const handleWebhook = async (req, res) => {
     await webhookService.handle(req.body);
     res.json({ success: true });
   } catch (err) {
-    console.error('[PayOS Webhook]', err.message);
+    logger.error('[PayOS Webhook]', err.message);
     res.status(err.statusCode || 400).json({ success: false, error: err.message });
   }
 };

@@ -1,22 +1,24 @@
 /**
  * Vietnamese license-plate normalization & validation.
+ * Phủ đủ các định dạng biển dân sự hiện hành của Việt Nam:
  *
- * Canonical form: `59G2-038.80`
- *   - province: 2 digits
- *   - series:   1 letter + 1 digit (e.g. G2, A1, F1) OR 2 letters (e.g. LD, MD).
- *               A bare single letter (e.g. `59G`) is NOT valid — the series digit
- *               is required for letter-series plates.
- *   - number:   4 or 5 digits. 5-digit groups render with a dot before the last
- *               two digits (`NNN.NN`); 4-digit groups render plain (`NNNN`).
+ *   province: 2 chữ số (mã tỉnh/thành).
+ *   series  : 1–2 chữ cái + (tuỳ chọn) 1 chữ số:
+ *     - Ô TÔ          → 1 chữ cái:           30A, 51F, 36C        (vd 30A-123.45)
+ *     - XE MÁY        → 1 chữ cái + 1 số:     59X1, 29B1, 60F8     (vd 59X1-234.56)
+ *     - Đặc biệt/liên doanh → 2 chữ cái:      51LD, 80NG, 29MĐ→MD  (vd 51LD-123.45)
+ *     - Hiếm           → 2 chữ cái + 1 số:    59AB1                (vd 59AB1-234.56)
+ *   number  : 4 hoặc 5 chữ số. Nhóm 5 số hiển thị dấu chấm trước 2 số cuối
+ *             (`NNN.NN`); nhóm 4 số để trơn (`NNNN`).
  *
- * Single source of truth — every read/write of a plate should pass through here
- * so stored values and lookups stay consistent. `normalizePlate` is idempotent
- * on canonical input.
+ * Single source of truth — mọi nơi đọc/ghi biển số nên đi qua đây để giá trị lưu
+ * và tra cứu luôn nhất quán. `normalizePlate` idempotent với input đã canonical.
  */
 
-// Matches the canonical output form (and validates stored values).
-// Series must be a letter+digit (e.g. G2) or two letters (e.g. LD) — never a bare letter.
-const CANONICAL_PLATE_REGEX = /^\d{2}(?:[A-Z]\d|[A-Z]{2})-(?:\d{3}\.\d{2}|\d{4})$/;
+// Khớp dạng canonical (đồng thời validate giá trị đã lưu).
+// Series = 1–2 chữ cái + tuỳ chọn 1 chữ số → phủ cả ô tô (30A), xe máy (59X1),
+// biển 2 chữ (51LD) và biển 2 chữ + số (59AB1).
+const CANONICAL_PLATE_REGEX = /^\d{2}[A-Z]{1,2}\d?-(?:\d{3}\.\d{2}|\d{4})$/;
 
 /**
  * Normalize arbitrary user/OCR input into the canonical Vietnamese plate form.

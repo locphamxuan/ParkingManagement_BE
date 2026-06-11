@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const Feedback = require("../../models/log/Feedback");
+const Feedback = require("../../models/operations/Feedback");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");

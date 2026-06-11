@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Reservation = require('../../models/operations/Reservation');
+const ParkingSession = require('../../models/operations/ParkingSession');
 const Building = require('../../models/building/Building');
 const VehicleType = require('../../models/building/VehicleType');
 const Floor = require('../../models/building/Floor');
@@ -78,7 +79,6 @@ const list = async (userId, query = {}) => {
   const refundAmtByRes = new Map(refundPayments.map((p) => [String(p.reservation), p.amount]));
 
   // Query associated parking sessions for these reservations
-  const ParkingSession = require('../../models/operations/ParkingSession');
   const reservationIds = docs.map((d) => d._id);
   const sessions = await ParkingSession.find({ reservation: { $in: reservationIds } }).lean();
 
@@ -168,17 +168,27 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
   }
 
   // Chỉ cho phép đặt theo giờ nguyên (1, 2, 3... giờ).
-  assertWholeHourDuration(start, end);
+  const durationHours = assertWholeHourDuration(start, end);
+
+  // ── Giới hạn thời lượng tối đa/lượt do MANAGER cấu hình ────────────────────
+  const maxDurationHours = Number(policy.maxDurationHours ?? 24);
+  if (durationHours > maxDurationHours) {
+    throw new AppError(
+      `Thời lượng đặt chỗ tối đa là ${maxDurationHours} giờ/lượt theo chính sách của tòa nhà`,
+      400,
+    );
+  }
 
   const now = new Date();
   if (start < new Date(now.getTime() - 60 * 60 * 1000)) {
     throw new AppError('Start time is too far in the past, please select a valid time.', 400);
   }
 
-  // ── Enforce 7-day maximum advance booking window ──────────────────────────
-  const maxAllowedStart = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  // ── Cửa sổ đặt trước tối đa do MANAGER cấu hình (mặc định 7 ngày) ──────────
+  const maxAdvanceDays = Number(policy.maxAdvanceDays ?? 7);
+  const maxAllowedStart = new Date(now.getTime() + maxAdvanceDays * 24 * 60 * 60 * 1000);
   if (start > maxAllowedStart) {
-    throw new AppError('Chỉ được phép đặt trước chỗ đỗ theo giờ tối đa 7 ngày', 400);
+    throw new AppError(`Chỉ được phép đặt trước chỗ đỗ tối đa ${maxAdvanceDays} ngày`, 400);
   }
 
   // ── 5. Validate & assign slot ──────────────────────────────────────────────

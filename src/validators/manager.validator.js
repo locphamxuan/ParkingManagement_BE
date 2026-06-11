@@ -62,11 +62,30 @@ const validateSlotStatus = wrap((req) => {
   }
 });
 
+const isHHMM = (v) => typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+
 const validatePricePolicy = wrap((req) => {
   if (req.method === "POST")
     requireFields(req.body, ["name", "vehicleType", "hourlyRate"]);
   if (req.body.hourlyRate !== undefined && Number(req.body.hourlyRate) < 0)
     throw new AppError("hourlyRate must be >= 0", 400);
+  if (req.body.type !== undefined && !["regular", "peak"].includes(req.body.type))
+    throw new AppError("type must be 'regular' or 'peak'", 400);
+
+  // Giá theo KHUNG GIỜ (peak): bắt buộc có timeWindow hợp lệ để áp đúng khung.
+  if (req.body.type === "peak") {
+    const w = req.body.timeWindow || {};
+    if (!isHHMM(w.from) || !isHHMM(w.to))
+      throw new AppError("Khung giờ (timeWindow.from/to) phải có định dạng HH:MM", 400);
+    if (w.from === w.to)
+      throw new AppError("Khung giờ bắt đầu và kết thúc không được trùng nhau", 400);
+  }
+
+  // effectiveFrom/effectiveTo nếu có cả hai thì from < to.
+  if (req.body.effectiveFrom && req.body.effectiveTo) {
+    if (new Date(req.body.effectiveFrom) >= new Date(req.body.effectiveTo))
+      throw new AppError("effectiveFrom phải trước effectiveTo", 400);
+  }
 });
 
 const validatePackage = wrap((req) => {
@@ -82,6 +101,8 @@ const validatePackage = wrap((req) => {
     throw new AppError("durationDays must be >= 1", 400);
   if (req.body.price !== undefined && Number(req.body.price) < 0)
     throw new AppError("price must be >= 0", 400);
+  if (req.body.maxHoursPerDay !== undefined && Number(req.body.maxHoursPerDay) < 0)
+    throw new AppError("maxHoursPerDay must be >= 0", 400);
 });
 
 const validateReservationPolicy = wrap((req) => {
@@ -95,6 +116,14 @@ const validateReservationPolicy = wrap((req) => {
     (req.body.depositPercent < 0 || req.body.depositPercent > 100)
   )
     throw new AppError("depositPercent must be 0..100", 400);
+  if (req.body.maxHoldMinutes !== undefined && Number(req.body.maxHoldMinutes) < 0)
+    throw new AppError("maxHoldMinutes must be >= 0", 400);
+  if (req.body.maxAdvanceDays !== undefined && Number(req.body.maxAdvanceDays) < 1)
+    throw new AppError("maxAdvanceDays must be >= 1", 400);
+  if (req.body.maxDurationHours !== undefined && Number(req.body.maxDurationHours) < 1)
+    throw new AppError("maxDurationHours must be >= 1", 400);
+  if (req.body.longTermGraceDays !== undefined && Number(req.body.longTermGraceDays) < 1)
+    throw new AppError("longTermGraceDays must be >= 1", 400);
 });
 
 const validateShift = wrap((req) => {
