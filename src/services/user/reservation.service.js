@@ -88,23 +88,6 @@ const list = async (userId, query = {}) => {
       sessionsMap[s.reservation.toString()] = s;
     }
   });
-
-  // Gắn % hoàn tiền (theo chính sách của từng tòa nhà) + số tiền đã hoàn thực tế
-  // (với lượt đã hủy) để FE hiển thị đúng thay vì 0%.
-  const buildingIds = [...new Set(docs.map((d) => String(d.building?._id || d.building)))];
-  const policies = buildingIds.length
-    ? await ReservationPolicy.find({ building: { $in: buildingIds } }).select('building refundPercent').lean()
-    : [];
-  const refundPctByBuilding = new Map(policies.map((p) => [String(p.building), p.refundPercent ?? 0]));
-
-  const cancelledIds = docs.filter((d) => d.status === 'cancelled').map((d) => d._id);
-  const refundPayments = cancelledIds.length
-    ? await Payment.find({ reservation: { $in: cancelledIds }, type: 'refund', status: 'success' })
-        .select('reservation amount')
-        .lean()
-    : [];
-  const refundAmtByRes = new Map(refundPayments.map((p) => [String(p.reservation), p.amount]));
-
   const items = docs.map((d) => {
     const session = sessionsMap[d._id.toString()] || null;
     return {
