@@ -252,8 +252,63 @@ const resolveFeedback = async (staffContext, feedbackId, replyPayload = {}) => {
   }
 };
 
+const listAllFeedbacks = async (filters = {}) => {
+  const { page, limit } = parsePagination(filters);
+  const filter = {};
+
+  if (filters.status) {
+    if (!FEEDBACK_STATUS.includes(filters.status)) {
+      throw new AppError('Invalid feedback status', 400, 'INVALID_FEEDBACK_STATUS');
+    }
+    filter.status = filters.status;
+  }
+  if (filters.buildingId || filters.building) {
+    const buildingId = filters.buildingId || filters.building;
+    if (mongoose.Types.ObjectId.isValid(buildingId)) {
+      filter.building = buildingId;
+    }
+  }
+  if (filters.rating) {
+    filter.rating = normalizeRating(Number(filters.rating));
+  }
+
+  const mongoSession = await mongoose.startSession();
+  try {
+    let items = [];
+    let total = 0;
+
+    await mongoSession.withTransaction(async () => {
+      items = await Feedback.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('user', 'fullName email avatar')
+        .populate('building', 'name code address')
+        .populate('parkingSession', 'plateNumber entryTime exitTime fee status')
+        .populate('repliedBy', 'fullName email role')
+        .session(mongoSession);
+
+      total = await Feedback.countDocuments(filter).session(mongoSession);
+    });
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  } finally {
+    mongoSession.endSession();
+  }
+};
+
 module.exports = {
   createFeedback,
   listFeedbacks,
   resolveFeedback,
+  listAllFeedbacks,
 };
+

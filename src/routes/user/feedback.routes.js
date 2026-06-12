@@ -14,5 +14,6 @@ const requireFeedbackUser = (req, _res, next) => {
 
 router.post('/', requireFeedbackUser, feedbackController.createFeedback);
 router.get('/me', requireFeedbackUser, feedbackController.listMyFeedbacks);
+router.get('/', feedbackController.listAllFeedbacks);
 
 module.exports = router;

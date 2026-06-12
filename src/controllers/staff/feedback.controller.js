@@ -47,9 +47,16 @@ const resolveFeedback = asyncHandler(async (req, res) => {
   });
 });
 
+const listAllFeedbacks = asyncHandler(async (req, res) => {
+  const data = await feedbackService.listAllFeedbacks(req.query);
+  sendSuccess(res, { data });
+});
+
 module.exports = {
   createFeedback,
   listMyFeedbacks,
   listFeedbacks,
   resolveFeedback,
+  listAllFeedbacks,
 };
+

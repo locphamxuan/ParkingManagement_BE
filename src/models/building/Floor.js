@@ -26,6 +26,11 @@ const floorSchema = new mongoose.Schema(
         ref: "VehicleType",
       },
     ],
+    pricePolicy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PricePolicy",
+      default: null,
+    },
     status: {
       type: String,
       enum: ["active", "inactive", "maintenance"],
