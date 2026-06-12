@@ -22,6 +22,7 @@ const notificationSchema = new mongoose.Schema(
         'subscription_slot_released',
         'subscription_overage',
         'reservation_expired',
+        'feedback_reply', 
         'general',
       ],
       default: 'general',
@@ -30,6 +31,7 @@ const notificationSchema = new mongoose.Schema(
     message: { type: String, required: true, trim: true, maxlength: 1000 },
     plateNumber: { type: String, trim: true, default: null },
     building: { type: mongoose.Schema.Types.ObjectId, ref: 'Building', default: null },
+    feedback: { type: mongoose.Schema.Types.ObjectId, ref: 'Feedback', default: null },
     isRead: { type: Boolean, default: false, index: true },
   },
   { timestamps: true }
