@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Feedback = require("../../models/operations/Feedback");
+const Notification = require("../../models/log/Notification");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
@@ -25,6 +26,7 @@ const list = async (user, buildingId, query = {}) => {
       .populate("user", "fullName email phone")
       .populate("building", "name code address")
       .populate("parkingSession", "plateNumber entryTime exitTime fee status")
+      .populate("reservation", "code plateNumber startTime endTime fee estimatedFee status")
       .populate("repliedBy", "fullName email role")
       .sort("-createdAt")
       .skip((page - 1) * limit)
@@ -67,8 +69,10 @@ const respond = async (user, buildingId, id, payload = {}) => {
       } else if (update.staffReply) {
         update.status = "resolved";
       }
-      if (update.staffReply || update.status === "resolved") {
+      
+      if (update.staffReply) {
         update.repliedBy = user._id;
+        update.repliedAt = new Date();
       }
 
       updated = await Feedback.findByIdAndUpdate(id, update, {
@@ -79,7 +83,25 @@ const respond = async (user, buildingId, id, payload = {}) => {
         .populate("user", "fullName email phone")
         .populate("building", "name code address")
         .populate("parkingSession", "plateNumber entryTime exitTime fee status")
+        .populate("reservation", "code plateNumber startTime endTime fee estimatedFee status")
         .populate("repliedBy", "fullName email role");
+
+      if (update.staffReply) {
+        await Notification.create(
+          [
+            {
+              user: current.user,
+              type: "feedback_reply",
+              title: "Admin has responded to your review",
+              message: `Admin replied: ${update.staffReply}`,
+              feedback: current._id,
+              building: current.building,
+              isRead: false,
+            },
+          ],
+          { session: mongoSession }
+        );
+      }
     });
 
     await writeAuditLog({
