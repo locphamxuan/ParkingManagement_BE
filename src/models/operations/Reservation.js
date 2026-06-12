@@ -51,6 +51,8 @@ const reservationSchema = new mongoose.Schema(
     endTime: { type: Date, default: null },
     // Mốc thời điểm xe thực sự check-in (khác startTime — giờ đặt).
     checkedInAt: { type: Date, default: null },
+    // Mốc đã gửi cảnh báo "đậu quá giờ" (overstay) — tránh báo trùng.
+    overstayNotifiedAt: { type: Date, default: null },
     // 15% deposit charged from user wallet at booking time.
     fee: { type: Number, default: 0, min: 0 },
     // Total estimated fee calculated from duration × price policy (100%).

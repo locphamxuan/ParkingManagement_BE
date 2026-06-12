@@ -17,6 +17,7 @@ const buildingWalletService = require('../../manager/buildingWallet.service');
 const { normalizePlate, plateMatchRegex } = require('../../../utils/plate.util');
 const { calculateParkingFee } = require('../../../utils/feeCalculator');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
+const { getOverstayPenaltyPercent } = require('../../../utils/reservationHold');
 const { sendNotificationEmail } = require('../../../utils/email');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
 const {
@@ -413,6 +414,11 @@ const checkOut = async (user, sessionId, payload = {}) => {
             const kind = vehicleKindFromType(parkingSession.vehicleType);
             const hours = Math.max(1, Math.ceil((now.getTime() - endTime.getTime()) / (1000 * 60 * 60)));
             overstayFee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
+          }
+          // Phụ phí PHẠT overstay (manager cấu hình) — CHỈ áp lên phần vượt giờ.
+          const penaltyPercent = await getOverstayPenaltyPercent(parkingSession.building, mongoSession);
+          if (penaltyPercent > 0) {
+            overstayFee = Math.ceil(overstayFee * (1 + penaltyPercent / 100));
           }
           fee += overstayFee;
         }
