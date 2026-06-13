@@ -1,4 +1,4 @@
-﻿const crypto = require('crypto');
+const crypto = require('crypto');
 const User = require('../models/user/User');
 const OtpVerification = require('../models/user/OtpVerification');
 const AppError = require('../utils/AppError');
@@ -83,7 +83,7 @@ const resetPassword = async (token, newPassword) => {
   user.password = newPassword;
   user.resetPasswordToken = null;
   user.resetPasswordExpires = null;
-  await user.save();
+  await user.save({ validateBeforeSave: false });
 
   return buildAuthResponse(user);
 };
