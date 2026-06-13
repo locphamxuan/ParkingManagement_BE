@@ -14,13 +14,6 @@ const reservationPolicySchema = new mongoose.Schema(
       default: 30,
       min: 0,
     },
-    // Số ngày giữ slot cố định của gói dài hạn sau khi hết hạn (grace) trước khi
-    // hệ thống thu hồi slot về pool. Manager quyết định theo từng tòa nhà.
-    longTermGraceDays: {
-      type: Number,
-      default: 7,
-      min: 1,
-    },
     // Cửa sổ đặt trước tối đa (số ngày) — manager quyết định được đặt trước bao xa.
     maxAdvanceDays: {
       type: Number,
@@ -32,6 +25,13 @@ const reservationPolicySchema = new mongoose.Schema(
       type: Number,
       default: 24,
       min: 1,
+    },
+    // % phụ phí PHẠT áp lên phần đỗ quá giờ đặt (overstay). 0 = không phạt, chỉ
+    // tính giá thường cho phần vượt.
+    overstayPenaltyPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     refundPercent: {
       type: Number,

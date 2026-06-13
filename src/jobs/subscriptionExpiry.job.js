@@ -1,6 +1,5 @@
 const { LongTermSubscription, ParkingSlot, User, Notification } = require('../models');
 const logger = require("../utils/logger");
-const ReservationPolicy = require('../models/policy/ReservationPolicy');
 const { sendNotificationEmail } = require('../utils/email');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -12,22 +11,9 @@ const RUN_INTERVAL_MS = 60 * 60 * 1000; // chạy mỗi giờ
 const formatDate = (date) =>
   new Date(date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
-/**
- * Số ngày grace (giữ slot sau hết hạn) theo cấu hình của tòa nhà
- * (ReservationPolicy.longTermGraceDays, fallback 7). Cache theo building cho mỗi
- * lần chạy job để tránh truy vấn lặp.
- */
-const makeGraceResolver = () => {
-  const cache = new Map();
-  return async (buildingId) => {
-    const key = String(buildingId);
-    if (!cache.has(key)) {
-      const policy = await ReservationPolicy.findOne({ building: buildingId }).select('longTermGraceDays');
-      cache.set(key, Math.max(Number(policy?.longTermGraceDays ?? DEFAULT_GRACE_DAYS) || DEFAULT_GRACE_DAYS, 1));
-    }
-    return cache.get(key);
-  };
-};
+// Số ngày grace lấy từ GÓI (LongTermPackage.graceDays), fallback 7.
+const graceDaysOf = (sub) =>
+  Math.max(Number(sub?.package?.graceDays ?? DEFAULT_GRACE_DAYS) || DEFAULT_GRACE_DAYS, 1);
 
 const isSameCalendarDay = (a, b) =>
   a && b &&
@@ -84,7 +70,7 @@ const sendExpiryReminders = async () => {
     endDate: { $gt: new Date(now), $lte: windowEnd },
   })
     .populate('building', 'name')
-    .populate('package', 'name');
+    .populate('package', 'name graceDays');
 
   for (const sub of subs) {
     const daysLeft = Math.ceil((new Date(sub.endDate).getTime() - now) / DAY_MS);
@@ -120,7 +106,7 @@ const sendExpiryReminders = async () => {
  * Bước 2 — Gói đã quá hạn: chuyển 'active' → 'expired'. GIỮ slot (grace 7 ngày).
  * User trở thành tài khoản thường (tính phí theo giờ) từ lần checkin kế tiếp.
  */
-const expireActiveSubscriptions = async (graceDaysForBuilding) => {
+const expireActiveSubscriptions = async () => {
   const now = new Date();
 
   const subs = await LongTermSubscription.find({
@@ -128,7 +114,7 @@ const expireActiveSubscriptions = async (graceDaysForBuilding) => {
     endDate: { $lt: now },
   })
     .populate('building', 'name')
-    .populate('package', 'name');
+    .populate('package', 'name graceDays');
 
   for (const sub of subs) {
     // Set lastGraceReminderAt = now để cảnh báo grace hàng ngày bắt đầu từ NGÀY SAU.
@@ -137,7 +123,7 @@ const expireActiveSubscriptions = async (graceDaysForBuilding) => {
       { $set: { status: 'expired', lastGraceReminderAt: now } },
     );
 
-    const graceDays = await graceDaysForBuilding(sub.building?._id || sub.building);
+    const graceDays = graceDaysOf(sub);
     const graceEnds = new Date(new Date(sub.endDate).getTime() + graceDays * DAY_MS);
     const pkgName = sub.package?.name || 'gói dài hạn';
     const message =
@@ -162,7 +148,7 @@ const expireActiveSubscriptions = async (graceDaysForBuilding) => {
  * Bước 3 — Cảnh báo MỖI NGÀY trong thời gian grace cho gói đã hết hạn còn giữ slot.
  * Gửi tối đa 1 lần/ngày dương lịch (theo lastGraceReminderAt).
  */
-const sendGraceReminders = async (graceDaysForBuilding) => {
+const sendGraceReminders = async () => {
   const now = new Date();
 
   const subs = await LongTermSubscription.find({
@@ -171,13 +157,13 @@ const sendGraceReminders = async (graceDaysForBuilding) => {
     slotReleased: false,
   })
     .populate('building', 'name')
-    .populate('package', 'name');
+    .populate('package', 'name graceDays');
 
   for (const sub of subs) {
     // Đã nhắc trong ngày hôm nay rồi → bỏ qua.
     if (isSameCalendarDay(sub.lastGraceReminderAt, now)) continue;
 
-    const graceDays = await graceDaysForBuilding(sub.building?._id || sub.building);
+    const graceDays = graceDaysOf(sub);
     const graceEnds = new Date(new Date(sub.endDate).getTime() + graceDays * DAY_MS);
     if (now.getTime() > graceEnds.getTime()) continue; // hết grace → để releaseGraceSlots xử lý
 
@@ -204,7 +190,7 @@ const sendGraceReminders = async (graceDaysForBuilding) => {
  * Bước 4 — Hết grace (theo cấu hình từng tòa nhà) mà chưa gia hạn: thả slot về
  * 'available' và báo user.
  */
-const releaseGraceSlots = async (graceDaysForBuilding) => {
+const releaseGraceSlots = async () => {
   const now = Date.now();
 
   const subs = await LongTermSubscription.find({
@@ -213,10 +199,10 @@ const releaseGraceSlots = async (graceDaysForBuilding) => {
     slotReleased: false,
   })
     .populate('building', 'name')
-    .populate('package', 'name');
+    .populate('package', 'name graceDays');
 
   for (const sub of subs) {
-    const graceDays = await graceDaysForBuilding(sub.building?._id || sub.building);
+    const graceDays = graceDaysOf(sub);
     const graceEnds = new Date(sub.endDate).getTime() + graceDays * DAY_MS;
     if (now <= graceEnds) continue; // còn trong grace
 
@@ -247,9 +233,6 @@ const releaseGraceSlots = async (graceDaysForBuilding) => {
 };
 
 const runOnce = async () => {
-  // Cache grace-days theo building, dùng chung cho cả lần chạy.
-  const graceDaysForBuilding = makeGraceResolver();
-
   // Mỗi bước try/catch riêng để một bước lỗi không chặn các bước còn lại.
   try {
     await sendExpiryReminders();
@@ -257,17 +240,17 @@ const runOnce = async () => {
     logger.error('[subscriptionExpiry] sendExpiryReminders error:', err.message);
   }
   try {
-    await expireActiveSubscriptions(graceDaysForBuilding);
+    await expireActiveSubscriptions();
   } catch (err) {
     logger.error('[subscriptionExpiry] expireActiveSubscriptions error:', err.message);
   }
   try {
-    await sendGraceReminders(graceDaysForBuilding);
+    await sendGraceReminders();
   } catch (err) {
     logger.error('[subscriptionExpiry] sendGraceReminders error:', err.message);
   }
   try {
-    await releaseGraceSlots(graceDaysForBuilding);
+    await releaseGraceSlots();
   } catch (err) {
     logger.error('[subscriptionExpiry] releaseGraceSlots error:', err.message);
   }

@@ -20,7 +20,9 @@ const changePassword = async (userId, { currentPassword, newPassword }) => {
   if (!match) throw new AppError('Mật khẩu hiện tại không đúng', 400);
 
   user.password = newPassword;
-  await user.save();
+  // Chỉ validate field vừa đổi (password) — tránh việc dữ liệu cũ không hợp lệ
+  // (vd phone rỗng, biển số định dạng cũ) làm save() báo lỗi oan khi đổi mật khẩu.
+  await user.save({ validateModifiedOnly: true });
 };
 
 module.exports = { update, changePassword };

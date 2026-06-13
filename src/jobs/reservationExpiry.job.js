@@ -115,11 +115,50 @@ const expireStaleReservations = async () => {
   }
 };
 
+/**
+ * Cảnh báo MỘT LẦN cho reservation đã CHECK-IN nhưng đã quá endTime (đang đỗ quá
+ * giờ đặt). Phí phần vượt + phụ phí phạt sẽ thu khi xe ra; ở đây chỉ báo cho user.
+ */
+const notifyOverstayingReservations = async () => {
+  const now = new Date();
+
+  const reservations = await Reservation.find({
+    status: 'checked_in',
+    endTime: { $ne: null, $lt: now },
+    overstayNotifiedAt: null,
+  }).populate('building', 'name');
+
+  for (const reservation of reservations) {
+    const message =
+      `Xe ${reservation.plateNumber} (lượt đặt ${reservation.code}) đã đỗ QUÁ giờ đặt ` +
+      `(hết hạn ${formatDateTime(reservation.endTime)}). Phần đỗ quá giờ sẽ được tính phí theo ` +
+      `giá thường kèm phụ phí phạt khi xe ra. Vui lòng cho xe ra sớm để tránh phát sinh thêm.`;
+
+    await notifyUser(reservation, {
+      type: 'reservation_overstay',
+      title: 'Xe đang đỗ quá giờ đặt',
+      message,
+      emailHtml: `
+        <p>Xe <strong>${reservation.plateNumber}</strong> (lượt đặt <strong>${reservation.code}</strong>)
+        đã đỗ <strong>quá giờ đặt</strong> (hết hạn ${formatDateTime(reservation.endTime)}).</p>
+        <p>Phần đỗ quá giờ sẽ được tính phí theo giá thường <strong>kèm phụ phí phạt</strong> khi xe ra.
+        Vui lòng cho xe ra sớm để tránh phát sinh thêm.</p>`,
+    });
+
+    await Reservation.updateOne({ _id: reservation._id }, { $set: { overstayNotifiedAt: now } });
+  }
+};
+
 const runOnce = async () => {
   try {
     await expireStaleReservations();
   } catch (err) {
     logger.error('[reservationExpiry] expireStaleReservations error:', err.message);
+  }
+  try {
+    await notifyOverstayingReservations();
+  } catch (err) {
+    logger.error('[reservationExpiry] notifyOverstayingReservations error:', err.message);
   }
 };
 
@@ -135,4 +174,4 @@ const start = () => {
   logger.info('[reservationExpiry] scheduler started (interval 5m)');
 };
 
-module.exports = { start, runOnce, expireStaleReservations };
+module.exports = { start, runOnce, expireStaleReservations, notifyOverstayingReservations };

@@ -37,6 +37,10 @@ const createPackage = async (user, buildingId, payload) => {
       payload.maxHoursPerDay !== undefined && payload.maxHoursPerDay !== null && payload.maxHoursPerDay !== ''
         ? Number(payload.maxHoursPerDay)
         : defaultMaxHoursByDuration(payload.durationDays),
+    graceDays:
+      payload.graceDays !== undefined && payload.graceDays !== null && payload.graceDays !== ''
+        ? Number(payload.graceDays)
+        : 7,
     reservedSlots: payload.reservedSlots ? Number(payload.reservedSlots) : 0,
     description: payload.description || "",
     allowDedicatedSlot: payload.allowDedicatedSlot === true || payload.allowDedicatedSlot === 'true',
@@ -68,7 +72,7 @@ const updatePackage = async (user, buildingId, id, payload) => {
   });
   if (payload.code !== undefined)
     update.code = String(payload.code).trim().toUpperCase();
-  ["durationDays", "price", "reservedSlots", "maxHoursPerDay"].forEach((k) => {
+  ["durationDays", "price", "reservedSlots", "maxHoursPerDay", "graceDays"].forEach((k) => {
     if (payload[k] !== undefined) update[k] = Number(payload[k]);
   });
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
@@ -141,6 +145,7 @@ const listSubscriptions = async (user, buildingId, query = {}) => {
     LongTermSubscription.find(filter)
       .populate("user", "fullName email phone")
       .populate("package", "name code durationDays price")
+      .populate({ path: "slot", select: "code floor", populate: { path: "floor", select: "name code" } })
       .sort("-createdAt")
       .skip((page - 1) * limit)
       .limit(limit),

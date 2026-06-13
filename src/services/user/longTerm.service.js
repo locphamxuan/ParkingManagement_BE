@@ -370,9 +370,9 @@ const listSubscriptions = async (userId, query = {}) => {
       .sort('-createdAt')
       .skip((page - 1) * limit)
       .limit(limit)
-      .populate('package', 'name code price durationDays')
+      .populate('package', 'name code price durationDays maxHoursPerDay')
       .populate('building', 'name address')
-      .populate('slot', 'code floor status'),
+      .populate({ path: 'slot', select: 'code floor status', populate: { path: 'floor', select: 'name code' } }),
     LongTermSubscription.countDocuments(filter),
   ]);
 

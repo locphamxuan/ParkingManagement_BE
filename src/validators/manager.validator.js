@@ -103,6 +103,8 @@ const validatePackage = wrap((req) => {
     throw new AppError("price must be >= 0", 400);
   if (req.body.maxHoursPerDay !== undefined && Number(req.body.maxHoursPerDay) < 0)
     throw new AppError("maxHoursPerDay must be >= 0", 400);
+  if (req.body.graceDays !== undefined && Number(req.body.graceDays) < 1)
+    throw new AppError("graceDays must be >= 1", 400);
 });
 
 const validateReservationPolicy = wrap((req) => {
@@ -122,8 +124,8 @@ const validateReservationPolicy = wrap((req) => {
     throw new AppError("maxAdvanceDays must be >= 1", 400);
   if (req.body.maxDurationHours !== undefined && Number(req.body.maxDurationHours) < 1)
     throw new AppError("maxDurationHours must be >= 1", 400);
-  if (req.body.longTermGraceDays !== undefined && Number(req.body.longTermGraceDays) < 1)
-    throw new AppError("longTermGraceDays must be >= 1", 400);
+  if (req.body.overstayPenaltyPercent !== undefined && Number(req.body.overstayPenaltyPercent) < 0)
+    throw new AppError("overstayPenaltyPercent must be >= 0", 400);
 });
 
 const validateShift = wrap((req) => {
