@@ -1,4 +1,4 @@
-﻿const crypto = require('crypto');
+const crypto = require('crypto');
 const User = require('../models/user/User');
 const OtpVerification = require('../models/user/OtpVerification');
 const AppError = require('../utils/AppError');
@@ -36,7 +36,7 @@ const login = async ({ email, password }) => {
   }
 
   user.lastLoginAt = new Date();
-  await user.save({ validateBeforeSave: false });
+  await user.save({ validateModifiedOnly: true });
 
   return buildAuthResponse(user);
 };
@@ -47,7 +47,7 @@ const getProfile = async (userId) => {
   return toPublicUser(user);
 };
 
-const forgotPassword = async (email) => {
+const forgotPassword = async (email, frontendUrlFromRequest) => {
   const user = await User.findOne({ email: email.trim().toLowerCase() });
   // Always respond the same to prevent email enumeration
   if (!user || !user.isActive) return;
@@ -57,9 +57,9 @@ const forgotPassword = async (email) => {
 
   user.resetPasswordToken = hashedToken;
   user.resetPasswordExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 min
-  await user.save({ validateBeforeSave: false });
+  await user.save({ validateModifiedOnly: true });
 
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = frontendUrlFromRequest || process.env.FRONTEND_URL || 'http://localhost:5173';
   const resetUrl = `${frontendUrl}/auth/reset-password?token=${plainToken}`;
 
   await sendResetPasswordEmail({ to: user.email, resetUrl, fullName: user.fullName });
@@ -83,7 +83,7 @@ const resetPassword = async (token, newPassword) => {
   user.password = newPassword;
   user.resetPasswordToken = null;
   user.resetPasswordExpires = null;
-  await user.save();
+  await user.save({ validateModifiedOnly: true });
 
   return buildAuthResponse(user);
 };

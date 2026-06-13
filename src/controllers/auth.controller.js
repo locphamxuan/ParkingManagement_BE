@@ -22,7 +22,7 @@ const getMe = asyncHandler(async (req, res) => {
 });
 
 const forgotPassword = asyncHandler(async (req, res) => {
-  await authService.forgotPassword(req.body.email);
+  await authService.forgotPassword(req.body.email, req.body.frontendUrl);
   // Always return 200 regardless of whether email exists (prevent enumeration)
   sendSuccess(res, {
     message: 'If that email is registered, a reset link has been sent.',
