@@ -15,7 +15,7 @@ const listen = (port) =>
   });
 
 const shutdown = async (signal) => {
-  logger.info(`\n[Server] ${signal} — đang tắt...`);
+  logger.info(`\n[Server] ${signal} received — shutting down gracefully...`);
 
   if (server) {
     await new Promise((resolve) => server.close(resolve));
@@ -28,29 +28,38 @@ const shutdown = async (signal) => {
 };
 
 const start = async () => {
+  // Establish database connection
   await connectDB();
 
-  // Scheduler: nhắc gói sắp hết hạn (7/5/3/1 ngày), đánh dấu hết hạn và thu hồi slot grace.
+  // Cron Schedulers
+  // 1. Subscription Expiry Job: Reminds users of upcoming expiry (7/5/3/1 days), marks expired, and releases grace slots.
   require('./jobs/subscriptionExpiry.job').start();
-  // Scheduler: tự động hết hạn reservation no-show (quá 30 phút) và thả slot.
+  // 2. Reservation Expiry Job: Automatically expires no-show reservations (after 30 mins) and releases slots.
   require('./jobs/reservationExpiry.job').start();
 
+  // Resolve active port dynamically
   const port = await findAvailablePort(env.port);
 
   if (port !== env.port) {
     logger.warn(
-      `[Server] Port ${env.port} đang dùng → chuyển sang port ${port} (không cần kill thủ công)`
+      `[Server] Configured port ${env.port} is already in use ➔ Dynamically switching to port ${port}`
     );
   }
 
+  // Start Express HTTP Server
   server = await listen(port);
-  logger.info(`[Server] Server đã chạy thành công — http://localhost:${port}`);
+  
+  // Terminal Status Logs
+  logger.info(`[Server] Application is successfully running at ➔ http://localhost:${port}`);
+  logger.info(`[Swagger] API Documentation UI available at     ➔ http://localhost:${port}/api-docs`);
 };
 
+// Intercept system termination signals
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+// Execute bootstrapping logic
 start().catch((err) => {
-  logger.error('[Server] Unhandled error during start:', err);
+  logger.error('[Server] Unhandled critical error during bootstrap:', err);
   process.exit(1);
 });
