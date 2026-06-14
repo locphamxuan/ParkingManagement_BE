@@ -47,7 +47,7 @@ const getProfile = async (userId) => {
   return toPublicUser(user);
 };
 
-const forgotPassword = async (email, frontendUrlFromRequest) => {
+const forgotPassword = async (email, frontendUrlFromRequest, clientType) => {
   const user = await User.findOne({ email: email.trim().toLowerCase() });
   // Always respond the same to prevent email enumeration
   if (!user || !user.isActive) return;
@@ -59,8 +59,13 @@ const forgotPassword = async (email, frontendUrlFromRequest) => {
   user.resetPasswordExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 min
   await user.save({ validateModifiedOnly: true });
 
-  const frontendUrl = frontendUrlFromRequest || process.env.FRONTEND_URL || 'http://localhost:5173';
-  const resetUrl = `${frontendUrl}/auth/reset-password?token=${plainToken}`;
+  let resetUrl;
+  if (clientType === 'mobile') {
+    resetUrl = `pbms://reset-password?token=${plainToken}`;
+  } else {
+    const frontendUrl = frontendUrlFromRequest || process.env.FRONTEND_URL || 'http://localhost:5173';
+    resetUrl = `${frontendUrl}/auth/reset-password?token=${plainToken}`;
+  }
 
   await sendResetPasswordEmail({ to: user.email, resetUrl, fullName: user.fullName });
 };
