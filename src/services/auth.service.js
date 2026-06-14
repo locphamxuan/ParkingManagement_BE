@@ -59,11 +59,11 @@ const forgotPassword = async (email, frontendUrlFromRequest, clientType) => {
   user.resetPasswordExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 min
   await user.save({ validateModifiedOnly: true });
 
-  const frontendUrl = frontendUrlFromRequest || process.env.FRONTEND_URL || 'http://localhost:5173';
   let resetUrl;
   if (clientType === 'mobile') {
-    resetUrl = `${frontendUrl}/auth/reset-password?token=${plainToken}&clientType=mobile`;
+    resetUrl = `pbms://reset-password?token=${plainToken}`;
   } else {
+    const frontendUrl = frontendUrlFromRequest || process.env.FRONTEND_URL || 'http://localhost:5173';
     resetUrl = `${frontendUrl}/auth/reset-password?token=${plainToken}`;
   }
 
