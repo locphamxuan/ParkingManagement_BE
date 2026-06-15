@@ -5,7 +5,6 @@ const VehicleType = require('../../models/building/VehicleType');
 const Building = require('../../models/building/Building');
 const Floor = require('../../models/building/Floor');
 const ParkingSlot = require('../../models/building/ParkingSlot');
-const LongTermSubscription = require('../../models/policy/LongTermSubscription');
 const AppError = require('../../utils/AppError');
 
 /**
@@ -120,38 +119,17 @@ const listSlotsForFloor = asyncHandler(async (req, res) => {
       ? { _id: floorVTs[0]._id, name: floorVTs[0].name, code: floorVTs[0].code }
       : null;
 
-  // Slot đang được một gói dài hạn giữ (active hoặc vừa hết hạn còn trong grace)
-  // → hiển thị biển số + tên tài khoản chủ slot, và không cho user khác chọn.
-  const slotIds = slots.map((s) => s._id);
-  const holders = slotIds.length
-    ? await LongTermSubscription.find({
-        slot: { $in: slotIds },
-        slotReleased: false,
-        status: { $in: ['active', 'expired'] },
-      })
-        .select('slot plateNumber user')
-        .populate('user', 'fullName')
-    : [];
-  const ownerBySlot = new Map(
-    holders.map((h) => [
-      String(h.slot),
-      { plateNumber: h.plateNumber, accountName: h.user?.fullName || null },
-    ]),
-  );
-
-  const slotsOut = slots.map((s) => {
-    const owner = ownerBySlot.get(String(s._id)) || null;
-    return {
-      _id: s._id,
-      code: s.code,
-      status: s.status,
-      reservable: s.reservable,
-      vehicleType: slotVehicleType,
-      // Chỉ chọn được slot còn trống (available) và không bị gói nào giữ.
-      selectable: s.status === 'available' && !owner,
-      owner, // { plateNumber, accountName } nếu đang bị một gói giữ, ngược lại null
-    };
-  });
+  // Gói dài hạn KHÔNG còn giữ slot cố định → slot chỉ bị giữ bởi reservation
+  // ('reserved') hoặc đang có xe ('occupied'). Slot còn trống là chọn được.
+  const slotsOut = slots.map((s) => ({
+    _id: s._id,
+    code: s.code,
+    status: s.status,
+    reservable: s.reservable,
+    vehicleType: slotVehicleType,
+    selectable: s.status === 'available',
+    owner: null,
+  }));
 
   sendSuccess(res, {
     data: { floor: { _id: floor._id, name: floor.name, code: floor.code }, slots: slotsOut },

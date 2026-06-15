@@ -17,7 +17,6 @@ const buildingWalletController = require("../../controllers/manager/buildingWall
 const buildingController = require("../../controllers/manager/building.controller");
 
 const v = require("../../validators/manager.validator");
-const { requireActiveSubscription } = require("../../middlewares/subscription.middleware");
 
 const router = express.Router({ mergeParams: true });
 
@@ -27,25 +26,16 @@ router.use(
   authorizeBuildingAccess
 );
 
-// ── Building Wallet ─ (NOT subscription-gated: manager must be able to pay) ─────
+// ── Building Wallet ─ (gom doanh thu gửi xe của tòa nhà) ─────────────────────────
 router.get("/wallet", buildingWalletController.getWallet);
 router.get("/wallet/transactions", buildingWalletController.listTransactions);
 router.get("/wallet/daily-revenue", buildingWalletController.getDailyRevenue);
-// Manager manually subscribes to an admin package (transfers package price → system wallet).
-router.post("/wallet/subscribe", buildingWalletController.subscribe);
-router.get("/wallet/subscription-packages", buildingWalletController.listSubscriptionPackages);
-// Subscription status — drives the FE dashboard gate.
-router.get("/subscription", buildingWalletController.getSubscriptionStatus);
 
-// Giờ mở/đóng cửa của tòa nhà — tab riêng, không bị khóa bởi subscription gate.
+// Giờ mở/đóng cửa của tòa nhà.
 router.put("/operating-hours", buildingController.updateOperatingHours);
 // PayOS top-up for building wallet
 router.post("/wallet/topup", buildingWalletController.initiateTopup);
 router.get("/wallet/topup/:orderCode/verify", buildingWalletController.verifyTopup);
-
-// ── Subscription gate ───────────────────────────────────────────────────────────
-// Everything below requires the building to hold an active admin subscription.
-router.use(requireActiveSubscription);
 
 router.get("/dashboard", dashboardController.getOverview);
 
@@ -111,7 +101,6 @@ router
   .put(v.validatePackage, packageController.updatePackage)
   .delete(packageController.removePackage);
 router.get("/subscriptions", packageController.listSubscriptions);
-router.post("/subscriptions/:id/release-slot", packageController.releaseSubscriptionSlot);
 
 router
   .route("/reservation-policy")

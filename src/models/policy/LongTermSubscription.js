@@ -28,11 +28,6 @@ const longTermSubscriptionSchema = new mongoose.Schema(
       trim: true,
       maxlength: 20,
     },
-    slot: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "ParkingSlot",
-      default: null,
-    },
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
     status: {
@@ -42,7 +37,7 @@ const longTermSubscriptionSchema = new mongoose.Schema(
     },
     cancelReason: {
       type: String,
-      enum: ['change_slot', 'change_vehicle', 'no_longer_needed', 'pricing_issue', 'other'],
+      enum: ['change_vehicle', 'no_longer_needed', 'pricing_issue', 'other'],
       default: null,
     },
     cancelNote: {
@@ -53,16 +48,6 @@ const longTermSubscriptionSchema = new mongoose.Schema(
     remindersSent: {
       type: [Number],
       default: [],
-    },
-    // Đánh dấu slot cố định đã được thu hồi sau khi hết grace.
-    slotReleased: {
-      type: Boolean,
-      default: false,
-    },
-    // Mốc lần cuối gửi cảnh báo "gói đã hết hạn" trong thời gian grace (gửi tối đa 1 lần/ngày).
-    lastGraceReminderAt: {
-      type: Date,
-      default: null,
     },
   },
   { timestamps: true }

@@ -36,21 +36,12 @@ const longTermPackageSchema = new mongoose.Schema(
       required: [true, "price is required"],
       min: 0,
     },
-    reservedSlots: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
     description: { type: String, trim: true, maxlength: 500, default: "" },
     // Số giờ đỗ tối đa/ngày được miễn phí của gói. Đậu quá sẽ tính phí phần dư
     // theo PricePolicy thường (manager set). 0 = không giới hạn.
     // Gợi ý mặc định theo thời hạn: tuần 5h, tháng 7h, năm 10h (cả xe máy & ô tô).
+    // Gói KHÔNG giữ slot cố định (floating) — staff gán slot trống lúc check-in.
     maxHoursPerDay: { type: Number, default: 0, min: 0 },
-    // Số ngày giữ chỗ cố định sau khi gói HẾT HẠN (grace) trước khi hệ thống thu
-    // hồi slot về pool. Thuộc về gói (mỗi gói có thể cấu hình khác nhau).
-    graceDays: { type: Number, default: 7, min: 1 },
-    // When true, subscribers can reserve a specific dedicated parking slot.
-    allowDedicatedSlot: { type: Boolean, default: false },
     benefits: { type: [String], default: [] },
     isActive: { type: Boolean, default: true },
   },

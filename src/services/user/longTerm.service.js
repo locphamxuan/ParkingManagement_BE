@@ -1,7 +1,6 @@
 const LongTermPackage = require('../../models/policy/LongTermPackage');
 const logger = require("../../utils/logger");
 const LongTermSubscription = require('../../models/policy/LongTermSubscription');
-const ParkingSlot = require('../../models/building/ParkingSlot');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const User = require('../../models/user/User');
 const AppError = require('../../utils/AppError');
@@ -57,7 +56,7 @@ function validateStartDateConstraint(startDate, durationDays) {
   }
 }
 
-const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) => {
+const subscribe = async (userId, { packageId, plateNumber, startDate }) => {
   // Chuẩn hoá biển số về dạng canonical (giống lúc check-in) để gói luôn được
   // nhận diện khi staff quét xe — tránh lệch '59G2-81000' vs '59G2-810.00'.
   const normalizedPlate = normalizePlate(plateNumber);
@@ -89,32 +88,7 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
 
   const endDate = new Date(resolvedStart.getTime() + pkg.durationDays * 24 * 60 * 60 * 1000);
 
-  // ── Dedicated slot handling ──────────────────────────────────────────────
-  let resolvedSlotId = null;
-
-  if (slotId) {
-    // Gói phải cho phép chỗ đỗ cố định mới được chọn slot.
-    if (!pkg.allowDedicatedSlot) {
-      throw new AppError('Gói này không hỗ trợ chỗ đỗ cố định', 400);
-    }
-
-    // Verify the slot exists, is in the same building, matches vehicle type, and is available
-    const slot = await ParkingSlot.findById(slotId).populate('vehicleType', 'code');
-    if (!slot) {
-      throw new AppError('Không tìm thấy chỗ đỗ', 404);
-    }
-    if (String(slot.building) !== String(pkg.building)) {
-      throw new AppError('Chỗ đỗ không thuộc cùng tòa nhà với gói đăng ký', 400);
-    }
-    if (slot.vehicleType && String(slot.vehicleType._id || slot.vehicleType) !== String(pkg.vehicleType)) {
-      throw new AppError('Loại xe của chỗ đỗ không khớp với gói đăng ký', 400);
-    }
-    if (slot.status !== 'available') {
-      throw new AppError('Chỗ đỗ hiện không khả dụng', 409);
-    }
-
-    resolvedSlotId = slot._id;
-  }
+  // Gói floating: KHÔNG giữ slot cố định. Staff gán slot trống lúc check-in.
 
   // ── Debit wallet ─────────────────────────────────────────────────────────
   const updatedUser = await User.findOneAndUpdate(
@@ -132,23 +106,13 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
       package: packageId,
       building: pkg.building,
       plateNumber: normalizedPlate,
-      slot: resolvedSlotId,
       startDate: resolvedStart,
       endDate,
       status: 'active',
     });
-
-    // Reserve the slot if one was assigned
-    if (resolvedSlotId) {
-      await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'reserved' });
-    }
   } catch (err) {
     // Rollback wallet debit on failure
     await User.findByIdAndUpdate(userId, { $inc: { walletBalance: pkg.price } });
-    // Rollback slot status if it was changed
-    if (resolvedSlotId) {
-      await ParkingSlot.findByIdAndUpdate(resolvedSlotId, { status: 'available' });
-    }
     throw err;
   }
 
@@ -170,21 +134,8 @@ const subscribe = async (userId, { packageId, plateNumber, slotId, startDate }) 
   return subscription;
 };
 
-/**
- * Release a dedicated slot back to 'available' when its subscription ends.
- * Called when a subscription is cancelled or detected as expired.
- */
-const releaseSubscriptionSlot = async (subscription) => {
-  if (!subscription.slot) return;
-  try {
-    await ParkingSlot.findByIdAndUpdate(subscription.slot, { status: 'available' });
-  } catch (err) {
-    logger.error('[longTerm.releaseSlot] Failed to release slot:', err.message);
-  }
-};
-
 const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancelNote } = {}) => {
-  const validReasons = ['change_slot', 'change_vehicle', 'no_longer_needed', 'pricing_issue', 'other'];
+  const validReasons = ['change_vehicle', 'no_longer_needed', 'pricing_issue', 'other'];
   if (!cancelReason || !validReasons.includes(cancelReason)) {
     throw new AppError('Lý do hủy không hợp lệ', 400);
   }
@@ -225,14 +176,6 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
       subscription.cancelReason = cancelReason;
       subscription.cancelNote = cancelNote || '';
       await subscription.save({ session: mongoSession });
-
-      if (subscription.slot) {
-        await ParkingSlot.findByIdAndUpdate(
-          subscription.slot,
-          { status: 'available' },
-          { session: mongoSession }
-        );
-      }
 
       const packagePrice = subscription.package.price;
       const refundAmount = Math.round(packagePrice * 0.95);
@@ -275,12 +218,12 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
   }
 };
 
-const GRACE_DAYS = 7;
+// Số ngày sau khi hết hạn vẫn cho phép gia hạn (gói floating không còn slot).
+const RENEW_WINDOW_DAYS = 7;
 
 /**
- * Gia hạn một gói dài hạn: cộng dồn thêm 1 kỳ (durationDays của package) và
- * giữ nguyên slot cố định. Cho phép khi gói đang 'active', hoặc đã 'expired'
- * nhưng vẫn trong grace 7 ngày (slot chưa bị thu hồi).
+ * Gia hạn một gói dài hạn: cộng dồn thêm 1 kỳ (durationDays của package).
+ * Cho phép khi gói đang 'active', hoặc đã 'expired' nhưng trong vòng 7 ngày.
  */
 const renewSubscription = async (userId, subscriptionId) => {
   const mongoSession = await mongoose.startSession();
@@ -300,13 +243,13 @@ const renewSubscription = async (userId, subscriptionId) => {
 
       const now = new Date();
       const endDate = new Date(subscription.endDate);
-      const graceCutoff = new Date(now.getTime() - GRACE_DAYS * 24 * 60 * 60 * 1000);
+      const renewCutoff = new Date(now.getTime() - RENEW_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
       if (subscription.status === 'active') {
         // ok
       } else if (subscription.status === 'expired') {
-        // Chỉ cho gia hạn khi còn trong grace và slot chưa bị thu hồi.
-        if (subscription.slotReleased || endDate < graceCutoff) {
+        // Chỉ cho gia hạn trong vòng 7 ngày kể từ khi hết hạn.
+        if (endDate < renewCutoff) {
           throw new AppError(
             'Gói đã quá thời hạn gia hạn (quá 7 ngày). Vui lòng mua gói mới.',
             400,
@@ -333,7 +276,6 @@ const renewSubscription = async (userId, subscriptionId) => {
       subscription.endDate = newEnd;
       subscription.status = 'active';
       subscription.remindersSent = [];
-      subscription.slotReleased = false;
       await subscription.save({ session: mongoSession });
 
       await WalletTransaction.create(
@@ -371,12 +313,11 @@ const listSubscriptions = async (userId, query = {}) => {
       .skip((page - 1) * limit)
       .limit(limit)
       .populate('package', 'name code price durationDays maxHoursPerDay')
-      .populate('building', 'name address')
-      .populate({ path: 'slot', select: 'code floor status', populate: { path: 'floor', select: 'name code' } }),
+      .populate('building', 'name address'),
     LongTermSubscription.countDocuments(filter),
   ]);
 
   return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
-module.exports = { listPackages, subscribe, listSubscriptions, cancelSubscription, renewSubscription, releaseSubscriptionSlot };
+module.exports = { listPackages, subscribe, listSubscriptions, cancelSubscription, renewSubscription };

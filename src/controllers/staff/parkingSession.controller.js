@@ -37,6 +37,11 @@ const lookupPlate = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
+const listFreeSlots = asyncHandler(async (req, res) => {
+  const items = await parkingSessionService.listFreeSlots(req.user, req.query.building || req.query.buildingId);
+  sendSuccess(res, { data: { items } });
+});
+
 /**
  * POST /api/staff/parking-sessions/scan
  * AI camera (Camera 1): reads plate + brand from a captured frame and resolves
@@ -77,4 +82,4 @@ const verifyPayment = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, scan, reject, initiatePayment, verifyPayment };
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment };

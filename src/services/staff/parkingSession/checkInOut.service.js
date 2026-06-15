@@ -70,18 +70,13 @@ const checkIn = async (user, payload) => {
         throw new AppError('Cần ảnh chân dung tài xế để đối chiếu khi lấy xe', 400, 'PORTRAIT_REQUIRED');
       }
 
-      // Nhận diện gói dài hạn sớm (qua biển số lấy từ QR phương tiện hoặc nhập tay)
-      // để quyết định có bỏ qua chặn capacity hay không.
+      // Nhận diện gói dài hạn sớm (qua biển số lấy từ QR phương tiện hoặc nhập tay).
       const longTerm = await resolveLongTermSubscription(plateNumber, allowedBuildings);
 
-      // Subscriber CÓ slot cố định → luôn được vào, bỏ qua chặn "hết chỗ" vì chỗ đã
-      // dành riêng cho họ. Người mua gói không có slot cố định vẫn theo capacity.
-      const hasDedicatedSlot = Boolean(longTerm && longTerm.slot);
-      if (!hasDedicatedSlot) {
-        const { totalSlots, activeSessions } = await findCapacityForBuilding(buildingId);
-        if (totalSlots > 0 && activeSessions >= totalSlots) {
-          throw new AppError('Building is at capacity', 409);
-        }
+      // Gói floating: không còn slot cố định → mọi xe (kể cả gói) đều theo capacity.
+      const { totalSlots, activeSessions } = await findCapacityForBuilding(buildingId);
+      if (totalSlots > 0 && activeSessions >= totalSlots) {
+        throw new AppError('Building is at capacity', 409);
       }
 
       const duplicate = await findDuplicateActiveSession(plateNumber);
@@ -90,6 +85,21 @@ const checkIn = async (user, payload) => {
       }
 
       if (longTerm) {
+        // Gói floating: staff PHẢI chọn 1 slot trống để gán cho xe (slot → occupied).
+        const ltSlotId = asObjectId(payload?.slot || payload?.slotId);
+        if (!ltSlotId) {
+          throw new AppError('Cần chọn chỗ đỗ trống cho xe mua gói', 400, 'SLOT_REQUIRED_FOR_LONG_TERM');
+        }
+        const ltSlot = await ParkingSlot.findById(ltSlotId).session(session);
+        if (!ltSlot || (ltSlot.building && String(ltSlot.building) !== String(buildingId))) {
+          throw new AppError('Chỗ đỗ không hợp lệ', 400, 'INVALID_SLOT');
+        }
+        if (ltSlot.status !== 'available') {
+          throw new AppError('Chỗ đỗ đã có xe hoặc không khả dụng', 409, 'SLOT_NOT_AVAILABLE');
+        }
+        ltSlot.status = 'occupied';
+        await ltSlot.save({ session });
+
         const created = await ParkingSession.create(
           [{
             plateNumber,
@@ -103,7 +113,7 @@ const checkIn = async (user, payload) => {
             plateImage,
             portraitImage,
             entryGate: gate,
-            slot: longTerm.slot || null,
+            slot: ltSlotId,
             note: `long_term:${longTerm._id}`,
           }],
           { session },
@@ -369,6 +379,16 @@ const checkOut = async (user, sessionId, payload = {}) => {
           payload.bypassMismatch ? 'plate_mismatch_bypassed' : null,
         ].filter(Boolean).join(' | ');
         await parkingSession.save({ session: mongoSession });
+
+        // Gói floating: nhả slot về 'available' khi xe rời (giống session thường).
+        if (parkingSession.slot) {
+          const ltSlotId = parkingSession.slot._id || parkingSession.slot;
+          const ltSlot = await ParkingSlot.findById(ltSlotId).session(mongoSession);
+          if (ltSlot && ltSlot.status !== 'maintenance') {
+            ltSlot.status = 'available';
+            await ltSlot.save({ session: mongoSession });
+          }
+        }
 
         await logAudit(mongoSession, {
           actor: user._id,
