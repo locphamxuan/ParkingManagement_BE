@@ -11,6 +11,9 @@ router.get("/search", parkingSessionController.search);
 // Plate lookup — returns hasAccount + user wallet info for staff at entry gate
 router.get("/lookup-plate/:plate", parkingSessionController.lookupPlate);
 
+// Free slots of a building (for assigning a long-term package vehicle at check-in)
+router.get("/free-slots", parkingSessionController.listFreeSlots);
+
 // AI camera (Camera 1) — recognize plate + brand from an image, resolve account
 router.post("/scan", parkingSessionController.scan);
 

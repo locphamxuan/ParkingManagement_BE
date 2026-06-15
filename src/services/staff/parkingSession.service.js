@@ -18,6 +18,7 @@ module.exports = {
   getById: query.getById,
   search: query.search,
   lookupPlate: query.lookupPlate,
+  listFreeSlots: query.listFreeSlots,
   scanVehicle: query.scanVehicle,
   rejectEntry: query.rejectEntry,
   initiatePayment: payment.initiatePayment,

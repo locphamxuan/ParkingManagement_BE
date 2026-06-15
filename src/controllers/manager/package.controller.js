@@ -48,20 +48,10 @@ const listSubscriptions = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-const releaseSubscriptionSlot = asyncHandler(async (req, res) => {
-  const item = await service.releaseSubscriptionSlot(
-    req.user,
-    req.params.buildingId,
-    req.params.id
-  );
-  sendSuccess(res, { message: "Subscription slot released", data: { item } });
-});
-
 module.exports = {
   listPackages,
   createPackage,
   updatePackage,
   removePackage,
   listSubscriptions,
-  releaseSubscriptionSlot,
 };

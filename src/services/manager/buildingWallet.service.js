@@ -1,7 +1,6 @@
 const mongoose = require('mongoose');
 const BuildingWallet = require('../../models/finance/BuildingWallet');
 const BuildingWalletTransaction = require('../../models/finance/BuildingWalletTransaction');
-const SystemWallet = require('../../models/finance/SystemWallet');
 const AppError = require('../../utils/AppError');
 
 // ─── Day helpers (local-server time) ───────────────────────────────────────────
@@ -145,51 +144,10 @@ const listTransactions = async (buildingId, query = {}) => {
   return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
-/**
- * Manager manually transfers money from their building wallet to the system (admin) wallet
- * as payment for an admin subscription package.
- *
- * @param {string|ObjectId} buildingId
- * @param {number} amount - exact price of the subscription package
- * @param {string|ObjectId} performedById - manager user ID
- * @param {string|ObjectId} [packageId] - optional reference to AdminSubscriptionPackage
- */
-const manualTransferToAdmin = async (buildingId, amount, performedById, packageId) => {
-  const amt = Number(amount);
-  if (!amt || amt <= 0) throw new AppError('amount must be a positive number', 400);
-
-  const mongoSession = await mongoose.startSession();
-  try {
-    let updatedBuildingWallet;
-    await mongoSession.withTransaction(async () => {
-      updatedBuildingWallet = await debit(
-        buildingId, amt, 'admin_subscription', null, performedById, mongoSession,
-      );
-
-      await SystemWallet.findOneAndUpdate(
-        {},
-        { $inc: { balance: amt } },
-        { new: true, upsert: true, session: mongoSession },
-      );
-
-      await BuildingWallet.findOneAndUpdate(
-        { building: buildingId },
-        { $inc: { totalTransferred: amt } },
-        { session: mongoSession },
-      );
-    });
-
-    return updatedBuildingWallet;
-  } finally {
-    mongoSession.endSession();
-  }
-};
-
 module.exports = {
   getOrCreate,
   credit,
   debit,
   getDailyRevenue,
   listTransactions,
-  manualTransferToAdmin,
 };

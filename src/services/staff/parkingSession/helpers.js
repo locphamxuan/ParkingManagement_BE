@@ -54,8 +54,6 @@ const resolveLongTermSubscription = async (plateNumber, allowedBuildings) => {
   const endAt = subscription.endDate ? new Date(subscription.endDate) : null;
   if (endAt && endAt.getTime() < Date.now()) {
     // Hết hạn → đánh dấu 'expired'; user trở thành tài khoản thường (tính giờ).
-    // GIỮ slot cố định trong grace 7 ngày — việc thả slot do job
-    // subscriptionExpiry.releaseGraceSlots() xử lý sau khi quá grace.
     await LongTermSubscription.updateOne(
       { _id: subscription._id },
       { $set: { status: 'expired' } },

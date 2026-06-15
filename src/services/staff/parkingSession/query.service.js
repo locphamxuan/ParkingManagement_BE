@@ -1,5 +1,5 @@
 const AppError = require('../../../utils/AppError');
-const { ParkingSession, User, Notification } = require('../../../models');
+const { ParkingSession, ParkingSlot, LongTermSubscription, User, Notification } = require('../../../models');
 const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../../utils/plate.util');
 const visionScanService = require('../visionScan.service');
@@ -90,11 +90,19 @@ const lookupPlate = async (staffUser, plateNumber) => {
   // (e.g. 59G2-03880 / 59G2-038.80) still resolves to its owner.
   const plateRx = plateMatchRegex(plate) || plate;
 
-  const [user, activeSession] = await Promise.all([
+  const [user, activeSession, activeSub] = await Promise.all([
     User.findOne({ 'licensePlates.plateNumber': plateRx })
       .select('fullName email phone walletBalance licensePlates'),
     ParkingSession.findOne({ plateNumber: plateRx, status: 'active' })
       .select('_id building entryTime'),
+    // Gói dài hạn còn hiệu lực cho biển số này (để staff biết phải gán chỗ trống).
+    LongTermSubscription.findOne({
+      plateNumber: plateRx,
+      status: 'active',
+      building: { $in: allowedBuildings },
+    })
+      .populate('package', 'name maxHoursPerDay')
+      .sort('-updatedAt'),
   ]);
 
   // The vehicle type registered for THIS plate (normalized to car|motorcycle),
@@ -123,7 +131,32 @@ const lookupPlate = async (staffUser, plateNumber) => {
     activeSession: activeSession
       ? { id: activeSession._id, building: activeSession.building, entryTime: activeSession.entryTime }
       : null,
+    // Gói floating: nếu có gói còn hạn, staff PHẢI gán 1 slot trống khi check-in.
+    hasActivePackage: Boolean(activeSub),
+    activePackage: activeSub
+      ? {
+          id: activeSub._id,
+          name: activeSub.package?.name || 'Gói dài hạn',
+          maxHoursPerDay: activeSub.package?.maxHoursPerDay ?? 0,
+        }
+      : null,
   };
+};
+
+/* ─────────────────────────────────────────────
+   listFreeSlots — slot 'available' của 1 tòa nhà (cho staff gán xe gói lúc check-in)
+───────────────────────────────────────────── */
+const listFreeSlots = async (staffUser, buildingId) => {
+  const allowed = assignedBuildingIds(staffUser).map(String);
+  if (!buildingId) throw new AppError('building is required', 400);
+  if (!allowed.includes(String(buildingId))) {
+    throw new AppError('Forbidden building scope', 403, 'FORBIDDEN_BUILDING_SCOPE');
+  }
+  const slots = await ParkingSlot.find({ building: buildingId, status: 'available' })
+    .select('_id code floor')
+    .populate('floor', 'name code')
+    .sort('code');
+  return slots;
 };
 
 /* ─────────────────────────────────────────────
@@ -215,4 +248,4 @@ const rejectEntry = async (staffUser, { plateNumber, stage, reason, building } =
   return { plateNumber: plate, stage: isCheckout ? 'check-out' : 'check-in', notified };
 };
 
-module.exports = { listActive, getById, search, lookupPlate, scanVehicle, rejectEntry };
+module.exports = { listActive, getById, search, lookupPlate, listFreeSlots, scanVehicle, rejectEntry };

@@ -28,10 +28,6 @@ router.post("/:buildingId/revoke-manager", assignmentController.revokeManager);
 router.post("/:buildingId/assign-staff", assignmentController.assignStaff);
 router.post("/:buildingId/revoke-staff", assignmentController.revokeStaff);
 
-// Admin manually grants / revokes a building's admin-system subscription.
-router.post("/:id/subscription/grant", controller.grantSubscription);
-router.post("/:id/subscription/revoke", controller.revokeSubscription);
-
 // Admin xem bảng giá của building (read-only)
 router.get("/:id/price-policies", pricePolicyController.listByBuilding);
 // Admin xem gói dài hạn của building (read-only)

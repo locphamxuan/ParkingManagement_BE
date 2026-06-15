@@ -103,8 +103,6 @@ const validatePackage = wrap((req) => {
     throw new AppError("price must be >= 0", 400);
   if (req.body.maxHoursPerDay !== undefined && Number(req.body.maxHoursPerDay) < 0)
     throw new AppError("maxHoursPerDay must be >= 0", 400);
-  if (req.body.graceDays !== undefined && Number(req.body.graceDays) < 1)
-    throw new AppError("graceDays must be >= 1", 400);
 });
 
 const validateReservationPolicy = wrap((req) => {

@@ -1,5 +1,4 @@
 const ShiftRevenue = require("../../models/finance/ShiftRevenue");
-const BuildingWalletTransaction = require("../../models/finance/BuildingWalletTransaction");
 const AppError = require("../../utils/AppError");
 const mongoose = require("mongoose");
 
@@ -63,41 +62,4 @@ const getReport = async ({ from, to, buildingId } = {}) => {
   return { from: dateFrom, to: dateTo, items: rows, grandTotal };
 };
 
-/**
- * List all admin_subscription transfers (manager → system wallet) for revenue tracking.
- */
-const getSubscriptionTransfers = async ({ from, to, buildingId } = {}) => {
-  const filter = { type: 'debit', reason: 'admin_subscription' };
-
-  if (from || to) {
-    filter.createdAt = {};
-    if (from) filter.createdAt.$gte = new Date(from);
-    if (to) {
-      const end = new Date(to);
-      end.setHours(23, 59, 59, 999);
-      filter.createdAt.$lte = end;
-    }
-  }
-  if (buildingId) {
-    filter.building = new mongoose.Types.ObjectId(String(buildingId));
-  }
-
-  const page = 1;
-  const limit = 100;
-
-  const [items, total] = await Promise.all([
-    BuildingWalletTransaction.find(filter)
-      .sort('-createdAt')
-      .limit(limit)
-      .populate('building', 'name code')
-      .populate('performedBy', 'fullName email')
-      .lean(),
-    BuildingWalletTransaction.countDocuments(filter),
-  ]);
-
-  const grandTotal = items.reduce((s, t) => s + (t.amount || 0), 0);
-
-  return { items, total, grandTotal, page, limit };
-};
-
-module.exports = { getReport, getSubscriptionTransfers };
+module.exports = { getReport };
