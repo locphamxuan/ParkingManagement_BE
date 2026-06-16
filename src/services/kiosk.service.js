@@ -5,29 +5,28 @@ const { logAudit } = require('../utils/staffScope');
 const { normalizePlate, plateMatchRegex } = require('../utils/plate.util');
 
 /**
- * Resolve a vehicle QR token (PLT-...) or a raw plate number to a canonical
- * plate string + its owner. Used by the self-service gate kiosk so a reservation
- * driver can check in WITHOUT going through a staff member.
+ * Resolve a REGISTERED vehicle QR token (PLT-...) to its canonical plate + owner.
+ * Kiosk is unmanned, so it ONLY accepts a valid per-plate QR token — a bare plate
+ * number is rejected (anyone could read a plate off a windshield). Drivers who
+ * can't scan their QR must check in via a staff member instead.
  */
-const resolvePlateFromQr = async ({ qrCode, plateNumber }) => {
+const resolvePlateFromQr = async ({ qrCode }) => {
   const token = `${qrCode || ''}`.trim();
-  if (token) {
-    const owner = await User.findOne({ 'licensePlates.qrCode': token }).select('licensePlates');
-    if (owner) {
-      const plate = (owner.licensePlates || []).find((p) => p.qrCode === token);
-      if (plate?.plateNumber) {
-        return { plateNumber: normalizePlate(plate.plateNumber) || plate.plateNumber, user: owner._id };
-      }
-    }
-    // Token might itself be a plain plate string scanned from a QR.
-    const asPlate = normalizePlate(token);
-    if (asPlate) return { plateNumber: asPlate, user: null };
-    throw new AppError('Mã QR phương tiện không hợp lệ hoặc chưa được đăng ký.', 404, 'KIOSK_QR_NOT_FOUND');
+  if (!token) {
+    throw new AppError('Vui lòng quét mã QR phương tiện.', 400, 'KIOSK_QR_REQUIRED');
   }
 
-  const plate = normalizePlate(plateNumber);
-  if (!plate) throw new AppError('qrCode hoặc plateNumber là bắt buộc', 400, 'KIOSK_INPUT_REQUIRED');
-  return { plateNumber: plate, user: null };
+  const owner = await User.findOne({ 'licensePlates.qrCode': token }).select('licensePlates');
+  const plate = owner?.licensePlates?.find((p) => p.qrCode === token);
+  if (!owner || !plate?.plateNumber) {
+    throw new AppError(
+      'Mã QR không hợp lệ hoặc chưa đăng ký. Vui lòng gặp nhân viên để check-in.',
+      404,
+      'KIOSK_QR_NOT_FOUND',
+    );
+  }
+
+  return { plateNumber: normalizePlate(plate.plateNumber) || plate.plateNumber, user: owner._id };
 };
 
 /**

@@ -7,6 +7,12 @@ const update = async (userId, payload) => {
   if (payload.phone !== undefined) updates.phone = payload.phone;
   if (payload.avatar !== undefined) updates.avatar = payload.avatar;
 
+  // Phone phải là duy nhất (trừ chính người dùng này).
+  if (updates.phone) {
+    const taken = await User.exists({ phone: String(updates.phone).trim(), _id: { $ne: userId } });
+    if (taken) throw new AppError('Số điện thoại đã được sử dụng bởi tài khoản khác', 409, 'PHONE_TAKEN');
+  }
+
   const user = await User.findByIdAndUpdate(userId, updates, { new: true, runValidators: true });
   if (!user) throw new AppError('User not found', 404);
   return user;

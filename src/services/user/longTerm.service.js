@@ -1,11 +1,12 @@
 const LongTermPackage = require('../../models/policy/LongTermPackage');
-const logger = require("../../utils/logger");
 const LongTermSubscription = require('../../models/policy/LongTermSubscription');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
+const Payment = require('../../models/finance/Payment');
 const User = require('../../models/user/User');
 const AppError = require('../../utils/AppError');
 const mongoose = require('mongoose');
 const { normalizePlate } = require('../../utils/plate.util');
+const buildingWalletService = require('../manager/buildingWallet.service');
 
 const Building = require('../../models/building/Building');
 
@@ -90,45 +91,68 @@ const subscribe = async (userId, { packageId, plateNumber, startDate }) => {
 
   // Gói floating: KHÔNG giữ slot cố định. Staff gán slot trống lúc check-in.
 
-  // ── Debit wallet ─────────────────────────────────────────────────────────
-  const updatedUser = await User.findOneAndUpdate(
-    { _id: userId, walletBalance: { $gte: pkg.price } },
-    { $inc: { walletBalance: -pkg.price } },
-    { new: true }
-  ).select('walletBalance');
-  if (!updatedUser) throw new AppError('Số dư ví không đủ', 400);
-
-  // ── Create subscription ──────────────────────────────────────────────────
+  // ── Thu tiền + ghi doanh thu (atomic) ────────────────────────────────────
+  // Mua gói = doanh thu của TÒA NHÀ: trừ ví user → tạo Payment(subscription) →
+  // credit BuildingWallet, giống luồng reservation/checkout.
+  const mongoSession = await mongoose.startSession();
   let subscription;
   try {
-    subscription = await LongTermSubscription.create({
-      user: userId,
-      package: packageId,
-      building: pkg.building,
-      plateNumber: normalizedPlate,
-      startDate: resolvedStart,
-      endDate,
-      status: 'active',
-    });
-  } catch (err) {
-    // Rollback wallet debit on failure
-    await User.findByIdAndUpdate(userId, { $inc: { walletBalance: pkg.price } });
-    throw err;
-  }
+    await mongoSession.withTransaction(async () => {
+      const updatedUser = await User.findOneAndUpdate(
+        { _id: userId, walletBalance: { $gte: pkg.price } },
+        { $inc: { walletBalance: -pkg.price } },
+        { new: true, session: mongoSession },
+      ).select('walletBalance');
+      if (!updatedUser) throw new AppError('Số dư ví không đủ', 400);
 
-  // ── Wallet transaction record ────────────────────────────────────────────
-  try {
-    await WalletTransaction.create({
-      user: userId,
-      type: 'debit',
-      amount: pkg.price,
-      balanceAfter: updatedUser.walletBalance,
-      status: 'success',
-      reason: 'long_term_subscription',
-      metadata: { packageId: pkg._id, subscriptionId: subscription._id },
+      const [created] = await LongTermSubscription.create(
+        [{
+          user: userId,
+          package: packageId,
+          building: pkg.building,
+          plateNumber: normalizedPlate,
+          startDate: resolvedStart,
+          endDate,
+          status: 'active',
+        }],
+        { session: mongoSession },
+      );
+      subscription = created;
+
+      await WalletTransaction.create(
+        [{
+          user: userId,
+          type: 'debit',
+          amount: pkg.price,
+          balanceAfter: updatedUser.walletBalance,
+          status: 'success',
+          reason: 'long_term_subscription',
+          metadata: { packageId: pkg._id, subscriptionId: created._id },
+        }],
+        { session: mongoSession },
+      );
+
+      const [payment] = await Payment.create(
+        [{
+          building: pkg.building,
+          subscription: created._id,
+          type: 'subscription',
+          method: 'wallet',
+          amount: pkg.price,
+          status: 'success',
+          user: userId,
+        }],
+        { session: mongoSession },
+      );
+
+      if (pkg.building) {
+        await buildingWalletService.credit(
+          pkg.building, pkg.price, 'subscription_fee', payment._id, mongoSession,
+        );
+      }
     });
-  } catch (txErr) {
-    logger.error('[longTerm.subscribe] WalletTransaction record failed:', txErr.message);
+  } finally {
+    mongoSession.endSession();
   }
 
   return subscription;
@@ -208,6 +232,26 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
         }],
         { session: mongoSession }
       );
+
+      // Hoàn tiền = rút khỏi ví TÒA NHÀ (đối xứng với credit lúc mua) + Payment(refund).
+      if (refundAmount > 0 && subscription.building) {
+        const [refundPayment] = await Payment.create(
+          [{
+            building: subscription.building,
+            subscription: subscription._id,
+            type: 'refund',
+            method: 'wallet',
+            amount: refundAmount,
+            status: 'success',
+            user: userId,
+            note: `Long-term ${subscription._id} cancelled — 95% refund`,
+          }],
+          { session: mongoSession },
+        );
+        await buildingWalletService.debit(
+          subscription.building, refundAmount, 'refund', refundPayment._id, null, mongoSession,
+        );
+      }
 
       result = subscription;
     });
@@ -290,6 +334,25 @@ const renewSubscription = async (userId, subscriptionId) => {
         }],
         { session: mongoSession },
       );
+
+      // Gia hạn = doanh thu tòa nhà → Payment + credit BuildingWallet.
+      const [payment] = await Payment.create(
+        [{
+          building: pkg.building,
+          subscription: subscription._id,
+          type: 'subscription',
+          method: 'wallet',
+          amount: pkg.price,
+          status: 'success',
+          user: userId,
+        }],
+        { session: mongoSession },
+      );
+      if (pkg.building) {
+        await buildingWalletService.credit(
+          pkg.building, pkg.price, 'subscription_fee', payment._id, mongoSession,
+        );
+      }
 
       result = subscription;
     });

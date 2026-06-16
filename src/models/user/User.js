@@ -112,6 +112,17 @@ const userSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    // Brute-force lockout: số lần nhập sai liên tiếp + mốc hết khóa.
+    failedLoginAttempts: {
+      type: Number,
+      default: 0,
+      select: false,
+    },
+    lockUntil: {
+      type: Date,
+      default: null,
+      select: false,
+    },
   },
   {
     timestamps: true,
@@ -120,6 +131,8 @@ const userSchema = new mongoose.Schema(
         delete ret.password;
         delete ret.resetPasswordToken;
         delete ret.resetPasswordExpires;
+        delete ret.failedLoginAttempts;
+        delete ret.lockUntil;
         delete ret.__v;
         return ret;
       },

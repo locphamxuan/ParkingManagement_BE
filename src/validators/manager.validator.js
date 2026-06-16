@@ -124,6 +124,8 @@ const validateReservationPolicy = wrap((req) => {
     throw new AppError("maxDurationHours must be >= 1", 400);
   if (req.body.overstayPenaltyPercent !== undefined && Number(req.body.overstayPenaltyPercent) < 0)
     throw new AppError("overstayPenaltyPercent must be >= 0", 400);
+  if (req.body.cancellationCutoffHours !== undefined && Number(req.body.cancellationCutoffHours) < 0)
+    throw new AppError("cancellationCutoffHours must be >= 0", 400);
 });
 
 const validateShift = wrap((req) => {

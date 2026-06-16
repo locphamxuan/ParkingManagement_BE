@@ -243,7 +243,7 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
       );
       if (!updatedUser) {
         throw new AppError(
-          `Insufficient wallet balance. The deposit (15%) is ${depositAmount.toLocaleString('en-US')} VND — please top up your wallet.`,
+          `Insufficient wallet balance. The deposit (${Math.round(depositRate * 100)}%) is ${depositAmount.toLocaleString('en-US')} VND — please top up your wallet.`,
           400,
         );
       }
@@ -261,6 +261,8 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
           slot: resolvedSlotId,
           fee: depositAmount,
           estimatedFee,
+          // Snapshot mốc hủy (giờ trước startTime) theo chính sách hiện tại của tòa nhà.
+          cancellationCutoffHours: Math.max(Number(policy.cancellationCutoffHours ?? 0), 0),
           status: 'confirmed',
         }],
         { session: mongoSession },
@@ -331,6 +333,19 @@ const cancel = async (userId, id) => {
 
       if (!CANCELLABLE_STATUSES.includes(reservation.status)) {
         throw new AppError('Cannot cancel a reservation in this status', 400);
+      }
+
+      // Mốc hủy do manager cấu hình: phải hủy trước giờ đặt ít nhất X giờ.
+      const cutoffHours = Math.max(Number(reservation.cancellationCutoffHours ?? 0), 0);
+      if (cutoffHours > 0 && reservation.startTime) {
+        const deadline = new Date(new Date(reservation.startTime).getTime() - cutoffHours * 60 * 60 * 1000);
+        if (Date.now() > deadline.getTime()) {
+          throw new AppError(
+            `Đã quá thời hạn hủy — phải hủy trước giờ đặt ít nhất ${cutoffHours} giờ.`,
+            400,
+            'CANCELLATION_CUTOFF_PASSED',
+          );
+        }
       }
 
       // Số tiền cọc đã thu khi đặt.

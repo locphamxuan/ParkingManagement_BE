@@ -82,4 +82,13 @@ const verifyPayment = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment };
+/**
+ * GET /api/staff/parking-sessions/my-shift-revenue
+ * Doanh thu CA của nhân viên cổng ra: tổng tiền đã thu hôm nay + tách phương thức.
+ */
+const myShiftRevenue = asyncHandler(async (req, res) => {
+  const data = await parkingSessionService.getMyShiftRevenue(req.user, req.query);
+  sendSuccess(res, { data });
+});
+
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment, myShiftRevenue };

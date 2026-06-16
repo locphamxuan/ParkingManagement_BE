@@ -47,6 +47,13 @@ const reservationPolicySchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+    // Số GIỜ trước startTime mà user còn được phép hủy. Sau mốc này không hủy được.
+    // 0 = cho hủy bất kỳ lúc nào trước giờ đặt.
+    cancellationCutoffHours: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

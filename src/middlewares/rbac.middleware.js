@@ -58,4 +58,23 @@ const authorizeBuildingAccess = (req, _res, next) => {
   next();
 };
 
-module.exports = { authorize, authorizeBuildingAccess };
+/**
+ * Admin = operator chỉ-ĐỌC cấu hình tòa nhà: cho phép GET/HEAD/OPTIONS, chặn
+ * mọi phương thức ghi (POST/PUT/PATCH/DELETE). Manager không bị ảnh hưởng.
+ * Đặt SAU authorize(MANAGER, ADMIN) trên nhóm route quản lý tòa nhà.
+ */
+const READ_METHODS = ["GET", "HEAD", "OPTIONS"];
+const readOnlyForAdmin = (req, _res, next) => {
+  if (req.user?.role === ROLES.ADMIN && !READ_METHODS.includes(req.method)) {
+    return next(
+      new AppError(
+        "Admin chỉ có quyền xem cấu hình tòa nhà (read-only).",
+        403,
+        "ADMIN_READ_ONLY",
+      ),
+    );
+  }
+  next();
+};
+
+module.exports = { authorize, authorizeBuildingAccess, readOnlyForAdmin };

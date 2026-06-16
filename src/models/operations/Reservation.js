@@ -57,6 +57,9 @@ const reservationSchema = new mongoose.Schema(
     fee: { type: Number, default: 0, min: 0 },
     // Total estimated fee calculated from duration × price policy (100%).
     estimatedFee: { type: Number, default: 0, min: 0 },
+    // Snapshot lúc đặt: phải hủy trước giờ đặt ít nhất số GIỜ này (manager set qua
+    // ReservationPolicy). 0 = được hủy bất kỳ lúc nào trước giờ đặt.
+    cancellationCutoffHours: { type: Number, default: 0, min: 0 },
     status: {
       type: String,
       enum: RESERVATION_STATUS,

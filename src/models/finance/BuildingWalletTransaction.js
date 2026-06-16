@@ -17,7 +17,7 @@ const buildingWalletTransactionSchema = new mongoose.Schema(
     balanceAfter: { type: Number, required: true, min: 0 },
     reason: {
       type: String,
-      enum: ['parking_fee', 'reservation_fee', 'transfer_to_system', 'refund', 'topup', 'admin_subscription'],
+      enum: ['parking_fee', 'reservation_fee', 'subscription_fee', 'transfer_to_system', 'refund', 'topup'],
       required: true,
     },
     relatedPayment: {

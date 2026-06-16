@@ -196,51 +196,6 @@
  *       - { in: query, name: buildingId, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Revenue report returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, additionalProperties: true } } } ] } } } }
- * /api/admin/revenue/subscriptions:
- *   get:
- *     tags: [Admin - Revenue]
- *     summary: List manager subscription transfer revenue
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: query, name: from, schema: { type: string, format: date } }
- *       - { in: query, name: to, schema: { type: string, format: date } }
- *       - { in: query, name: buildingId, schema: { type: string, format: objectId } }
- *     responses:
- *       200: { description: Subscription transfers returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, additionalProperties: true } } } ] } } } }
- * /api/admin/wallet:
- *   get:
- *     tags: [Admin - Wallet]
- *     summary: Get system wallet
- *     security: [{ bearerAuth: [] }]
- *     responses:
- *       200: { description: System wallet returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { wallet: { type: object, properties: { _id: { $ref: '#/components/schemas/ObjectId' }, balance: { type: number, example: 50000000 }, totalDistributed: { type: number, example: 40000000 }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } } } } } } } ] } } } }
- * /api/admin/wallet/topup:
- *   post:
- *     tags: [Admin - Wallet]
- *     summary: Manually top up the system wallet
- *     security: [{ bearerAuth: [] }]
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [amount], properties: { amount: { type: number, minimum: 1, example: 1000000 } } } } } }
- *     responses:
- *       200: { description: Wallet topped up successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Wallet topped up }, data: { type: object, properties: { wallet: { type: object } } } } } ] } } } }
- * /api/admin/wallet/distribute:
- *   post:
- *     tags: [Admin - Wallet]
- *     summary: Distribute system wallet revenue to a building wallet
- *     security: [{ bearerAuth: [] }]
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [buildingId, amount, periodStart, periodEnd], properties: { buildingId: { type: string, format: objectId }, amount: { type: number, minimum: 1, example: 500000 }, periodStart: { type: string, format: date-time }, periodEnd: { type: string, format: date-time }, note: { type: string, example: Monthly distribution } } } } } }
- *     responses:
- *       201: { description: Revenue distributed successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Revenue distributed successfully }, data: { type: object, properties: { wallet: { type: object }, distribution: { type: object } } } } } ] } } } }
- * /api/admin/wallet/distributions:
- *   get:
- *     tags: [Admin - Wallet]
- *     summary: List revenue distributions
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
- *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
- *       - { in: query, name: buildingId, schema: { type: string, format: objectId } }
- *     responses:
- *       200: { description: Distributions returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { type: object } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
  * /api/admin/price-policies:
  *   get:
  *     tags: [Admin - Price Policies]
@@ -252,48 +207,6 @@
  *       - { in: query, name: isActive, schema: { type: boolean } }
  *     responses:
  *       200: { description: Price policies returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/PricePolicy' } } } } } } ] } } } }
- * /api/admin/subscription-packages:
- *   get:
- *     tags: [Admin - Subscription Packages]
- *     summary: List manager subscription packages
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: query, name: isActive, schema: { type: boolean } }
- *     responses:
- *       200: { description: Subscription packages returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { type: object } } } } } } ] } } } }
- *   post:
- *     tags: [Admin - Subscription Packages]
- *     summary: Create a manager subscription package
- *     security: [{ bearerAuth: [] }]
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, price, durationDays], properties: { name: { type: string, example: Standard Plan }, price: { type: number, example: 500000 }, durationDays: { type: integer, example: 30 }, description: { type: string, example: Standard manager subscription }, features: { type: array, items: { type: string } }, isActive: { type: boolean, example: true } } } } } }
- *     responses:
- *       201: { description: Subscription package created successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object } } } ] } } } }
- * /api/admin/subscription-packages/{id}:
- *   get:
- *     tags: [Admin - Subscription Packages]
- *     summary: Get manager subscription package details
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     responses:
- *       200: { description: Subscription package returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object } } } ] } } } }
- *   put:
- *     tags: [Admin - Subscription Packages]
- *     summary: Update a manager subscription package
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { name: { type: string }, price: { type: number }, durationDays: { type: integer }, description: { type: string }, features: { type: array, items: { type: string } }, isActive: { type: boolean } } } } } }
- *     responses:
- *       200: { description: Subscription package updated successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object } } } ] } } } }
- *   delete:
- *     tags: [Admin - Subscription Packages]
- *     summary: Delete a manager subscription package
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     responses:
- *       200: { description: Subscription package deleted successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Package deleted } } } ] } } } }
  * /api/payments/webhook:
  *   post:
  *     tags: [Payment - Webhook]

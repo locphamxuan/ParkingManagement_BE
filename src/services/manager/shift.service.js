@@ -1,7 +1,8 @@
 ﻿const Shift = require("../../models/operations/Shift");
 const StaffShift = require("../../models/operations/StaffShift");
-const ShiftRevenue = require("../../models/finance/ShiftRevenue");
+const Payment = require("../../models/finance/Payment");
 const BuildingManager = require("../../models/building/BuildingManager");
+const mongoose = require("mongoose");
 const Gate = require("../../models/building/Gate");
 const User = require("../../models/user/User");
 const AppError = require("../../utils/AppError");
@@ -215,19 +216,52 @@ const listAvailableStaff = async (user, buildingId) => {
 
 const listShiftRevenues = async (user, buildingId, query = {}) => {
   ensureManagerOwnsBuilding(user, buildingId);
-  const filter = { building: buildingId };
-  if (query.from || query.to) {
-    filter.workDate = {};
-    if (query.from) filter.workDate.$gte = new Date(query.from);
-    if (query.to) filter.workDate.$lte = new Date(query.to);
-  }
-  if (query.shift) filter.shift = query.shift;
-  if (query.staff) filter.staff = query.staff;
 
-  const items = await ShiftRevenue.find(filter)
-    .populate("staff", "fullName email")
-    .populate("shift", "code name startTime endTime")
-    .sort("-workDate");
+  // Per-staff, per-day revenue derived from successful session Payments.
+  const match = {
+    building: new mongoose.Types.ObjectId(String(buildingId)),
+    status: "success",
+    type: "session",
+    staff: { $ne: null },
+  };
+  if (query.from || query.to) {
+    match.createdAt = {};
+    if (query.from) match.createdAt.$gte = new Date(query.from);
+    if (query.to) match.createdAt.$lte = new Date(query.to);
+  }
+  if (query.staff) match.staff = new mongoose.Types.ObjectId(String(query.staff));
+
+  const items = await Payment.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: {
+          staff: "$staff",
+          workDate: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+        },
+        sessionCount: { $sum: 1 },
+        totalRevenue: { $sum: "$amount" },
+        cashAmount: { $sum: { $cond: [{ $eq: ["$method", "cash"] }, "$amount", 0] } },
+        walletAmount: { $sum: { $cond: [{ $eq: ["$method", "wallet"] }, "$amount", 0] } },
+        qrAmount: { $sum: { $cond: [{ $in: ["$method", ["qr", "payos", "card"]] }, "$amount", 0] } },
+      },
+    },
+    { $lookup: { from: "users", localField: "_id.staff", foreignField: "_id", as: "staff" } },
+    { $unwind: { path: "$staff", preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        _id: 0,
+        workDate: "$_id.workDate",
+        staff: { _id: "$staff._id", fullName: "$staff.fullName", email: "$staff.email" },
+        sessionCount: 1,
+        totalRevenue: 1,
+        cashAmount: 1,
+        walletAmount: 1,
+        qrAmount: 1,
+      },
+    },
+    { $sort: { workDate: -1 } },
+  ]);
 
   const totals = items.reduce(
     (acc, row) => {

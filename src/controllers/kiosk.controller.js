@@ -4,9 +4,9 @@ const kioskService = require('../services/kiosk.service');
 
 /**
  * POST /api/kiosk/reservation-checkin
- * Self-service gate check-in for a reservation, identified by the vehicle QR
- * (PLT-...) or plate number. No staff / auth required — the gate device calls it.
- * Body: { qrCode?, plateNumber?, gate?, plateImage?, portraitImage? }
+ * Self-service gate check-in for a reservation, identified ONLY by the registered
+ * vehicle QR token (PLT-...). No staff / auth required — the gate device calls it.
+ * Body: { qrCode, gate?, plateImage?, portraitImage? }
  */
 const reservationCheckIn = asyncHandler(async (req, res) => {
   const result = await kioskService.selfCheckInByQr(req.body || {});

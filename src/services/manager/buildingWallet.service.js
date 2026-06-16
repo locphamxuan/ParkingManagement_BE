@@ -96,7 +96,7 @@ const debit = async (buildingId, amount, reason, relatedPaymentId, performedById
 };
 
 /**
- * Daily revenue for a building (parking_fee + reservation_fee credits).
+ * Daily revenue for a building (parking_fee + reservation_fee + subscription_fee credits).
  * @param {string|ObjectId} buildingId
  * @param {Date|string} [date] - Date or 'YYYY-MM-DD' (defaults to today)
  */
@@ -108,7 +108,7 @@ const getDailyRevenue = async (buildingId, date) => {
       $match: {
         building: new mongoose.Types.ObjectId(String(buildingId)),
         type: 'credit',
-        reason: { $in: ['parking_fee', 'reservation_fee'] },
+        reason: { $in: ['parking_fee', 'reservation_fee', 'subscription_fee'] },
         createdAt: { $gte: start, $lte: end },
       },
     },

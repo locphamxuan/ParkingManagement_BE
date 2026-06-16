@@ -9,6 +9,7 @@ const DEFAULT_POLICY = {
   overstayPenaltyPercent: 0,
   refundPercent: 80,
   depositPercent: 15,
+  cancellationCutoffHours: 0,
   isActive: true,
 };
 
@@ -29,7 +30,7 @@ const upsert = async (user, buildingId, payload) => {
   const current = await ReservationPolicy.findOne({ building: buildingId });
 
   const update = {};
-  ["maxHoldMinutes", "maxAdvanceDays", "maxDurationHours", "overstayPenaltyPercent", "refundPercent", "depositPercent"].forEach((k) => {
+  ["maxHoldMinutes", "maxAdvanceDays", "maxDurationHours", "overstayPenaltyPercent", "refundPercent", "depositPercent", "cancellationCutoffHours"].forEach((k) => {
     if (payload[k] !== undefined) update[k] = Number(payload[k]);
   });
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;

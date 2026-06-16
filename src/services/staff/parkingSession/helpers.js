@@ -9,6 +9,7 @@ const {
 } = require('../../../models');
 const { getMaxHoldMs } = require('../../../utils/reservationHold');
 const { calculateParkingFee } = require('../../../utils/feeCalculator');
+const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
 
 // Resolve a 'car'|'motorcycle' kind (or an ObjectId) to the building's VehicleType _id.
@@ -115,12 +116,50 @@ const findCapacityForBuilding = async (buildingId) => {
 };
 
 /**
+ * Phí "vượt giờ" hiện tại của một session GÓI DÀI HẠN (long_term):
+ * miễn phí trong maxHoursPerDay/ngày, chỉ tính phần vượt theo PricePolicy.
+ * Mirror đúng logic checkOut để staff thấy số tiền sẽ thu trùng khớp.
+ */
+const calculateLongTermOverageFee = async (parkingSession, now = new Date()) => {
+  let maxHoursPerDay = 0;
+  const m = /long_term:([a-f\d]{24})/i.exec(parkingSession.note || '');
+  if (m) {
+    const sub = await LongTermSubscription.findById(m[1]).populate('package', 'maxHoursPerDay');
+    maxHoursPerDay = Number(sub?.package?.maxHoursPerDay || 0);
+  }
+
+  const overageHours = await computeDailyOverageHours({
+    plateNumber: parkingSession.plateNumber,
+    building: parkingSession.building,
+    entryTime: parkingSession.entryTime,
+    exitTime: now,
+    excludeSessionId: parkingSession._id,
+    maxHoursPerDay,
+  });
+  if (overageHours <= 0) return { fee: 0, overageHours: 0, maxHoursPerDay };
+
+  const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
+  const overageStart = new Date(now.getTime() - overageHours * 60 * 60 * 1000);
+  let fee = await calculateParkingFee(parkingSession.building, vtId, overageStart, now);
+  if (!fee || fee <= 0) {
+    const kind = vehicleKindFromType(parkingSession.vehicleType);
+    fee = Math.ceil(overageHours) * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
+  }
+  return { fee, overageHours, maxHoursPerDay };
+};
+
+/**
  * Compute the parking fee (VND) for a session — price by vehicle type via
  * PricePolicy, falling back to a flat hourly rate by kind. Mirrors checkOut.
+ * Gói dài hạn (long_term): miễn phí trong hạn mức/ngày, chỉ tính phần vượt.
  */
 const calculateFee = async (parkingSession) => {
   if (parkingSession.fee && parkingSession.fee > 0) return parkingSession.fee;
   const now = new Date();
+  if (parkingSession.paymentMethod === 'long_term') {
+    const { fee } = await calculateLongTermOverageFee(parkingSession, now);
+    return fee;
+  }
   const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
   let fee = await calculateParkingFee(parkingSession.building, vtId, parkingSession.entryTime, now);
   if (!fee || fee <= 0) {
@@ -140,4 +179,5 @@ module.exports = {
   resolveReservation,
   findCapacityForBuilding,
   calculateFee,
+  calculateLongTermOverageFee,
 };

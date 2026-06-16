@@ -261,111 +261,6 @@
  *                         cashAmount: { type: number, example: 300000 }
  *                         walletAmount: { type: number, example: 700000 }
  *                         qrAmount: { type: number, example: 250000 }
- * /api/manager/buildings/{buildingId}/wallet/subscribe:
- *   post:
- *     tags: [Manager - Wallet]
- *     summary: Subscribe building to an admin package
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: buildingId
- *         required: true
- *         schema: { type: string, format: objectId }
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [packageId]
- *             properties:
- *               packageId: { type: string, format: objectId, example: 665f1d2c7b0d1b0012a34570 }
- *     responses:
- *       200:
- *         description: Subscription purchased successfully.
- *         content:
- *           application/json:
- *             schema:
- *               allOf:
- *                 - $ref: '#/components/schemas/ApiResponseWrapper'
- *                 - type: object
- *                   properties:
- *                     data:
- *                       type: object
- *                       properties:
- *                         wallet: { type: object }
- *                         package: { type: object }
- *                         subscription: { type: object }
- *       400: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
- *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
- * /api/manager/buildings/{buildingId}/wallet/subscription-packages:
- *   get:
- *     tags: [Manager - Wallet]
- *     summary: List active admin subscription packages
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: buildingId
- *         required: true
- *         schema: { type: string, format: objectId }
- *     responses:
- *       200:
- *         description: Subscription packages returned successfully.
- *         content:
- *           application/json:
- *             schema:
- *               allOf:
- *                 - $ref: '#/components/schemas/ApiResponseWrapper'
- *                 - type: object
- *                   properties:
- *                     data:
- *                       type: object
- *                       properties:
- *                         items:
- *                           type: array
- *                           items:
- *                             type: object
- *                             properties:
- *                               _id: { $ref: '#/components/schemas/ObjectId' }
- *                               name: { type: string, example: Standard Plan }
- *                               price: { type: number, example: 500000 }
- *                               durationDays: { type: number, example: 30 }
- *                               description: { type: string, example: Standard manager subscription }
- *                               features: { type: array, items: { type: string } }
- *                               isActive: { type: boolean, example: true }
- *                               createdAt: { type: string, format: date-time }
- *                               updatedAt: { type: string, format: date-time }
- * /api/manager/buildings/{buildingId}/subscription:
- *   get:
- *     tags: [Manager - Wallet]
- *     summary: Get building subscription status
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: buildingId
- *         required: true
- *         schema: { type: string, format: objectId }
- *     responses:
- *       200:
- *         description: Subscription status returned successfully.
- *         content:
- *           application/json:
- *             schema:
- *               allOf:
- *                 - $ref: '#/components/schemas/ApiResponseWrapper'
- *                 - type: object
- *                   properties:
- *                     data:
- *                       type: object
- *                       properties:
- *                         isActive: { type: boolean, example: true }
- *                         startDate: { type: string, format: date-time }
- *                         endDate: { type: string, format: date-time }
- *                         packageName: { type: string, example: Standard Plan }
- *                         lastAmountPaid: { type: number, example: 500000 }
  * /api/manager/buildings/{buildingId}/wallet/topup:
  *   post:
  *     tags: [Manager - Wallet]
@@ -862,16 +757,6 @@
  *       - { in: query, name: status, schema: { type: string, enum: [pending, active, expired, cancelled] } }
  *     responses:
  *       200: { description: Subscriptions returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { type: object } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
- * /api/manager/buildings/{buildingId}/subscriptions/{id}/release-slot:
- *   post:
- *     tags: [Manager - Packages]
- *     summary: Release a dedicated slot from an expired subscription
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
- *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     responses:
- *       200: { description: Subscription slot released successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Subscription slot released }, data: { type: object, properties: { item: { type: object } } } } } ] } } } }
  */
 /**
  * @swagger

@@ -26,6 +26,10 @@ const initiatePayment = async (staffUser, sessionId) => {
   }
 
   const fee = await calculateFee(parkingSession);
+  if (!fee || fee <= 0) {
+    // Gói dài hạn còn trong hạn mức giờ/ngày → không có phí để thu qua PayOS.
+    throw new AppError('Phiên này không có phí cần thu (miễn phí theo gói).', 400, 'NO_FEE_DUE');
+  }
   const orderCode = payosService.generateOrderCode();
 
   const { checkoutUrl, qrCode, paymentLinkId } = await payosService.createPaymentLink({

@@ -5,7 +5,6 @@ const Floor = require("../../models/building/Floor");
 const Gate = require("../../models/building/Gate");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
 const Feedback = require("../../models/operations/Feedback");
-const ShiftRevenue = require("../../models/finance/ShiftRevenue");
 const mongoose = require("mongoose");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 
@@ -74,20 +73,22 @@ const getOverview = async (user, buildingId) => {
       building: buildingId,
       status: "pending",
     }),
-    ShiftRevenue.aggregate([
+    // Weekly revenue trend from successful Payments (consistent with today's card).
+    Payment.aggregate([
       {
         $match: {
           building: toObjectId(buildingId),
-          workDate: { $gte: sevenDaysAgo, $lt: tomorrow },
+          status: "success",
+          createdAt: { $gte: sevenDaysAgo, $lt: tomorrow },
         },
       },
       {
         $group: {
           _id: {
-            $dateToString: { format: "%Y-%m-%d", date: "$workDate" },
+            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
           },
-          totalRevenue: { $sum: "$totalRevenue" },
-          sessionCount: { $sum: "$sessionCount" },
+          totalRevenue: { $sum: "$amount" },
+          sessionCount: { $sum: 1 },
         },
       },
       { $sort: { _id: 1 } },

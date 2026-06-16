@@ -1,9 +1,9 @@
 const AppError = require('../../../utils/AppError');
-const { ParkingSession, ParkingSlot, LongTermSubscription, User, Notification } = require('../../../models');
+const { ParkingSession, ParkingSlot, LongTermSubscription, Reservation, Payment, User, Notification } = require('../../../models');
 const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../../utils/plate.util');
 const visionScanService = require('../visionScan.service');
-const { asObjectId, calculateFee } = require('./helpers');
+const { asObjectId, calculateFee, calculateLongTermOverageFee } = require('./helpers');
 
 const listActive = async (user, query = {}) => {
   const allowedBuildings = assertBuildingScope(user, query.buildingId || query.building);
@@ -27,8 +27,17 @@ const listActive = async (user, query = {}) => {
   return Promise.all(
     sessions.map(async (s) => {
       const obj = s.toObject();
-      obj.currentFee = await calculateFee(s);
       obj.isMember = Boolean(s.user);
+      obj.isLongTerm = s.paymentMethod === 'long_term';
+      if (obj.isLongTerm) {
+        // Gói dài hạn: miễn phí trong hạn mức/ngày, chỉ tính phần vượt.
+        const { fee, overageHours, maxHoursPerDay } = await calculateLongTermOverageFee(s);
+        obj.currentFee = fee;
+        obj.overageHours = overageHours;
+        obj.maxHoursPerDay = maxHoursPerDay;
+      } else {
+        obj.currentFee = await calculateFee(s);
+      }
       return obj;
     })
   );
@@ -90,7 +99,7 @@ const lookupPlate = async (staffUser, plateNumber) => {
   // (e.g. 59G2-03880 / 59G2-038.80) still resolves to its owner.
   const plateRx = plateMatchRegex(plate) || plate;
 
-  const [user, activeSession, activeSub] = await Promise.all([
+  const [user, activeSession, activeSub, activeReservation] = await Promise.all([
     User.findOne({ 'licensePlates.plateNumber': plateRx })
       .select('fullName email phone walletBalance licensePlates'),
     ParkingSession.findOne({ plateNumber: plateRx, status: 'active' })
@@ -102,6 +111,14 @@ const lookupPlate = async (staffUser, plateNumber) => {
       building: { $in: allowedBuildings },
     })
       .populate('package', 'name maxHoursPerDay')
+      .sort('-updatedAt'),
+    // Đặt chỗ còn hiệu lực cho biển số này (để FE biết là luồng "chỉ cần quét").
+    Reservation.findOne({
+      plateNumber: plateRx,
+      status: { $in: ['pending', 'confirmed'] },
+      building: { $in: allowedBuildings },
+    })
+      .select('_id code startTime endTime')
       .sort('-updatedAt'),
   ]);
 
@@ -139,6 +156,11 @@ const lookupPlate = async (staffUser, plateNumber) => {
           name: activeSub.package?.name || 'Gói dài hạn',
           maxHoursPerDay: activeSub.package?.maxHoursPerDay ?? 0,
         }
+      : null,
+    // Đặt chỗ còn hiệu lực → luồng "chỉ cần quét", không bắt chụp ảnh.
+    hasActiveReservation: Boolean(activeReservation),
+    activeReservation: activeReservation
+      ? { id: activeReservation._id, code: activeReservation.code }
       : null,
   };
 };
@@ -248,4 +270,59 @@ const rejectEntry = async (staffUser, { plateNumber, stage, reason, building } =
   return { plateNumber: plate, stage: isCheckout ? 'check-out' : 'check-in', notified };
 };
 
-module.exports = { listActive, getById, search, lookupPlate, listFreeSlots, scanVehicle, rejectEntry };
+/* ─────────────────────────────────────────────
+   getMyShiftRevenue — Doanh thu CA của nhân viên cổng ra.
+   Tổng tiền nhân viên này đã thu (Payment type='session', success) TRONG NGÀY
+   HÔM NAY, tách theo phương thức (tiền mặt / ví / QR-chuyển khoản) + danh sách lượt.
+───────────────────────────────────────────── */
+const getMyShiftRevenue = async (staffUser, query = {}) => {
+  const allowedBuildings = assertBuildingScope(staffUser, query.building || query.buildingId);
+  const buildingFilter = (query.building || query.buildingId)
+    ? { building: query.building || query.buildingId }
+    : { building: { $in: allowedBuildings } };
+
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+
+  const payments = await Payment.find({
+    ...buildingFilter,
+    staff: staffUser._id,
+    type: 'session',
+    status: 'success',
+    createdAt: { $gte: start, $lte: end },
+  })
+    .populate('parkingSession', 'plateNumber')
+    .sort('-createdAt')
+    .lean();
+
+  let total = 0;
+  let cash = 0;
+  let wallet = 0;
+  let online = 0; // qr / payos / card
+  const items = payments.map((p) => {
+    const amount = p.amount || 0;
+    total += amount;
+    if (p.method === 'cash') cash += amount;
+    else if (p.method === 'wallet') wallet += amount;
+    else online += amount;
+    return {
+      _id: p._id,
+      plateNumber: p.parkingSession?.plateNumber || null,
+      amount,
+      method: p.method,
+      createdAt: p.createdAt,
+    };
+  });
+
+  return {
+    date: start,
+    total,
+    count: payments.length,
+    byMethod: { cash, wallet, online },
+    items,
+  };
+};
+
+module.exports = { listActive, getById, search, lookupPlate, listFreeSlots, scanVehicle, rejectEntry, getMyShiftRevenue };

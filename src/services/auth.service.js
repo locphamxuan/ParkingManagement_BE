@@ -13,11 +13,19 @@ const buildAuthResponse = (user) => ({
   user: toPublicUser(user),
 });
 
+// Brute-force lockout: khóa tài khoản sau MAX_FAILED lần sai liên tiếp.
+const MAX_FAILED_LOGINS = 5;
+const LOCK_MINUTES = 5;
+
 const register = async (body) => {
   const { email, password, fullName, phone } = body;
 
   const exists = await User.exists({ email });
   if (exists) throw new AppError('Email already registered', 409);
+
+  if (phone && (await User.exists({ phone: String(phone).trim() }))) {
+    throw new AppError('Số điện thoại đã được đăng ký', 409, 'PHONE_TAKEN');
+  }
 
   const user = await User.create({ email, password, fullName, phone, role: ROLES.USER });
 
@@ -26,15 +34,43 @@ const register = async (body) => {
 };
 
 const login = async ({ email, password }) => {
-  const user = await User.findOne({ email: String(email).trim().toLowerCase() }).select('+password');
+  const user = await User.findOne({ email: String(email).trim().toLowerCase() })
+    .select('+password +failedLoginAttempts +lockUntil');
 
-  if (!user || !(await user.comparePassword(password))) {
+  // Generic message để tránh lộ email nào tồn tại.
+  if (!user) {
     throw new AppError('Invalid email or password', 401);
   }
+
+  // Đang trong thời gian khóa?
+  if (user.lockUntil && user.lockUntil.getTime() > Date.now()) {
+    const secs = Math.ceil((user.lockUntil.getTime() - Date.now()) / 1000);
+    throw new AppError(
+      `Tài khoản tạm khóa do nhập sai quá nhiều lần. Vui lòng thử lại sau ${Math.floor(secs / 60)} phút ${secs % 60} giây.`,
+      423,
+      'ACCOUNT_LOCKED',
+    );
+  }
+
+  if (!(await user.comparePassword(password))) {
+    user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+    let message = 'Invalid email or password';
+    if (user.failedLoginAttempts >= MAX_FAILED_LOGINS) {
+      user.lockUntil = new Date(Date.now() + LOCK_MINUTES * 60 * 1000);
+      user.failedLoginAttempts = 0;
+      message = `Sai mật khẩu quá ${MAX_FAILED_LOGINS} lần. Tài khoản bị khóa ${LOCK_MINUTES} phút.`;
+    }
+    await user.save({ validateModifiedOnly: true });
+    throw new AppError(message, 401);
+  }
+
   if (!user.isActive) {
     throw new AppError('Account is deactivated', 403);
   }
 
+  // Đăng nhập thành công → reset bộ đếm + mốc khóa.
+  user.failedLoginAttempts = 0;
+  user.lockUntil = null;
   user.lastLoginAt = new Date();
   await user.save({ validateModifiedOnly: true });
 
@@ -99,6 +135,10 @@ const requestRegistration = async (body) => {
   const emailExists = await User.exists({ email });
   if (emailExists) throw new AppError('Email already registered', 409);
 
+  if (phone && (await User.exists({ phone: String(phone).trim() }))) {
+    throw new AppError('Số điện thoại đã được đăng ký', 409, 'PHONE_TAKEN');
+  }
+
   const otp = String(Math.floor(100000 + Math.random() * 900000));
 
   await OtpVerification.deleteOne({ email });
@@ -119,6 +159,10 @@ const verifyOtpAndRegister = async ({ email, otp }) => {
 
   const emailExists = await User.exists({ email });
   if (emailExists) throw new AppError('Email already registered', 409);
+
+  if (otpRecord.phone && (await User.exists({ phone: String(otpRecord.phone).trim() }))) {
+    throw new AppError('Số điện thoại đã được đăng ký', 409, 'PHONE_TAKEN');
+  }
 
   const user = await User.create({
     email: otpRecord.email,
