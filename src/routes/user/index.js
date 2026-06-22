@@ -16,10 +16,9 @@ const buildingController = require('../../controllers/user/building.controller')
 const router = express.Router();
 
 router.use('/auth', authRoutes);
+router.use('/feedbacks', feedbackRoutes);
 
 router.use(authenticate);
-
-router.use('/feedbacks', feedbackRoutes);
 
 router.use(authorize(ROLES.USER));
 

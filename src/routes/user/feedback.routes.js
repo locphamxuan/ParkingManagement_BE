@@ -2,6 +2,7 @@ const express = require('express');
 const feedbackController = require('../../controllers/staff/feedback.controller');
 const AppError = require('../../utils/AppError');
 const { ROLES } = require('../../constants/roles');
+const { authenticate } = require('../../middlewares/auth.middleware');
 
 const router = express.Router();
 
@@ -12,8 +13,8 @@ const requireFeedbackUser = (req, _res, next) => {
   next();
 };
 
-router.post('/', requireFeedbackUser, feedbackController.createFeedback);
-router.get('/me', requireFeedbackUser, feedbackController.listMyFeedbacks);
+router.post('/', authenticate, requireFeedbackUser, feedbackController.createFeedback);
+router.get('/me', authenticate, requireFeedbackUser, feedbackController.listMyFeedbacks);
 router.get('/', feedbackController.listAllFeedbacks);
 
 module.exports = router;
