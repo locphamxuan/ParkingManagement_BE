@@ -52,11 +52,20 @@ const listAllFeedbacks = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
+const deleteFeedback = asyncHandler(async (req, res) => {
+  const result = await feedbackService.deleteFeedback(req.user, req.params.id);
+  sendSuccess(res, {
+    message: 'Feedback deleted successfully',
+    data: result,
+  });
+});
+
 module.exports = {
   createFeedback,
   listMyFeedbacks,
   listFeedbacks,
   resolveFeedback,
   listAllFeedbacks,
+  deleteFeedback,
 };
 

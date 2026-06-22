@@ -305,10 +305,32 @@ const listAllFeedbacks = async (filters = {}) => {
   }
 };
 
+const deleteFeedback = async (userContext, feedbackId) => {
+  if (!userContext || userContext.role !== ROLES.USER) {
+    throw new AppError('Only registered users can delete feedback', 403, 'USER_FEEDBACK_ONLY');
+  }
+  if (!mongoose.Types.ObjectId.isValid(feedbackId)) {
+    throw new AppError('Invalid feedbackId', 400, 'INVALID_FEEDBACK_ID');
+  }
+
+  const feedback = await Feedback.findById(feedbackId);
+  if (!feedback) {
+    throw new AppError('Feedback not found', 404, 'FEEDBACK_NOT_FOUND');
+  }
+
+  if (feedback.user.toString() !== userContext._id.toString()) {
+    throw new AppError('You are not authorized to delete this feedback', 403, 'USER_FEEDBACK_UNAUTHORIZED');
+  }
+
+  await Feedback.findByIdAndDelete(feedbackId);
+  return { id: feedbackId };
+};
+
 module.exports = {
   createFeedback,
   listFeedbacks,
   resolveFeedback,
   listAllFeedbacks,
+  deleteFeedback,
 };
 

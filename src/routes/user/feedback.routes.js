@@ -15,6 +15,7 @@ const requireFeedbackUser = (req, _res, next) => {
 
 router.post('/', authenticate, requireFeedbackUser, feedbackController.createFeedback);
 router.get('/me', authenticate, requireFeedbackUser, feedbackController.listMyFeedbacks);
+router.delete('/:id', authenticate, requireFeedbackUser, feedbackController.deleteFeedback);
 router.get('/', feedbackController.listAllFeedbacks);
 
 module.exports = router;
