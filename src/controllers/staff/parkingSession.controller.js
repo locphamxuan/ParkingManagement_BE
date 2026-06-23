@@ -91,4 +91,13 @@ const myShiftRevenue = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment, myShiftRevenue };
+/**
+ * GET /api/staff/parking-sessions/my-checkins
+ * Lịch sử xe vào hôm nay của nhân viên cổng VÀO — có location (cổng vào, tầng, ô đỗ).
+ */
+const myCheckIns = asyncHandler(async (req, res) => {
+  const items = await parkingSessionService.listMyCheckIns(req.user, req.query);
+  sendSuccess(res, { data: { items } });
+});
+
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment, myShiftRevenue, myCheckIns };

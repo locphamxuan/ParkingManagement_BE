@@ -104,8 +104,6 @@ const list = async (userId, query = {}) => {
             paymentStatus: session.paymentStatus,
           }
         : null,
-      refundPercent: refundPctByBuilding.get(String(d.building?._id || d.building)) ?? 0,
-      refundAmount: refundAmtByRes.get(String(d._id)) ?? 0,
     };
   });
 
@@ -189,6 +187,21 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
   const maxAllowedStart = new Date(now.getTime() + maxAdvanceDays * 24 * 60 * 60 * 1000);
   if (start > maxAllowedStart) {
     throw new AppError(`Chỉ được phép đặt trước chỗ đỗ tối đa ${maxAdvanceDays} ngày`, 400);
+  }
+
+  // ── 4b. Block re-booking with the same plate within 24 h of a cancellation ─
+  const recentCancelled = await Reservation.findOne({
+    plateNumber: String(plateNumber).trim().toUpperCase(),
+    building: resolvedBuildingId,
+    status: 'cancelled',
+    updatedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+  }).lean();
+  if (recentCancelled) {
+    throw new AppError(
+      'Biển số này vừa hủy một đặt chỗ — phải chờ 24 giờ trước khi đặt lại tại tòa nhà này.',
+      400,
+      'PLATE_RECENTLY_CANCELLED',
+    );
   }
 
   // ── 5. Validate & assign slot ──────────────────────────────────────────────

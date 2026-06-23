@@ -1,9 +1,14 @@
-﻿const LongTermPackage = require("../../models/policy/LongTermPackage");
+﻿const mongoose = require("mongoose");
+const LongTermPackage = require("../../models/policy/LongTermPackage");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
+const WalletTransaction = require("../../models/finance/WalletTransaction");
+const Payment = require("../../models/finance/Payment");
+const User = require("../../models/user/User");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
 const { defaultMaxHoursByDuration } = require("../../utils/longTermUsage");
+const buildingWalletService = require("./buildingWallet.service");
 
 const listPackages = async (user, buildingId, query = {}) => {
   ensureManagerOwnsBuilding(user, buildingId);
@@ -143,11 +148,106 @@ const listSubscriptions = async (user, buildingId, query = {}) => {
   };
 };
 
+const cancelSubscription = async (managerUser, buildingId, subscriptionId, reason) => {
+  ensureManagerOwnsBuilding(managerUser, buildingId);
+
+  const mongoSession = await mongoose.startSession();
+  try {
+    let result;
+    await mongoSession.withTransaction(async () => {
+      const subscription = await LongTermSubscription.findOne({
+        _id: subscriptionId,
+        building: buildingId,
+      })
+        .populate("package")
+        .session(mongoSession);
+
+      if (!subscription) throw new AppError("Không tìm thấy gói đăng ký", 404);
+      if (subscription.status === "cancelled") throw new AppError("Gói đăng ký đã được hủy trước đó", 400);
+      if (subscription.status !== "active" && subscription.status !== "pending") {
+        throw new AppError("Chỉ được phép hủy gói ở trạng thái active hoặc pending", 400);
+      }
+
+      const packagePrice = subscription.package?.price ?? 0;
+      const refundAmount = Math.round(packagePrice * 0.95);
+
+      subscription.status = "cancelled";
+      subscription.cancelReason = "manager_cancelled";
+      subscription.cancelNote = reason || "Hủy bởi quản lý";
+      await subscription.save({ session: mongoSession });
+
+      if (subscription.user) {
+        const updatedUser = await User.findByIdAndUpdate(
+          subscription.user,
+          { $inc: { walletBalance: refundAmount } },
+          { new: true, session: mongoSession }
+        ).select("walletBalance");
+
+        if (updatedUser) {
+          await WalletTransaction.create(
+            [{
+              user: subscription.user,
+              type: "refund",
+              amount: refundAmount,
+              balanceAfter: updatedUser.walletBalance,
+              status: "success",
+              reason: "long_term_subscription_cancellation",
+              metadata: {
+                subscriptionId: subscription._id,
+                cancelReason: "manager_cancelled",
+                refundAmount,
+                originalPrice: packagePrice,
+                cancelledByManager: managerUser._id,
+              },
+            }],
+            { session: mongoSession }
+          );
+        }
+
+        if (refundAmount > 0) {
+          const [refundPayment] = await Payment.create(
+            [{
+              building: buildingId,
+              subscription: subscription._id,
+              type: "refund",
+              method: "wallet",
+              amount: refundAmount,
+              status: "success",
+              user: subscription.user,
+              note: `Subscription ${subscription._id} cancelled by manager — 95% refund`,
+            }],
+            { session: mongoSession }
+          );
+          await buildingWalletService.debit(
+            buildingId, refundAmount, "refund", refundPayment._id, null, mongoSession
+          );
+        }
+      }
+
+      await writeAuditLog({
+        actor: managerUser,
+        action: "MANAGER_CANCEL_SUBSCRIPTION",
+        targetTable: "long_term_subscriptions",
+        targetId: subscription._id,
+        building: buildingId,
+        metadata: { refundAmount, originalPrice: packagePrice },
+        severity: "medium",
+      });
+
+      result = { subscription, refundAmount };
+    });
+    return result;
+  } finally {
+    await mongoSession.endSession();
+  }
+};
+
 module.exports = {
   listPackages,
   createPackage,
   updatePackage,
   removePackage,
   listSubscriptions,
+  cancelSubscription,
 };
 

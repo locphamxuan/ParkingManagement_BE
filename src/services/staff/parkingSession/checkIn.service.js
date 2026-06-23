@@ -137,11 +137,26 @@ const checkIn = async (user, payload) => {
         throw new AppError('Cần ảnh biển số xe để check-in', 400, 'PLATE_IMAGE_REQUIRED');
       }
 
-      const slotId = reservation?.slot?._id || reservation?.slot || null;
+      // Bắt buộc chọn ô đỗ với luồng không phải reservation khi tòa nhà có slot.
+      if (!reservation && !asObjectId(payload?.slot)) {
+        const availableSlotCount = await ParkingSlot.countDocuments({
+          building: buildingId,
+          status: 'available',
+        });
+        if (availableSlotCount > 0) {
+          throw new AppError('Cần chọn ô đỗ xe trước khi check-in', 400, 'SLOT_REQUIRED');
+        }
+      }
+
+      // Slot ưu tiên: reservation slot → staff-selected slot (walk-in/standard)
+      const slotId = reservation?.slot?._id || reservation?.slot || asObjectId(payload?.slot) || null;
       if (slotId) {
         const slot = await ParkingSlot.findById(slotId).session(session);
         if (slot?.status === 'maintenance') {
           throw new AppError('Assigned slot is under maintenance', 409, 'SLOT_MAINTENANCE_NOT_AVAILABLE');
+        }
+        if (slot?.status !== 'available' && !reservation) {
+          throw new AppError('Chỗ đỗ đã có xe hoặc không khả dụng', 409, 'SLOT_NOT_AVAILABLE');
         }
         if (slot) {
           slot.status = 'occupied';

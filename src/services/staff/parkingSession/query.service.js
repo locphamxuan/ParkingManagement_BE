@@ -20,21 +20,30 @@ const listActive = async (user, query = {}) => {
     .populate('vehicleType', 'name code')
     .populate('user', 'fullName email')
     .populate('staff', 'fullName email')
-    .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } });
+    .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
+    .populate('reservation', 'estimatedFee fee endTime');
 
   // Attach the current fee (per manager's PricePolicy, fallback by kind) + member flag
   // so the staff UI can show the amount and who owns the vehicle.
   return Promise.all(
     sessions.map(async (s) => {
       const obj = s.toObject();
-      obj.isMember = Boolean(s.user);
       obj.isLongTerm = s.paymentMethod === 'long_term';
+      obj.isReservation = Boolean(s.reservation);
+      // long_term session requires an account — treat as member even if user ref is null (data inconsistency)
+      obj.isMember = Boolean(s.user) || obj.isLongTerm;
       if (obj.isLongTerm) {
         // Gói dài hạn: miễn phí trong hạn mức/ngày, chỉ tính phần vượt.
         const { fee, overageHours, maxHoursPerDay } = await calculateLongTermOverageFee(s);
         obj.currentFee = fee;
         obj.overageHours = overageHours;
         obj.maxHoursPerDay = maxHoursPerDay;
+      } else if (obj.isReservation) {
+        // Reservation: tiền còn lại = phí ước tính − tiền cọc đã trả.
+        const estimated = s.reservation?.estimatedFee ?? 0;
+        const deposit = s.reservation?.fee ?? 0;
+        obj.reservationRemainingFee = Math.max(0, estimated - deposit);
+        obj.currentFee = obj.reservationRemainingFee;
       } else {
         obj.currentFee = await calculateFee(s);
       }
@@ -325,4 +334,33 @@ const getMyShiftRevenue = async (staffUser, query = {}) => {
   };
 };
 
-module.exports = { listActive, getById, search, lookupPlate, listFreeSlots, scanVehicle, rejectEntry, getMyShiftRevenue };
+/* ─────────────────────────────────────────────
+   listMyCheckIns — Lịch sử xe vào hôm nay của nhân viên cổng VÀO.
+   Trả về các phiên check-in do nhân viên này thực hiện hôm nay, có location.
+───────────────────────────────────────────── */
+const listMyCheckIns = async (staffUser, query = {}) => {
+  const allowedBuildings = assertBuildingScope(staffUser, query.building || query.buildingId);
+  const buildingFilter = (query.building || query.buildingId)
+    ? { building: query.building || query.buildingId }
+    : { building: { $in: allowedBuildings } };
+
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+
+  const sessions = await ParkingSession.find({
+    ...buildingFilter,
+    staff: staffUser._id,
+    entryTime: { $gte: start },
+  })
+    .sort('-entryTime')
+    .limit(100)
+    .select('-plateImage -portraitImage -exitPlateImage -exitPortraitImage')
+    .populate('entryGate', 'code name')
+    .populate('vehicleType', 'name code')
+    .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
+    .lean();
+
+  return sessions;
+};
+
+module.exports = { listActive, getById, search, lookupPlate, listFreeSlots, scanVehicle, rejectEntry, getMyShiftRevenue, listMyCheckIns };

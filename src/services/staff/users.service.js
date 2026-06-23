@@ -3,6 +3,7 @@ const AppError = require('../../utils/AppError');
 const {
   ParkingSession,
   User,
+  LongTermSubscription,
 } = require('../../models');
 const { assignedBuildingIds } = require('../../utils/staffScope');
 
@@ -40,12 +41,21 @@ const lookupQr = async (staffUser, qrCode) => {
     };
   }
 
-  // Get active parking sessions for this user
-  const activeSessions = await ParkingSession.find({
-    user: qrCode,
-    status: 'active',
-    building: { $in: allowedBuildings },
-  }).select('_id building plateNumber entryTime fee');
+  // Get active parking sessions + active packages for this user
+  const [activeSessions, activePackages] = await Promise.all([
+    ParkingSession.find({
+      user: qrCode,
+      status: 'active',
+      building: { $in: allowedBuildings },
+    }).select('_id building plateNumber entryTime fee'),
+    LongTermSubscription.find({
+      user: qrCode,
+      status: 'active',
+      building: { $in: allowedBuildings },
+    })
+      .populate('package', 'name code')
+      .select('_id plateNumber startDate endDate'),
+  ]);
 
   return {
     userId: qrCode,
@@ -65,6 +75,14 @@ const lookupQr = async (staffUser, qrCode) => {
       plateNumber: session.plateNumber,
       entryTime: session.entryTime,
       fee: session.fee,
+    })),
+    activePackages: activePackages.map((sub) => ({
+      id: sub._id,
+      name: sub.package?.name || 'Gói dài hạn',
+      code: sub.package?.code || null,
+      plateNumber: sub.plateNumber,
+      startDate: sub.startDate,
+      endDate: sub.endDate,
     })),
   };
 };

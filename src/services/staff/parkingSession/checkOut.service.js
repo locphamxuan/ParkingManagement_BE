@@ -16,7 +16,6 @@ const buildingWalletService = require('../../manager/buildingWallet.service');
 const { normalizePlate } = require('../../../utils/plate.util');
 const { calculateParkingFee } = require('../../../utils/feeCalculator');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
-const { getOverstayPenaltyPercent } = require('../../../utils/reservationHold');
 const { sendNotificationEmail } = require('../../../utils/email');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
 const { vehicleKindFromType } = require('./helpers');
@@ -223,21 +222,30 @@ const checkOut = async (user, sessionId, payload = {}) => {
         const deposit = Number(linkedReservation.fee || 0);
         fee = Math.max(0, estimatedFee - deposit);
 
-        // OVERSTAY: đỗ quá endTime đã đặt → tính thêm phần vượt theo giá thường.
         const now = new Date();
+        const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
+
+        // EARLY CHECK-IN: vào trước startTime → tính thêm phần sớm theo giá thường.
+        const startTime = linkedReservation.startTime ? new Date(linkedReservation.startTime) : null;
+        const actualEntry = parkingSession.entryTime ? new Date(parkingSession.entryTime) : null;
+        if (startTime && actualEntry && actualEntry.getTime() < startTime.getTime()) {
+          let earlyFee = await calculateParkingFee(parkingSession.building, vtId, actualEntry, startTime);
+          if (!earlyFee || earlyFee <= 0) {
+            const kind = vehicleKindFromType(parkingSession.vehicleType);
+            const hours = Math.max(1, Math.ceil((startTime.getTime() - actualEntry.getTime()) / (1000 * 60 * 60)));
+            earlyFee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
+          }
+          fee += earlyFee;
+        }
+
+        // OVERSTAY: đỗ quá endTime đã đặt → tính thêm phần vượt theo giá thường.
         const endTime = linkedReservation.endTime ? new Date(linkedReservation.endTime) : null;
         if (endTime && now.getTime() > endTime.getTime()) {
-          const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
           let overstayFee = await calculateParkingFee(parkingSession.building, vtId, endTime, now);
           if (!overstayFee || overstayFee <= 0) {
             const kind = vehicleKindFromType(parkingSession.vehicleType);
             const hours = Math.max(1, Math.ceil((now.getTime() - endTime.getTime()) / (1000 * 60 * 60)));
             overstayFee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
-          }
-          // Phụ phí PHẠT overstay (manager cấu hình) — CHỈ áp lên phần vượt giờ.
-          const penaltyPercent = await getOverstayPenaltyPercent(parkingSession.building, mongoSession);
-          if (penaltyPercent > 0) {
-            overstayFee = Math.ceil(overstayFee * (1 + penaltyPercent / 100));
           }
           fee += overstayFee;
         }
