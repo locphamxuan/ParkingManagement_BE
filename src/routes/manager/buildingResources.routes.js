@@ -127,6 +127,7 @@ router
   .delete(shiftController.removeStaffShift);
 router.get("/staff", shiftController.listAvailableStaff);
 router.get("/shift-revenues", shiftController.listShiftRevenues);
+router.get("/shift-report-submissions", shiftController.listShiftReportSubmissions);
 
 router.get("/feedbacks", feedbackController.list);
 router.patch(

@@ -7,8 +7,8 @@ const { writeAuditLog } = require("../../utils/audit");
 const GATE_STATUS = ["active", "inactive", "maintenance"];
 const GATE_DIRECTION = ["in", "out", "both"];
 
-// Mỗi tòa nhà có 2 cổng cố định: Cổng vào (in) + Cổng ra (out).
-// Manager không CRUD cổng — chỉ xem. Hệ thống tự sinh & duy trì.
+// Mỗi tòa nhà được tự sinh sẵn 2 cổng mặc định: Cổng vào (in) + Cổng ra (out).
+// Manager CÓ THỂ CRUD thêm/sửa/xóa cổng và đặt thể loại (in/out/both) — xem create/update/remove bên dưới.
 const DEFAULT_GATES = [
   { code: "IN", name: "Cổng vào", direction: "in" },
   { code: "OUT", name: "Cổng ra", direction: "out" },

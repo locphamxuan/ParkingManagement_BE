@@ -3,7 +3,7 @@ const { ParkingSession, ParkingSlot, LongTermSubscription, Reservation, Payment,
 const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../../utils/plate.util');
 const visionScanService = require('../visionScan.service');
-const { asObjectId, calculateFee, calculateLongTermOverageFee } = require('./helpers');
+const { asObjectId, calculateFee, calculateLongTermOverageFee, activeSubscriptionMatch } = require('./helpers');
 
 const listActive = async (user, query = {}) => {
   const allowedBuildings = assertBuildingScope(user, query.buildingId || query.building);
@@ -114,9 +114,11 @@ const lookupPlate = async (staffUser, plateNumber) => {
     ParkingSession.findOne({ plateNumber: plateRx, status: 'active' })
       .select('_id building entryTime'),
     // Gói dài hạn còn hiệu lực cho biển số này (để staff biết phải gán chỗ trống).
+    // Dùng CHUNG định nghĩa với check-in (activeSubscriptionMatch): active + trong [startDate, endDate]
+    // → badge "có gói" ở màn scan luôn khớp với hành vi check-in thật.
     LongTermSubscription.findOne({
       plateNumber: plateRx,
-      status: 'active',
+      ...activeSubscriptionMatch(),
       building: { $in: allowedBuildings },
     })
       .populate('package', 'name maxHoursPerDay')

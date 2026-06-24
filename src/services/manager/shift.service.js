@@ -278,6 +278,26 @@ const listShiftRevenues = async (user, buildingId, query = {}) => {
   return { items, totals };
 };
 
+const listShiftReportSubmissions = async (user, buildingId, query = {}) => {
+  ensureManagerOwnsBuilding(user, buildingId);
+
+  const filter = {
+    building: buildingId,
+    'revenueReport.submittedAt': { $ne: null },
+  };
+  if (query.from) filter.workDate = { ...filter.workDate, $gte: new Date(query.from) };
+  if (query.to) filter.workDate = { ...(filter.workDate || {}), $lte: new Date(query.to) };
+  if (query.staff) filter.staff = query.staff;
+
+  const items = await StaffShift.find(filter)
+    .populate('staff', 'fullName email')
+    .populate('shift', 'code name startTime endTime')
+    .populate('gate', 'code name direction')
+    .sort('-revenueReport.submittedAt');
+
+  return items;
+};
+
 module.exports = {
   listShifts,
   createShift,
@@ -289,5 +309,6 @@ module.exports = {
   removeStaffShift,
   listAvailableStaff,
   listShiftRevenues,
+  listShiftReportSubmissions,
 };
 

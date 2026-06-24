@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const AppError = require('../../utils/AppError');
-const { Reservation, ParkingSession, ParkingSlot } = require('../../models');
+const { Reservation, ParkingSession, ParkingSlot, StaffShift } = require('../../models');
 const { assertBuildingScope, logAudit } = require('../../utils/staffScope');
 const { normalizePlate } = require('../../utils/plate.util');
 const { getMaxHoldMs } = require('../../utils/reservationHold');
@@ -46,6 +46,21 @@ const processReservationCheckIn = async (staffUser, payload = {}) => {
       }
 
       assertBuildingScope(staffUser, reservation.building);
+
+      // Nhất quán với check-in thường: chỉ nhân viên có CA HÔM NAY tại tòa nhà này mới
+      // được check-in lượt đặt chỗ.
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+      const shiftToday = await StaffShift.findOne({
+        staff: staffUser._id,
+        building: reservation.building,
+        workDate: { $gte: todayStart, $lte: todayEnd },
+        status: { $in: ['active', 'scheduled'] },
+      }).session(session);
+      if (!shiftToday) {
+        throw new AppError('Bạn chưa được gán ca làm việc hôm nay', 403, 'NO_SHIFT_ASSIGNED');
+      }
+
       // Chỉ check-in được lượt đang chờ/đã xác nhận.
       if (reservation.status === 'checked_in') {
         throw new AppError('Lượt đặt chỗ này đã được check-in trước đó', 409, 'RESERVATION_ALREADY_CHECKED_IN');

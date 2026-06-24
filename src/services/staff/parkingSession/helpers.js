@@ -41,22 +41,32 @@ const asObjectId = (value) =>
 const findDuplicateActiveSession = async (plateNumber) =>
   ParkingSession.findOne({ plateNumber, status: 'active' });
 
+/**
+ * ĐỊNH NGHĨA DUY NHẤT của "gói dài hạn đang hiệu lực" — dùng chung cho cả check-in
+ * (resolveLongTermSubscription) lẫn màn tra cứu biển số (lookupPlate / lookupQr) để các
+ * nơi KHÔNG bao giờ lệch nhau: phải đang 'active' VÀ chưa quá hạn (endDate >= now).
+ * Cố ý KHÔNG ràng buộc startDate để tránh lệch múi giờ chặn nhầm gói bắt đầu trong ngày
+ * (giống hành vi check-in gốc trước đây). Gói bắt đầu trong tương lai vẫn hiếm và sẽ do
+ * luồng mua gói kiểm soát. `now` truyền vào để mọi nơi so cùng một mốc thời gian.
+ */
+const activeSubscriptionMatch = (now = new Date()) => ({
+  status: 'active',
+  endDate: { $gte: now },
+});
+
 const resolveLongTermSubscription = async (plateNumber, allowedBuildings) => {
+  const now = new Date();
   const subscription = await LongTermSubscription.findOne({
     plateNumber,
-    status: 'active',
+    ...activeSubscriptionMatch(now),
     building: { $in: allowedBuildings },
   }).sort({ updatedAt: -1 });
 
   if (!subscription) {
-    return null;
-  }
-
-  const endAt = subscription.endDate ? new Date(subscription.endDate) : null;
-  if (endAt && endAt.getTime() < Date.now()) {
-    // Hết hạn → đánh dấu 'expired'; user trở thành tài khoản thường (tính giờ).
-    await LongTermSubscription.updateOne(
-      { _id: subscription._id },
+    // Self-heal: nếu có gói 'active' nhưng đã quá endDate (job chưa chạy) → đánh dấu
+    // 'expired' để dữ liệu nhất quán cho lần sau. Không ảnh hưởng kết quả lần này.
+    await LongTermSubscription.updateMany(
+      { plateNumber, status: 'active', endDate: { $lt: now }, building: { $in: allowedBuildings } },
       { $set: { status: 'expired' } },
     );
     return null;
@@ -175,6 +185,7 @@ module.exports = {
   vehicleKindFromType,
   asObjectId,
   findDuplicateActiveSession,
+  activeSubscriptionMatch,
   resolveLongTermSubscription,
   resolveReservation,
   findCapacityForBuilding,

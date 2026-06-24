@@ -5,6 +5,7 @@ const {
   ParkingSession,
   ParkingSlot,
   User,
+  StaffShift,
 } = require('../../../models');
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, plateMatchRegex } = require('../../../utils/plate.util');
@@ -49,6 +50,25 @@ const checkIn = async (user, payload) => {
       const building = await buildingRepository.findById(buildingId);
       if (!building) {
         throw new AppError('Building not found', 404);
+      }
+
+      // Chỉ nhân viên được gán ca HÔM NAY mới được check-in. Ngoài ra, cổng của ca phải
+      // cho phép chiều VÀO ('in'/'both'). Ca không gắn cổng (null) → không chặn theo chiều
+      // (khớp đúng logic FE ẩn/hiện tab theo hướng cổng — useAssignedGates).
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+      const todayShifts = await StaffShift.find({
+        staff: user._id,
+        building: buildingId,
+        workDate: { $gte: todayStart, $lte: todayEnd },
+        status: { $in: ['active', 'scheduled'] },
+      }).populate('gate', 'direction').session(session);
+      if (!todayShifts.length) {
+        throw new AppError('Bạn chưa được gán ca làm việc hôm nay', 403, 'NO_SHIFT_ASSIGNED');
+      }
+      const gateDirs = todayShifts.map((s) => s.gate?.direction).filter(Boolean);
+      if (gateDirs.length > 0 && !gateDirs.some((d) => d === 'in' || d === 'both')) {
+        throw new AppError('Ca của bạn được phân ở cổng RA — không thể check-in xe vào', 403, 'WRONG_GATE_DIRECTION');
       }
 
       // Ảnh CHÂN DUNG bắt buộc cho MỌI check-in (kể cả gói/đặt chỗ) để đối chiếu

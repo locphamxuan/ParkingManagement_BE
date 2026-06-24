@@ -49,12 +49,13 @@ const getOverview = async (period = "today") => {
     User.countDocuments({ role: ROLES.USER }),
     ParkingSession.countDocuments({ status: "active" }),
     Payment.aggregate([
-      { $match: { status: "success", createdAt: { $gte: from, $lte: to } } },
+      // Chỉ doanh thu thật (session/reservation/subscription) — loại 'refund'/'topup'.
+      { $match: { status: "success", type: { $in: ["session", "reservation", "subscription"] }, createdAt: { $gte: from, $lte: to } } },
       { $group: { _id: "$method", amount: { $sum: "$amount" }, count: { $sum: 1 } } },
     ]),
     // Xu hướng doanh thu 7 ngày (toàn hệ thống) — thay cho việc gọi dashboard từng tòa nhà.
     Payment.aggregate([
-      { $match: { status: "success", createdAt: { $gte: sevenDaysAgo, $lt: tomorrow } } },
+      { $match: { status: "success", type: { $in: ["session", "reservation", "subscription"] }, createdAt: { $gte: sevenDaysAgo, $lt: tomorrow } } },
       {
         $group: {
           _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
@@ -76,7 +77,7 @@ const getOverview = async (period = "today") => {
     ]),
     // Doanh thu hôm nay theo từng tòa nhà — 1 aggregation.
     Payment.aggregate([
-      { $match: { status: "success", building: { $ne: null }, createdAt: { $gte: today, $lt: tomorrow } } },
+      { $match: { status: "success", type: { $in: ["session", "reservation", "subscription"] }, building: { $ne: null }, createdAt: { $gte: today, $lt: tomorrow } } },
       { $group: { _id: "$building", amount: { $sum: "$amount" } } },
     ]),
   ]);

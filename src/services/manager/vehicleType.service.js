@@ -1,4 +1,7 @@
 ﻿const VehicleType = require("../../models/building/VehicleType");
+const PricePolicy = require("../../models/policy/PricePolicy");
+const Floor = require("../../models/building/Floor");
+const ParkingSession = require("../../models/operations/ParkingSession");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
@@ -80,6 +83,24 @@ const remove = async (user, buildingId, id) => {
   ensureManagerOwnsBuilding(user, buildingId);
   const current = await VehicleType.findOne({ _id: id, building: buildingId });
   if (!current) throw new AppError("VehicleType not found", 404);
+
+  // Chặn xóa khi loại xe còn được tham chiếu — tránh để lại config/phiên mồ côi
+  // (đồng bộ với floor.remove / gate.remove). Kiểm: bảng giá, tầng cho phép, phiên đang đỗ.
+  const [pricePolicyCount, floorCount, activeSessionCount] = await Promise.all([
+    PricePolicy.countDocuments({ building: buildingId, vehicleType: id }),
+    Floor.countDocuments({ building: buildingId, allowedVehicleTypes: id }),
+    ParkingSession.countDocuments({ building: buildingId, status: "active", vehicleType: id }),
+  ]);
+  if (pricePolicyCount > 0) {
+    throw new AppError("Không thể xóa: loại xe đang được dùng trong bảng giá. Hãy gỡ/hủy bảng giá trước.", 409);
+  }
+  if (floorCount > 0) {
+    throw new AppError("Không thể xóa: loại xe đang được cho phép ở một số tầng. Hãy bỏ khỏi tầng trước.", 409);
+  }
+  if (activeSessionCount > 0) {
+    throw new AppError("Không thể xóa: còn xe thuộc loại này đang đỗ.", 409);
+  }
+
   await VehicleType.deleteOne({ _id: id });
   await writeAuditLog({
     actor: user,

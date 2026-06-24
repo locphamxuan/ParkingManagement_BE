@@ -8,9 +8,6 @@ const router = express.Router();
 
 router.use(authenticate);
 
-const feedbackRoutes = require("./feedback.routes");
-router.use("/feedbacks", authorize(ROLES.STAFF, ROLES.MANAGER), feedbackRoutes);
-
 router.use(authorize(ROLES.STAFF));
 
 router.get("/dashboard", buildingAccessController.getDashboard);

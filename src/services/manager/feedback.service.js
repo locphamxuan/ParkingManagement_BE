@@ -92,8 +92,8 @@ const respond = async (user, buildingId, id, payload = {}) => {
             {
               user: current.user,
               type: "feedback_reply",
-              title: "Admin has responded to your review",
-              message: `Admin replied: ${update.staffReply}`,
+              title: "Quản lý đã phản hồi đánh giá của bạn",
+              message: `Phản hồi từ quản lý: ${update.staffReply}`,
               feedback: current._id,
               building: current.building,
               isRead: false,

@@ -6,6 +6,7 @@ const {
   LongTermSubscription,
 } = require('../../models');
 const { assignedBuildingIds } = require('../../utils/staffScope');
+const { activeSubscriptionMatch } = require('./parkingSession/helpers');
 
 /**
  * lookupQr
@@ -50,7 +51,7 @@ const lookupQr = async (staffUser, qrCode) => {
     }).select('_id building plateNumber entryTime fee'),
     LongTermSubscription.find({
       user: qrCode,
-      status: 'active',
+      ...activeSubscriptionMatch(),
       building: { $in: allowedBuildings },
     })
       .populate('package', 'name code')

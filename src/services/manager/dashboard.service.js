@@ -54,6 +54,9 @@ const getOverview = async (user, buildingId) => {
         $match: {
           building: toObjectId(buildingId),
           status: "success",
+          // Chỉ doanh thu thật: phí gửi xe / cọc đặt chỗ / mua gói. Loại 'refund' (tiền hoàn ra)
+          // và 'topup' (manager tự nạp ví) — khớp định nghĩa của ví tòa nhà (getDailyRevenue).
+          type: { $in: ["session", "reservation", "subscription"] },
           createdAt: { $gte: today, $lt: tomorrow },
         },
       },
@@ -68,6 +71,8 @@ const getOverview = async (user, buildingId) => {
     LongTermSubscription.countDocuments({
       building: buildingId,
       status: "active",
+      // Nhất quán với định nghĩa "gói đang hiệu lực" (active + chưa quá hạn).
+      endDate: { $gte: new Date() },
     }),
     Feedback.countDocuments({
       building: buildingId,
@@ -79,6 +84,8 @@ const getOverview = async (user, buildingId) => {
         $match: {
           building: toObjectId(buildingId),
           status: "success",
+          // Cùng định nghĩa doanh thu với card "hôm nay": loại refund/topup.
+          type: { $in: ["session", "reservation", "subscription"] },
           createdAt: { $gte: sevenDaysAgo, $lt: tomorrow },
         },
       },

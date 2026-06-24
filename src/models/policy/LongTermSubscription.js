@@ -37,7 +37,7 @@ const longTermSubscriptionSchema = new mongoose.Schema(
     },
     cancelReason: {
       type: String,
-      enum: ['change_vehicle', 'no_longer_needed', 'pricing_issue', 'other'],
+      enum: ['change_slot', 'change_vehicle', 'no_longer_needed', 'pricing_issue', 'other', 'manager_cancelled'],
       default: null,
     },
     cancelNote: {
@@ -54,6 +54,14 @@ const longTermSubscriptionSchema = new mongoose.Schema(
 );
 
 longTermSubscriptionSchema.index({ building: 1, status: 1 });
+
+// Ràng buộc DB-level: 1 biển số chỉ được có DUY NHẤT 1 gói đang 'active' tại một thời điểm.
+// Partial index nên các gói đã 'cancelled'/'expired'/'pending' không bị tính → user vẫn
+// có thể mua lại gói mới sau khi hủy. plateNumber đã được normalize canonical trước khi lưu.
+longTermSubscriptionSchema.index(
+  { plateNumber: 1 },
+  { unique: true, partialFilterExpression: { status: 'active' } },
+);
 
 module.exports = mongoose.model(
   "LongTermSubscription",

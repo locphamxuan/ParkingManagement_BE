@@ -65,10 +65,11 @@ const subscribe = async (userId, { packageId, plateNumber, startDate }) => {
     throw new AppError('Biển số xe không hợp lệ', 400);
   }
 
-  // Kiểm tra xem biển số này đã đăng ký gói dài hạn nào đang hoạt động hoặc chờ thanh toán chưa
+  // Kiểm tra xem biển số này đã đăng ký gói dài hạn nào đang hoạt động / chờ thanh toán chưa.
+  // 1 biển số = 1 gói tại một thời điểm (xét cả 'active' lẫn 'pending').
   const existingActiveSub = await LongTermSubscription.findOne({
     plateNumber: normalizedPlate,
-    status: { $in: ['pending', 'active'] }
+    status: { $in: ['active', 'pending'] },
   });
 
   if (existingActiveSub) {
@@ -151,6 +152,13 @@ const subscribe = async (userId, { packageId, plateNumber, startDate }) => {
         );
       }
     });
+  } catch (err) {
+    // Unique partial index trên { plateNumber, status:'active' } chặn 2 gói active cùng biển
+    // (kể cả khi 2 request mua song song lọt qua check ở trên).
+    if (err && err.code === 11000) {
+      throw new AppError('Biển số xe này đã đăng ký một gói dài hạn khác đang hoạt động', 400);
+    }
+    throw err;
   } finally {
     mongoSession.endSession();
   }
@@ -159,7 +167,7 @@ const subscribe = async (userId, { packageId, plateNumber, startDate }) => {
 };
 
 const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancelNote } = {}) => {
-  const validReasons = ['change_vehicle', 'no_longer_needed', 'pricing_issue', 'other'];
+  const validReasons = ['change_slot', 'change_vehicle', 'no_longer_needed', 'pricing_issue', 'other'];
   if (!cancelReason || !validReasons.includes(cancelReason)) {
     throw new AppError('Lý do hủy không hợp lệ', 400);
   }
@@ -183,8 +191,8 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
         throw new AppError('Gói đăng ký đã được hủy trước đó', 400);
       }
 
-      if (subscription.status !== 'active' && subscription.status !== 'pending') {
-        throw new AppError('Chỉ được phép hủy gói ở trạng thái active hoặc pending', 400);
+      if (subscription.status !== 'active') {
+        throw new AppError('Chỉ được phép hủy gói đang hoạt động (active)', 400);
       }
 
       const now = new Date();

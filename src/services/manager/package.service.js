@@ -100,7 +100,7 @@ const removePackage = async (user, buildingId, id) => {
 
   const subs = await LongTermSubscription.countDocuments({
     package: id,
-    status: { $in: ["active", "pending"] },
+    status: 'active',
   });
   if (subs > 0) {
     throw new AppError(
@@ -164,8 +164,8 @@ const cancelSubscription = async (managerUser, buildingId, subscriptionId, reaso
 
       if (!subscription) throw new AppError("Không tìm thấy gói đăng ký", 404);
       if (subscription.status === "cancelled") throw new AppError("Gói đăng ký đã được hủy trước đó", 400);
-      if (subscription.status !== "active" && subscription.status !== "pending") {
-        throw new AppError("Chỉ được phép hủy gói ở trạng thái active hoặc pending", 400);
+      if (subscription.status !== "active") {
+        throw new AppError("Chỉ được phép hủy gói đang hoạt động (active)", 400);
       }
 
       const packagePrice = subscription.package?.price ?? 0;

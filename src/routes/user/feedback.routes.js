@@ -1,5 +1,5 @@
 const express = require('express');
-const feedbackController = require('../../controllers/staff/feedback.controller');
+const feedbackController = require('../../controllers/user/feedback.controller');
 const AppError = require('../../utils/AppError');
 const { ROLES } = require('../../constants/roles');
 const { authenticate } = require('../../middlewares/auth.middleware');

@@ -10,6 +10,7 @@ const {
   WalletTransaction,
   User,
   Notification,
+  StaffShift,
 } = require('../../../models');
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const buildingWalletService = require('../../manager/buildingWallet.service');
@@ -39,6 +40,25 @@ const checkOut = async (user, sessionId, payload = {}) => {
       }
 
       assertBuildingScope(user, parkingSession.building);
+
+      // Chỉ nhân viên được gán ca HÔM NAY mới được check-out. Ngoài ra, cổng của ca phải
+      // cho phép chiều RA ('out'/'both'). Ca không gắn cổng (null) → không chặn theo chiều
+      // (khớp đúng logic FE ẩn/hiện tab theo hướng cổng — useAssignedGates).
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+      const todayShifts = await StaffShift.find({
+        staff: user._id,
+        building: parkingSession.building,
+        workDate: { $gte: todayStart, $lte: todayEnd },
+        status: { $in: ['active', 'scheduled'] },
+      }).populate('gate', 'direction').session(mongoSession);
+      if (!todayShifts.length) {
+        throw new AppError('Bạn chưa được gán ca làm việc hôm nay', 403, 'NO_SHIFT_ASSIGNED');
+      }
+      const gateDirs = todayShifts.map((s) => s.gate?.direction).filter(Boolean);
+      if (gateDirs.length > 0 && !gateDirs.some((d) => d === 'out' || d === 'both')) {
+        throw new AppError('Ca của bạn được phân ở cổng VÀO — không thể check-out xe ra', 403, 'WRONG_GATE_DIRECTION');
+      }
 
       if (parkingSession.status !== 'active') {
         throw new AppError('Session not active', 400);

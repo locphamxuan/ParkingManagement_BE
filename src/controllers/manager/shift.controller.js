@@ -93,6 +93,15 @@ const listShiftRevenues = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
+const listShiftReportSubmissions = asyncHandler(async (req, res) => {
+  const items = await service.listShiftReportSubmissions(
+    req.user,
+    req.params.buildingId,
+    req.query
+  );
+  sendSuccess(res, { data: { items } });
+});
+
 module.exports = {
   listShifts,
   createShift,
@@ -104,4 +113,5 @@ module.exports = {
   removeStaffShift,
   listAvailableStaff,
   listShiftRevenues,
+  listShiftReportSubmissions,
 };
