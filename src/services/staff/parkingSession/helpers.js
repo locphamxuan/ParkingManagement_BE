@@ -44,15 +44,26 @@ const findDuplicateActiveSession = async (plateNumber) =>
 /**
  * ĐỊNH NGHĨA DUY NHẤT của "gói dài hạn đang hiệu lực" — dùng chung cho cả check-in
  * (resolveLongTermSubscription) lẫn màn tra cứu biển số (lookupPlate / lookupQr) để các
- * nơi KHÔNG bao giờ lệch nhau: phải đang 'active' VÀ chưa quá hạn (endDate >= now).
- * Cố ý KHÔNG ràng buộc startDate để tránh lệch múi giờ chặn nhầm gói bắt đầu trong ngày
- * (giống hành vi check-in gốc trước đây). Gói bắt đầu trong tương lai vẫn hiếm và sẽ do
- * luồng mua gói kiểm soát. `now` truyền vào để mọi nơi so cùng một mốc thời gian.
+ * nơi KHÔNG bao giờ lệch nhau: phải đang 'active' VÀ ĐANG trong khoảng hiệu lực
+ * [startDate, endDate].
+ *
+ * - endDate >= now      : chưa hết hạn.
+ * - startDate <= cuối ngày hôm nay : đã tới hạn dùng. So với CUỐI NGÀY (thay vì `now`)
+ *   để gói "bắt đầu trong hôm nay" vẫn được nhận dù lệch múi giờ (đúng lo ngại cũ),
+ *   NHƯNG gói có startDate từ NGÀY MAI trở đi (mua trước, chưa tới kỳ) sẽ KHÔNG bị
+ *   tính là "đang có gói" — tránh báo nhầm "có gói" khi gói chưa hiệu lực.
+ *
+ * `now` truyền vào để mọi nơi so cùng một mốc thời gian.
  */
-const activeSubscriptionMatch = (now = new Date()) => ({
-  status: 'active',
-  endDate: { $gte: now },
-});
+const activeSubscriptionMatch = (now = new Date()) => {
+  const endOfToday = new Date(now);
+  endOfToday.setHours(23, 59, 59, 999);
+  return {
+    status: 'active',
+    startDate: { $lte: endOfToday },
+    endDate: { $gte: now },
+  };
+};
 
 const resolveLongTermSubscription = async (plateNumber, allowedBuildings) => {
   const now = new Date();
