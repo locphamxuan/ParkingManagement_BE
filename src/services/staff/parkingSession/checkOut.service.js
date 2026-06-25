@@ -165,15 +165,15 @@ const checkOut = async (user, sessionId, payload = {}) => {
           );
 
           if (parkingSession.user) {
-            const capMsg = maxHoursPerDay ? `${maxHoursPerDay}h/ngày` : 'gói';
+            const capMsg = maxHoursPerDay ? `${maxHoursPerDay}h/day` : 'package';
             const message =
-              `Xe ${parkingSession.plateNumber} đã đỗ vượt hạn mức ${capMsg}. ` +
-              `Phần vượt ${overageHours.toFixed(1)} giờ được tính ${overageFee.toLocaleString('vi-VN')} VND theo giá thường.`;
+              `Vehicle ${parkingSession.plateNumber} parked over the daily limit of ${capMsg}. ` +
+              `The extra ${overageHours.toFixed(1)} hour(s) cost ${overageFee.toLocaleString('vi-VN')} VND calculated at standard rate.`;
             try {
               await Notification.create([{
                 user: parkingSession.user,
                 type: 'subscription_overage',
-                title: 'Vượt giờ đỗ tối đa/ngày của gói',
+                title: 'Daily Limit Exceeded',
                 message,
                 plateNumber: parkingSession.plateNumber,
                 building: parkingSession.building,

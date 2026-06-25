@@ -261,8 +261,8 @@ const rejectEntry = async (staffUser, { plateNumber, stage, reason, building } =
     await Notification.create({
       user: owner._id,
       type: isCheckout ? 'checkout_rejected' : 'checkin_rejected',
-      title: isCheckout ? 'Check-out bị từ chối' : 'Check-in bị từ chối',
-      message: `Biển số ${plate} bị từ chối ${isCheckout ? 'cho xe ra' : 'cho xe vào'}. Lý do: ${`${reason}`.trim()}. Vui lòng kiểm tra/cập nhật lại thông tin phương tiện.`,
+      title: isCheckout ? 'Check-out Rejected' : 'Check-in Rejected',
+      message: `License plate ${plate} was rejected for ${isCheckout ? 'check-out' : 'check-in'}. Reason: ${`${reason}`.trim()}. Please check/update your vehicle details.`,
       plateNumber: plate,
       building: asObjectId(building) || null,
     });

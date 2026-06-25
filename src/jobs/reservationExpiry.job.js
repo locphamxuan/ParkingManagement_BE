@@ -97,20 +97,20 @@ const expireStaleReservations = async () => {
 
     const holdMin = Math.round(holdMs / 60000);
     const message =
-      `Lượt đặt chỗ ${reservation.code} cho biển số ${reservation.plateNumber} đã hết hạn do ` +
-      `quá ${holdMin} phút so với giờ bắt đầu (${formatDateTime(reservation.startTime)}) mà chưa check-in. ` +
-      `Chỗ giữ đã được trả lại và tiền cọc không được hoàn.`;
+      `Reservation ${reservation.code} for vehicle ${reservation.plateNumber} has expired because ` +
+      `it was not checked in within ${holdMin} minutes of the start time (${formatDateTime(reservation.startTime)}). ` +
+      `The slot has been released and the deposit is non-refundable.`;
 
     await notifyUser(reservation, {
       type: 'reservation_expired',
-      title: 'Lượt đặt chỗ đã hết hạn',
+      title: 'Reservation Expired',
       message,
       emailHtml: `
-        <p>Lượt đặt chỗ <strong>${reservation.code}</strong> cho biển số
-        <strong>${reservation.plateNumber}</strong> đã hết hạn do quá ${holdMin} phút so với giờ bắt đầu
-        (${formatDateTime(reservation.startTime)}) mà chưa check-in.</p>
-        <p>Chỗ giữ đã được trả lại cho người khác và <strong>tiền cọc không được hoàn</strong>.</p>
-        <p>Bạn có thể đặt lại lượt mới bất cứ lúc nào.</p>`,
+        <p>Reservation <strong>${reservation.code}</strong> for vehicle
+        <strong>${reservation.plateNumber}</strong> has expired because it was not checked in within ${holdMin} minutes of the start time
+        (${formatDateTime(reservation.startTime)}).</p>
+        <p>The reserved slot has been released and the <strong>deposit is non-refundable</strong>.</p>
+        <p>You can make a new reservation at any time.</p>`,
     });
   }
 };
@@ -130,19 +130,19 @@ const notifyOverstayingReservations = async () => {
 
   for (const reservation of reservations) {
     const message =
-      `Xe ${reservation.plateNumber} (lượt đặt ${reservation.code}) đã đỗ QUÁ giờ đặt ` +
-      `(hết hạn ${formatDateTime(reservation.endTime)}). Phần đỗ quá giờ sẽ được tính phí theo ` +
-      `giá thường kèm phụ phí phạt khi xe ra. Vui lòng cho xe ra sớm để tránh phát sinh thêm.`;
+      `Vehicle ${reservation.plateNumber} (reservation ${reservation.code}) is overstaying ` +
+      `(expired at ${formatDateTime(reservation.endTime)}). Overstayed time will be charged at standard ` +
+      `hourly rates plus penalty surcharges upon exit. Please check out soon to avoid additional fees.`;
 
     await notifyUser(reservation, {
       type: 'reservation_overstay',
-      title: 'Xe đang đỗ quá giờ đặt',
+      title: 'Overstaying Reservation',
       message,
       emailHtml: `
-        <p>Xe <strong>${reservation.plateNumber}</strong> (lượt đặt <strong>${reservation.code}</strong>)
-        đã đỗ <strong>quá giờ đặt</strong> (hết hạn ${formatDateTime(reservation.endTime)}).</p>
-        <p>Phần đỗ quá giờ sẽ được tính phí theo giá thường <strong>kèm phụ phí phạt</strong> khi xe ra.
-        Vui lòng cho xe ra sớm để tránh phát sinh thêm.</p>`,
+        <p>Vehicle <strong>${reservation.plateNumber}</strong> (reservation <strong>${reservation.code}</strong>)
+        is <strong>overstaying</strong> (expired at ${formatDateTime(reservation.endTime)}).</p>
+        <p>Overstayed time will be charged at standard hourly rates <strong>plus penalty surcharges</strong> upon exit.
+        Please exit soon to avoid additional fees.</p>`,
     });
 
     await Reservation.updateOne({ _id: reservation._id }, { $set: { overstayNotifiedAt: now } });
