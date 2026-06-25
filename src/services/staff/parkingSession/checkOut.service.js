@@ -168,7 +168,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
             const capMsg = maxHoursPerDay ? `${maxHoursPerDay}h/day` : 'package';
             const message =
               `Vehicle ${parkingSession.plateNumber} parked over the daily limit of ${capMsg}. ` +
-              `The extra ${overageHours.toFixed(1)} hour(s) cost ${overageFee.toLocaleString('en-US')} VND calculated at standard rate.`;
+              `The extra ${overageHours.toFixed(1)} hour(s) cost ${overageFee.toLocaleString('vi-VN')} VND calculated at standard rate.`;
             try {
               await Notification.create([{
                 user: parkingSession.user,

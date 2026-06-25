@@ -8,7 +8,7 @@ const REMINDER_THRESHOLDS = [7, 5, 3, 1];
 const RUN_INTERVAL_MS = 60 * 60 * 1000; // chạy mỗi giờ
 
 const formatDate = (date) =>
-  new Date(date).toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  new Date(date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
 /**
  * Tạo thông báo in-app (chính) + gửi email (best-effort).

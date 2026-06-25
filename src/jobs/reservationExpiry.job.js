@@ -7,7 +7,7 @@ const CHECKINABLE_STATUSES = ['pending', 'confirmed'];
 const RUN_INTERVAL_MS = 5 * 60 * 1000; // chạy mỗi 5 phút (reservation nhạy thời gian hơn gói)
 
 const formatDateTime = (date) =>
-  new Date(date).toLocaleString('en-US', {
+  new Date(date).toLocaleString('vi-VN', {
     hour: '2-digit',
     minute: '2-digit',
     day: '2-digit',
