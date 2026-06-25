@@ -8,7 +8,7 @@ const REMINDER_THRESHOLDS = [7, 5, 3, 1];
 const RUN_INTERVAL_MS = 60 * 60 * 1000; // chạy mỗi giờ
 
 const formatDate = (date) =>
-  new Date(date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  new Date(date).toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
 /**
  * Tạo thông báo in-app (chính) + gửi email (best-effort).
@@ -69,19 +69,19 @@ const sendExpiryReminders = async () => {
     );
     if (!threshold) continue;
 
-    const pkgName = sub.package?.name || 'gói dài hạn';
+    const pkgName = sub.package?.name || 'long-term package';
     const message =
-      `Gói "${pkgName}" cho biển số ${sub.plateNumber} sẽ hết hạn sau ${daysLeft} ngày ` +
-      `(${formatDate(sub.endDate)}). Vui lòng gia hạn để tiếp tục được ưu đãi giờ đỗ.`;
+      `Your subscription "${pkgName}" for vehicle ${sub.plateNumber} will expire in ${daysLeft} days ` +
+      `(${formatDate(sub.endDate)}). Please renew to continue receiving parking benefits.`;
 
     await notifySubscription(sub, {
       type: 'subscription_expiring',
-      title: 'Gói dài hạn sắp hết hạn',
+      title: 'Subscription Expiring Soon',
       message,
       emailHtml: `
-        <p>Gói <strong>${pkgName}</strong> cho biển số <strong>${sub.plateNumber}</strong>
-        sẽ hết hạn sau <strong>${daysLeft} ngày</strong> (${formatDate(sub.endDate)}).</p>
-        <p>Hãy gia hạn sớm để tiếp tục được ưu đãi giờ đỗ của gói.</p>`,
+        <p>Your subscription <strong>${pkgName}</strong> for vehicle <strong>${sub.plateNumber}</strong>
+        will expire in <strong>${daysLeft} days</strong> (${formatDate(sub.endDate)}).</p>
+        <p>Please renew soon to continue receiving package parking privileges.</p>`,
     });
 
     await LongTermSubscription.updateOne(
@@ -112,19 +112,19 @@ const expireActiveSubscriptions = async () => {
       { $set: { status: 'expired' } },
     );
 
-    const pkgName = sub.package?.name || 'gói dài hạn';
+    const pkgName = sub.package?.name || 'long-term package';
     const message =
-      `Gói "${pkgName}" cho biển số ${sub.plateNumber} đã hết hạn. Từ giờ xe sẽ được tính phí ` +
-      `theo giờ như tài khoản thường. Hãy gia hạn hoặc mua gói mới để tiếp tục ưu đãi.`;
+      `Your subscription "${pkgName}" for vehicle ${sub.plateNumber} has expired. Future check-ins ` +
+      `will be charged at standard hourly rates. Please renew or purchase a new package.`;
 
     await notifySubscription(sub, {
       type: 'subscription_expired',
-      title: 'Gói dài hạn đã hết hạn',
+      title: 'Subscription Expired',
       message,
       emailHtml: `
-        <p>Gói <strong>${pkgName}</strong> cho biển số <strong>${sub.plateNumber}</strong> đã hết hạn.</p>
-        <p>Từ giờ xe của bạn sẽ được tính phí theo giờ như tài khoản thường.
-        Hãy gia hạn hoặc mua gói mới để tiếp tục được ưu đãi giờ đỗ.</p>`,
+        <p>Your subscription <strong>${pkgName}</strong> for vehicle <strong>${sub.plateNumber}</strong> has expired.</p>
+        <p>Your vehicle will now be charged at standard hourly rates.
+        Please renew or subscribe to a new package to keep your parking privileges.</p>`,
     });
   }
 };
