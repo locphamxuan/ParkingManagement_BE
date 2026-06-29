@@ -38,8 +38,13 @@ const vehicleKindFromType = (vt) => {
 const asObjectId = (value) =>
   mongoose.Types.ObjectId.isValid(value) ? value : null;
 
-const findDuplicateActiveSession = async (plateNumber) =>
-  ParkingSession.findOne({ plateNumber, status: 'active' });
+// Trùng biển CHỈ xét trong CÙNG tòa nhà — phiên active ở tòa khác không chặn check-in
+// ở tòa này (mỗi tòa vận hành độc lập; vẫn có forceCheckIn để bỏ qua nếu cần).
+const findDuplicateActiveSession = async (plateNumber, buildingId) => {
+  const filter = { plateNumber, status: 'active' };
+  if (buildingId) filter.building = buildingId;
+  return ParkingSession.findOne(filter);
+};
 
 /**
  * ĐỊNH NGHĨA DUY NHẤT của "gói dài hạn đang hiệu lực" — dùng chung cho cả check-in
@@ -130,6 +135,58 @@ const resolveReservation = async (plateNumber, allowedBuildings) => {
   return reservation;
 };
 
+/**
+ * Suy ra "đối tượng sử dụng" (usageType) của một lượt check-in để khớp với dãy/slot:
+ *  - subscriber : có gói dài hạn đang hiệu lực
+ *  - reserved   : có lượt đặt chỗ hợp lệ
+ *  - registered : biển số gắn với 1 tài khoản đã đăng ký
+ *  - walk_in    : còn lại (khách vãng lai)
+ * Thứ tự ưu tiên: subscriber > reserved > registered > walk_in.
+ */
+const resolveCustomerUsageType = ({ longTerm, reservation, registeredOwner }) => {
+  if (longTerm) return 'subscriber';
+  if (reservation) return 'reserved';
+  if (registeredOwner) return 'registered';
+  return 'walk_in';
+};
+
+/**
+ * Chuỗi ưu tiên đối tượng cho slot (fallback MỘT CHIỀU): hội viên/đặt chỗ có thể
+ * dùng tạm slot "chung" (walk_in) khi hết slot đúng đối tượng, NHƯNG khách vãng lai
+ * KHÔNG bao giờ chiếm slot dành cho hội viên/gói/đặt chỗ. Index nhỏ hơn = ưu tiên hơn.
+ */
+const USAGE_FALLBACK_CHAIN = {
+  walk_in: ['walk_in'],
+  registered: ['registered', 'walk_in'],
+  subscriber: ['subscriber', 'registered', 'walk_in'],
+  reserved: ['reserved', 'registered', 'walk_in'],
+};
+
+const acceptableUsageTypes = (usageType) =>
+  USAGE_FALLBACK_CHAIN[usageType] || (usageType ? [usageType] : []);
+
+/**
+ * Tìm các slot TRỐNG tương thích với (loại xe + đối tượng) của lượt check-in.
+ * Loại xe khớp chặt; đối tượng khớp theo chuỗi fallback ở trên. Sắp xếp để slot
+ * ĐÚNG đối tượng đứng trước (gợi ý best-fit), rồi tới các slot fallback.
+ */
+const findCompatibleSlots = async (buildingId, vehicleTypeId, usageType, session = null) => {
+  const filter = { building: buildingId, status: 'available' };
+  if (vehicleTypeId) filter.vehicleType = vehicleTypeId;
+  const chain = acceptableUsageTypes(usageType);
+  if (chain.length) filter.usageType = { $in: chain };
+  const q = ParkingSlot.find(filter);
+  if (session) q.session(session);
+  const slots = await q;
+  const rank = (u) => {
+    const i = chain.indexOf(u);
+    return i === -1 ? chain.length : i;
+  };
+  return slots.sort(
+    (a, b) => rank(a.usageType) - rank(b.usageType) || String(a.code).localeCompare(String(b.code))
+  );
+};
+
 const findCapacityForBuilding = async (buildingId) => {
   const totalSlots = await ParkingSlot.countDocuments({ building: buildingId, status: { $ne: 'maintenance' } });
   const activeSessions = await ParkingSession.countDocuments({ building: buildingId, status: 'active' });
@@ -199,6 +256,9 @@ module.exports = {
   activeSubscriptionMatch,
   resolveLongTermSubscription,
   resolveReservation,
+  resolveCustomerUsageType,
+  acceptableUsageTypes,
+  findCompatibleSlots,
   findCapacityForBuilding,
   calculateFee,
   calculateLongTermOverageFee,

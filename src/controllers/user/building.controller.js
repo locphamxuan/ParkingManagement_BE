@@ -99,37 +99,34 @@ const listSlotsForFloor = asyncHandler(async (req, res) => {
   const { floorId } = req.params;
   if (!mongoose.isValidObjectId(floorId)) throw new AppError('Invalid floorId', 400);
 
-  const floor = await Floor.findOne({ _id: floorId, building: building._id })
-    .populate('allowedVehicleTypes', 'name code');
+  const floor = await Floor.findOne({ _id: floorId, building: building._id });
   if (!floor) throw new AppError('Floor not found', 404);
 
   // Lọc theo floor là đủ (floor đã thuộc building). KHÔNG thêm điều kiện building
   // vào slot — nếu trường building của slot bị lệch dữ liệu, danh sách sẽ rỗng dù
   // tầng vẫn đếm ra số ô (aggregate đếm theo floor). Đây là nguyên nhân "ô không hiện".
+  // Loại xe + đối tượng của ô đỗ lấy theo DÃY (zone), denormalize sẵn trên slot.
   const slots = await ParkingSlot.find({ floor: floorId })
-    .select('_id code status reservable')
+    .select('_id code status reservable vehicleType usageType')
+    .populate('vehicleType', 'name code')
     .sort('code');
 
-  // Loại xe của Ô ĐỖ được suy ra từ TẦNG (manager set loại xe ở tầng, không set ở ô).
-  //  - tầng cho phép đúng 1 loại  → ô nhận loại đó
-  //  - tầng cho phép nhiều loại    → ô nhận mọi loại (null)
-  const floorVTs = floor.allowedVehicleTypes || [];
-  const slotVehicleType =
-    floorVTs.length === 1
-      ? { _id: floorVTs[0]._id, name: floorVTs[0].name, code: floorVTs[0].code }
-      : null;
-
-  // Gói dài hạn KHÔNG còn giữ slot cố định → slot chỉ bị giữ bởi reservation
-  // ('reserved') hoặc đang có xe ('occupied'). Slot còn trống là chọn được.
-  const slotsOut = slots.map((s) => ({
-    _id: s._id,
-    code: s.code,
-    status: s.status,
-    reservable: s.reservable,
-    vehicleType: slotVehicleType,
-    selectable: s.status === 'available',
-    owner: null,
-  }));
+  const slotsOut = slots.map((s) => {
+    // Ô thuộc dãy GÓI DÀI HẠN (subscriber) KHÔNG cho khách đặt chỗ — chỉ dành cho gói.
+    const bookable = s.usageType !== 'subscriber';
+    return {
+      _id: s._id,
+      code: s.code,
+      status: s.status,
+      reservable: Boolean(s.reservable) && bookable,
+      vehicleType: s.vehicleType
+        ? { _id: s.vehicleType._id, name: s.vehicleType.name, code: s.vehicleType.code }
+        : null,
+      usageType: s.usageType || null,
+      selectable: s.status === 'available' && Boolean(s.reservable) && bookable,
+      owner: null,
+    };
+  });
 
   sendSuccess(res, {
     data: { floor: { _id: floor._id, name: floor.name, code: floor.code }, slots: slotsOut },

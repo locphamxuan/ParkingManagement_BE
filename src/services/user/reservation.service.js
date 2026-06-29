@@ -230,6 +230,14 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
         'SLOT_VEHICLE_TYPE_MISMATCH',
       );
     }
+    // Slot thuộc dãy gói dài hạn (subscriber) thì KHÔNG cho đặt chỗ — dành riêng cho gói.
+    if (slot.usageType === 'subscriber') {
+      throw new AppError(
+        'This slot is reserved for long-term packages and cannot be booked.',
+        409,
+        'SLOT_USAGE_MISMATCH',
+      );
+    }
     resolvedSlotId = slot._id;
   }
 
@@ -248,6 +256,30 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
   const mongoSession = await mongoose.startSession();
   try {
     await mongoSession.withTransaction(async () => {
+      // ── Capacity guard ────────────────────────────────────────────────────
+      // Chặn overbooking: số đặt chỗ CÒN HIỆU LỰC chồng khung giờ [start, end]
+      // không được vượt tổng số ô đỗ của tòa nhà. Áp cho cả đặt chỗ KHÔNG kèm slot
+      // (trước đây không giới hạn → đặt vô hạn vượt sức chứa).
+      const totalSlots = await ParkingSlot.countDocuments({
+        building: resolvedBuildingId,
+        status: { $ne: 'maintenance' },
+      }).session(mongoSession);
+      if (totalSlots > 0) {
+        const overlapping = await Reservation.countDocuments({
+          building: resolvedBuildingId,
+          status: { $in: ['pending', 'confirmed', 'checked_in'] },
+          startTime: { $lt: end },
+          endTime: { $gt: start },
+        }).session(mongoSession);
+        if (overlapping >= totalSlots) {
+          throw new AppError(
+            'The building is fully booked for the selected time window. Please pick another time.',
+            409,
+            'BUILDING_FULLY_BOOKED',
+          );
+        }
+      }
+
       // Debit the deposit from user wallet — requires sufficient balance.
       const updatedUser = await User.findOneAndUpdate(
         { _id: userId, walletBalance: { $gte: depositAmount } },

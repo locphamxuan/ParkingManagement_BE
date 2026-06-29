@@ -41,9 +41,8 @@ const checkOut = async (user, sessionId, payload = {}) => {
 
       assertBuildingScope(user, parkingSession.building);
 
-      // Chỉ nhân viên được gán ca HÔM NAY mới được check-out. Ngoài ra, cổng của ca phải
-      // cho phép chiều RA ('out'/'both'). Ca không gắn cổng (null) → không chặn theo chiều
-      // (khớp đúng logic FE ẩn/hiện tab theo hướng cổng — useAssignedGates).
+      // Chỉ cần nhân viên có ca HÔM NAY là được check-out (không còn ràng buộc theo
+      // HƯỚNG cổng của ca — gate.direction chỉ là cấu hình vật lý + gợi ý tab ở FE).
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
       const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
       const todayShifts = await StaffShift.find({
@@ -51,13 +50,9 @@ const checkOut = async (user, sessionId, payload = {}) => {
         building: parkingSession.building,
         workDate: { $gte: todayStart, $lte: todayEnd },
         status: { $in: ['active', 'scheduled'] },
-      }).populate('gate', 'direction').session(mongoSession);
+      }).session(mongoSession);
       if (!todayShifts.length) {
-        throw new AppError('Bạn chưa được gán ca làm việc hôm nay', 403, 'NO_SHIFT_ASSIGNED');
-      }
-      const gateDirs = todayShifts.map((s) => s.gate?.direction).filter(Boolean);
-      if (gateDirs.length > 0 && !gateDirs.some((d) => d === 'out' || d === 'both')) {
-        throw new AppError('Ca của bạn được phân ở cổng VÀO — không thể check-out xe ra', 403, 'WRONG_GATE_DIRECTION');
+        throw new AppError('You have not been assigned a shift today', 403, 'NO_SHIFT_ASSIGNED');
       }
 
       if (parkingSession.status !== 'active') {

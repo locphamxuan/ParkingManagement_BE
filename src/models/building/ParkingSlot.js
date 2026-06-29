@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { ZONE_USAGE_TYPES } = require("./Zone");
 
 const PARKING_SLOT_STATUS = [
   "available",
@@ -21,6 +22,14 @@ const parkingSlotSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // Dãy chứa slot — nguồn cấu hình loại xe + đối tượng. vehicleType/usageType bên
+    // dưới được denormalize từ zone để query/filter nhanh lúc check-in.
+    zone: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Zone",
+      default: null,
+      index: true,
+    },
     code: {
       type: String,
       required: [true, "Slot code is required"],
@@ -31,6 +40,12 @@ const parkingSlotSchema = new mongoose.Schema(
     vehicleType: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "VehicleType",
+      default: null,
+    },
+    // Đối tượng sử dụng (denormalize từ zone): walk_in | registered | subscriber | reserved
+    usageType: {
+      type: String,
+      enum: [...ZONE_USAGE_TYPES, null],
       default: null,
     },
     status: {

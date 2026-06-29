@@ -7,6 +7,7 @@ const vehicleTypeController = require("../../controllers/manager/vehicleType.con
 const floorController = require("../../controllers/manager/floor.controller");
 const gateController = require("../../controllers/manager/gate.controller");
 const slotController = require("../../controllers/manager/slot.controller");
+const zoneController = require("../../controllers/manager/zone.controller");
 const pricingController = require("../../controllers/manager/pricing.controller");
 const packageController = require("../../controllers/manager/package.controller");
 const reservationPolicyController = require("../../controllers/manager/reservationPolicy.controller");
@@ -68,6 +69,16 @@ router
   .put(v.validateGate, gateController.update)
   .delete(gateController.remove);
 router.patch("/gates/:id/status", gateController.updateStatus);
+
+// Dãy (Zone) — nguồn cấu hình loại xe + đối tượng sử dụng cho các slot bên trong.
+router
+  .route("/zones")
+  .get(zoneController.list)
+  .post(v.validateZone, zoneController.create);
+router
+  .route("/zones/:id")
+  .put(v.validateZone, zoneController.update)
+  .delete(zoneController.remove);
 
 router
   .route("/slots")

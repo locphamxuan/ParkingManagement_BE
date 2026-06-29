@@ -147,7 +147,21 @@ const remove = async (user, buildingId, id) => {
     $or: [{ entryGate: id }, { exitGate: id }],
   });
   if (activeUsing > 0) {
-    throw new AppError("Không thể xóa cổng đang có xe sử dụng (phiên gửi xe active).", 409);
+    throw new AppError("Cannot delete a gate that is in use by an active parking session.", 409);
+  }
+
+  // Chặn xóa nếu xóa xong tòa nhà không còn cổng VÀO hoặc không còn cổng RA —
+  // tránh tình trạng staff không thể check-in/out. ('both' tính cho cả 2 chiều.)
+  const remaining = await Gate.find({ building: buildingId, _id: { $ne: id } }).select("direction");
+  const hasIn = remaining.some((g) => g.direction === "in" || g.direction === "both");
+  const hasOut = remaining.some((g) => g.direction === "out" || g.direction === "both");
+  const removingCoversIn = current.direction === "in" || current.direction === "both";
+  const removingCoversOut = current.direction === "out" || current.direction === "both";
+  if (removingCoversIn && !hasIn) {
+    throw new AppError("Cannot delete the last entry (in) gate — the building must keep at least one.", 409);
+  }
+  if (removingCoversOut && !hasOut) {
+    throw new AppError("Cannot delete the last exit (out) gate — the building must keep at least one.", 409);
   }
 
   await Gate.deleteOne({ _id: id });
