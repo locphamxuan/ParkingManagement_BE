@@ -1,5 +1,6 @@
 ﻿const Floor = require("../../models/building/Floor");
 const ParkingSlot = require("../../models/building/ParkingSlot");
+const Zone = require("../../models/building/Zone");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
@@ -60,6 +61,33 @@ const update = async (user, buildingId, id, payload) => {
   if (Array.isArray(payload.allowedVehicleTypes))
     update.allowedVehicleTypes = payload.allowedVehicleTypes;
 
+  // Giảm capacity tầng không được xuống dưới TỔNG capacity các dãy hiện có, cũng không
+  // dưới SỐ SLOT đã tạo — nếu không sẽ phá vỡ ràng buộc slot ≤ dãy ≤ tổng ≤ tầng.
+  if (update.capacity !== undefined && update.capacity > 0) {
+    const [zoneAgg, slotCount] = await Promise.all([
+      Zone.aggregate([
+        { $match: { floor: current._id } },
+        { $group: { _id: null, total: { $sum: "$capacity" } } },
+      ]),
+      ParkingSlot.countDocuments({ floor: current._id }),
+    ]);
+    const zoneTotal = zoneAgg[0]?.total || 0;
+    if (update.capacity < zoneTotal) {
+      throw new AppError(
+        `Floor capacity (${update.capacity}) is below the total zone capacity (${zoneTotal}). Reduce zone capacities first.`,
+        409,
+        "FLOOR_CAPACITY_BELOW_ZONES",
+      );
+    }
+    if (update.capacity < slotCount) {
+      throw new AppError(
+        `Floor capacity (${update.capacity}) is below the current slot count (${slotCount}). Remove slots first.`,
+        409,
+        "FLOOR_CAPACITY_BELOW_SLOTS",
+      );
+    }
+  }
+
   const updated = await Floor.findByIdAndUpdate(id, update, {
     new: true,
     runValidators: true,
@@ -85,6 +113,15 @@ const remove = async (user, buildingId, id) => {
   if (slotsCount > 0) {
     throw new AppError(
       "Floor still has parking slots. Remove slots first.",
+      409
+    );
+  }
+
+  // Zones belong to a floor — block delete while any remain to avoid orphaned zones.
+  const zonesCount = await Zone.countDocuments({ floor: id });
+  if (zonesCount > 0) {
+    throw new AppError(
+      "Floor still has zones. Remove zones first.",
       409
     );
   }

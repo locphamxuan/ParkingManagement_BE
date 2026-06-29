@@ -15,8 +15,23 @@ const {
   findDuplicateActiveSession,
   resolveLongTermSubscription,
   resolveReservation,
+  resolveCustomerUsageType,
+  acceptableUsageTypes,
+  findCompatibleSlots,
   findCapacityForBuilding,
 } = require('./helpers');
+
+// Slot có hợp ĐỐI TƯỢNG của lượt check-in không (theo chuỗi fallback: hội viên/đặt
+// chỗ dùng được slot chung walk_in, nhưng vãng lai không lấn slot hội viên).
+// KHÔNG chặn theo loại xe: loại xe của phiên lấy thẳng từ slot/dãy (manager cấu hình),
+// nên staff được tự do chọn dãy loại xe nào sau khi camera nhận diện.
+const isSlotUsageCompatible = (slot, usageType) => {
+  if (usageType && slot.usageType) {
+    const chain = acceptableUsageTypes(usageType);
+    if (chain.length && !chain.includes(slot.usageType)) return false;
+  }
+  return true;
+};
 
 const checkIn = async (user, payload) => {
   const session = await mongoose.startSession();
@@ -52,9 +67,8 @@ const checkIn = async (user, payload) => {
         throw new AppError('Building not found', 404);
       }
 
-      // Chỉ nhân viên được gán ca HÔM NAY mới được check-in. Ngoài ra, cổng của ca phải
-      // cho phép chiều VÀO ('in'/'both'). Ca không gắn cổng (null) → không chặn theo chiều
-      // (khớp đúng logic FE ẩn/hiện tab theo hướng cổng — useAssignedGates).
+      // Chỉ cần nhân viên có ca HÔM NAY là được check-in (không còn ràng buộc theo
+      // HƯỚNG cổng của ca — gate.direction chỉ là cấu hình vật lý + gợi ý tab ở FE).
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
       const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
       const todayShifts = await StaffShift.find({
@@ -62,20 +76,16 @@ const checkIn = async (user, payload) => {
         building: buildingId,
         workDate: { $gte: todayStart, $lte: todayEnd },
         status: { $in: ['active', 'scheduled'] },
-      }).populate('gate', 'direction').session(session);
+      }).session(session);
       if (!todayShifts.length) {
-        throw new AppError('Bạn chưa được gán ca làm việc hôm nay', 403, 'NO_SHIFT_ASSIGNED');
-      }
-      const gateDirs = todayShifts.map((s) => s.gate?.direction).filter(Boolean);
-      if (gateDirs.length > 0 && !gateDirs.some((d) => d === 'in' || d === 'both')) {
-        throw new AppError('Ca của bạn được phân ở cổng RA — không thể check-in xe vào', 403, 'WRONG_GATE_DIRECTION');
+        throw new AppError('You have not been assigned a shift today', 403, 'NO_SHIFT_ASSIGNED');
       }
 
       // Ảnh CHÂN DUNG bắt buộc cho MỌI check-in (kể cả gói/đặt chỗ) để đối chiếu
       // người khi lấy xe. Ảnh BIỂN SỐ bắt buộc thêm với khách vãng lai / user thường
       // (kiểm tra ở dưới); gói & đặt chỗ định danh bằng quét nên không bắt ảnh biển.
       if (!portraitImage) {
-        throw new AppError('Cần ảnh chân dung tài xế để đối chiếu khi lấy xe', 400, 'PORTRAIT_REQUIRED');
+        throw new AppError('A driver portrait photo is required to verify the person at pickup', 400, 'PORTRAIT_REQUIRED');
       }
 
       // Nhận diện gói dài hạn sớm (qua biển số lấy từ QR phương tiện hoặc nhập tay).
@@ -87,23 +97,34 @@ const checkIn = async (user, payload) => {
         throw new AppError('Building is at capacity', 409);
       }
 
-      const duplicate = await findDuplicateActiveSession(plateNumber);
+      const duplicate = await findDuplicateActiveSession(plateNumber, buildingId);
       if (duplicate && !forceCheckIn) {
         throw new AppError('Duplicate active plate detected', 400, 'DUPLICATE_PLATE_WARNING');
       }
 
       if (longTerm) {
-        // Gói floating: staff PHẢI chọn 1 slot trống để gán cho xe (slot → occupied).
-        const ltSlotId = asObjectId(payload?.slot || payload?.slotId);
-        if (!ltSlotId) {
-          throw new AppError('Cần chọn chỗ đỗ trống cho xe mua gói', 400, 'SLOT_REQUIRED_FOR_LONG_TERM');
-        }
-        const ltSlot = await ParkingSlot.findById(ltSlotId).session(session);
-        if (!ltSlot || (ltSlot.building && String(ltSlot.building) !== String(buildingId))) {
-          throw new AppError('Chỗ đỗ không hợp lệ', 400, 'INVALID_SLOT');
-        }
-        if (ltSlot.status !== 'available') {
-          throw new AppError('Chỗ đỗ đã có xe hoặc không khả dụng', 409, 'SLOT_NOT_AVAILABLE');
+        // Gói floating: gán 1 slot trống thuộc dãy "subscriber" + đúng loại xe.
+        // Staff chọn → validate tương thích; không chọn → tự gợi ý slot phù hợp.
+        let ltSlotId = asObjectId(payload?.slot || payload?.slotId);
+        let ltSlot;
+        if (ltSlotId) {
+          ltSlot = await ParkingSlot.findById(ltSlotId).session(session);
+          if (!ltSlot || (ltSlot.building && String(ltSlot.building) !== String(buildingId))) {
+            throw new AppError('Invalid slot', 400, 'INVALID_SLOT');
+          }
+          if (ltSlot.status !== 'available') {
+            throw new AppError('The slot is occupied or unavailable', 409, 'SLOT_NOT_AVAILABLE');
+          }
+          if (!forceCheckIn && !isSlotUsageCompatible(ltSlot, 'subscriber')) {
+            throw new AppError('The slot is not in a zone for long-term packages', 409, 'SLOT_USAGE_MISMATCH');
+          }
+        } else {
+          const [suggested] = await findCompatibleSlots(buildingId, vehicleType, 'subscriber', session);
+          if (!suggested) {
+            throw new AppError('No suitable slot available for the package vehicle', 409, 'SLOT_REQUIRED_FOR_LONG_TERM');
+          }
+          ltSlot = suggested;
+          ltSlotId = suggested._id;
         }
         ltSlot.status = 'occupied';
         await ltSlot.save({ session });
@@ -116,7 +137,8 @@ const checkIn = async (user, payload) => {
             user: longTerm.user,
             fee: 0,
             paymentMethod: 'long_term',
-            vehicleType,
+            // Loại xe của phiên lấy theo slot/dãy (manager cấu hình); camera chỉ là fallback.
+            vehicleType: ltSlot.vehicleType || vehicleType,
             vehicleBrand,
             plateImage,
             portraitImage,
@@ -154,31 +176,51 @@ const checkIn = async (user, payload) => {
       // user thường check-in trực tiếp: BẮT BUỘC thêm ảnh biển số (chân dung đã bắt
       // buộc ở trên). Đặt chỗ định danh bằng quét nên không bắt ảnh biển.
       if (!reservation && !plateImage) {
-        throw new AppError('Cần ảnh biển số xe để check-in', 400, 'PLATE_IMAGE_REQUIRED');
+        throw new AppError('A license plate photo is required to check in', 400, 'PLATE_IMAGE_REQUIRED');
       }
 
-      // Bắt buộc chọn ô đỗ với luồng không phải reservation khi tòa nhà có slot.
-      if (!reservation && !asObjectId(payload?.slot)) {
-        const availableSlotCount = await ParkingSlot.countDocuments({
-          building: buildingId,
-          status: 'available',
-        });
-        if (availableSlotCount > 0) {
-          throw new AppError('Cần chọn ô đỗ xe trước khi check-in', 400, 'SLOT_REQUIRED');
+      // Đối tượng của lượt check-in (để khớp dãy/slot). Reservation → 'reserved',
+      // có tài khoản → 'registered', còn lại → 'walk_in'.
+      const usageType = resolveCustomerUsageType({ longTerm: null, reservation, registeredOwner });
+
+      // Luồng KHÔNG phải reservation: tự gợi ý slot tương thích nếu staff chưa chọn.
+      let selectedSlotId = asObjectId(payload?.slot);
+      if (!reservation && !selectedSlotId) {
+        const [suggested] = await findCompatibleSlots(buildingId, vehicleType, usageType, session);
+        if (suggested) {
+          selectedSlotId = suggested._id;
+        } else {
+          // Không còn slot đúng đối tượng — nếu tòa vẫn còn slot trống khác thì bắt
+          // staff chọn tay (tránh tự gán bừa vào dãy sai đối tượng).
+          const availableSlotCount = await ParkingSlot.countDocuments({
+            building: buildingId,
+            status: 'available',
+          }).session(session);
+          if (availableSlotCount > 0) {
+            throw new AppError('Please select a parking slot before check-in', 400, 'SLOT_REQUIRED');
+          }
         }
       }
 
-      // Slot ưu tiên: reservation slot → staff-selected slot (walk-in/standard)
-      const slotId = reservation?.slot?._id || reservation?.slot || asObjectId(payload?.slot) || null;
+      // Slot ưu tiên: reservation slot → slot đã chọn/gợi ý (walk-in/standard)
+      const slotId = reservation?.slot?._id || reservation?.slot || selectedSlotId || null;
+      // Loại xe của phiên sẽ lấy theo slot/dãy (manager cấu hình) khi có slot.
+      let assignedSlotVehicleType = null;
       if (slotId) {
         const slot = await ParkingSlot.findById(slotId).session(session);
         if (slot?.status === 'maintenance') {
           throw new AppError('Assigned slot is under maintenance', 409, 'SLOT_MAINTENANCE_NOT_AVAILABLE');
         }
         if (slot?.status !== 'available' && !reservation) {
-          throw new AppError('Chỗ đỗ đã có xe hoặc không khả dụng', 409, 'SLOT_NOT_AVAILABLE');
+          throw new AppError('The slot is occupied or unavailable', 409, 'SLOT_NOT_AVAILABLE');
+        }
+        // Chỉ chặn theo ĐỐI TƯỢNG (reservation đã định sẵn slot nên bỏ qua). Loại xe do
+        // dãy/slot quyết định nên không chặn — staff tự do chọn dãy loại xe nào.
+        if (slot && !reservation && !forceCheckIn && !isSlotUsageCompatible(slot, usageType)) {
+          throw new AppError('The slot is not in a zone for this usage class', 409, 'SLOT_USAGE_MISMATCH');
         }
         if (slot) {
+          assignedSlotVehicleType = slot.vehicleType || null;
           slot.status = 'occupied';
           await slot.save({ session });
         }
@@ -199,7 +241,8 @@ const checkIn = async (user, payload) => {
           user: reservation?.user || registeredOwner?._id || null,
           reservation: reservation?._id || null,
           slot: slotId,
-          vehicleType,
+          // Ưu tiên loại xe của dãy/slot; fallback loại xe camera nhận diện.
+          vehicleType: assignedSlotVehicleType || vehicleType,
           vehicleBrand,
           plateImage,
           portraitImage,

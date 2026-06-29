@@ -50,7 +50,7 @@ const validateGate = wrap((req) => {
 const SLOT_STATUS = ["available", "occupied", "reserved", "maintenance"];
 
 const validateSlot = wrap((req) => {
-  if (req.method === "POST") requireFields(req.body, ["code", "floor"]);
+  if (req.method === "POST") requireFields(req.body, ["code", "floor", "zone"]);
   if (req.body.status !== undefined && !SLOT_STATUS.includes(req.body.status)) {
     throw new AppError(`status must be one of: ${SLOT_STATUS.join(", ")}`, 400);
   }
@@ -60,6 +60,29 @@ const validateSlotStatus = wrap((req) => {
   if (!SLOT_STATUS.includes(req.body.status)) {
     throw new AppError(`status must be one of: ${SLOT_STATUS.join(", ")}`, 400);
   }
+});
+
+const ZONE_USAGE_TYPES = ["walk_in", "registered", "subscriber", "reserved"];
+const ZONE_STATUS = ["active", "inactive", "maintenance"];
+
+const validateZone = wrap((req) => {
+  if (req.method === "POST")
+    requireFields(req.body, ["code", "floor", "vehicleType", "usageType", "capacity"]);
+  if (
+    req.body.usageType !== undefined &&
+    !ZONE_USAGE_TYPES.includes(req.body.usageType)
+  ) {
+    throw new AppError(
+      `usageType must be one of: ${ZONE_USAGE_TYPES.join(", ")}`,
+      400
+    );
+  }
+  if (req.body.status !== undefined && !ZONE_STATUS.includes(req.body.status)) {
+    throw new AppError(`status must be one of: ${ZONE_STATUS.join(", ")}`, 400);
+  }
+  // capacity = "ngân sách slot" của dãy → phải là số nguyên >= 1.
+  if (req.body.capacity !== undefined && Number(req.body.capacity) < 1)
+    throw new AppError("capacity must be at least 1", 400);
 });
 
 const isHHMM = (v) => typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
@@ -165,6 +188,7 @@ module.exports = {
   validateGate,
   validateSlot,
   validateSlotStatus,
+  validateZone,
   validatePricePolicy,
   validatePackage,
   validateReservationPolicy,

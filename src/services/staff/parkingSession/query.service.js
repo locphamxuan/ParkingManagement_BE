@@ -3,7 +3,7 @@ const { ParkingSession, ParkingSlot, LongTermSubscription, Reservation, Payment,
 const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../../utils/plate.util');
 const visionScanService = require('../visionScan.service');
-const { asObjectId, calculateFee, calculateLongTermOverageFee, activeSubscriptionMatch } = require('./helpers');
+const { asObjectId, calculateFee, calculateLongTermOverageFee, activeSubscriptionMatch, resolveVehicleTypeId, acceptableUsageTypes } = require('./helpers');
 
 const listActive = async (user, query = {}) => {
   const allowedBuildings = assertBuildingScope(user, query.buildingId || query.building);
@@ -143,9 +143,20 @@ const lookupPlate = async (staffUser, plateNumber) => {
     else if (t) registeredVehicleType = 'car'; // car/suv/truck/other → car
   }
 
+  // Đối tượng (usageType) suy ra từ trạng thái biển số — khớp resolveCustomerUsageType
+  // ở check-in, để FE gọi /free-slots đúng pool slot.
+  const usageType = activeSub
+    ? 'subscriber'
+    : activeReservation
+      ? 'reserved'
+      : user
+        ? 'registered'
+        : 'walk_in';
+
   return {
     plateNumber: plate,
     hasAccount: Boolean(user),
+    usageType,
     registeredVehicleType,
     user: user
       ? {
@@ -177,19 +188,53 @@ const lookupPlate = async (staffUser, plateNumber) => {
 };
 
 /* ─────────────────────────────────────────────
-   listFreeSlots — slot 'available' của 1 tòa nhà (cho staff gán xe gói lúc check-in)
+   listFreeSlots — slot 'available' của 1 tòa nhà (cho staff gán xe lúc check-in).
+   Lọc CHẶT theo đối tượng (usageType, có fallback) để khách vãng lai không lấn slot
+   hội viên. Loại xe (vehicleType từ camera) chỉ dùng để XẾP slot đúng loại lên đầu
+   (gợi ý) — KHÔNG lọc bỏ — để staff vẫn chọn được dãy loại xe khác (vd loại xe tùy
+   chỉnh của manager). 'suggestedSlotId' = slot best-fit để FE chọn sẵn.
 ───────────────────────────────────────────── */
-const listFreeSlots = async (staffUser, buildingId) => {
+const listFreeSlots = async (staffUser, buildingId, opts = {}) => {
   const allowed = assignedBuildingIds(staffUser).map(String);
   if (!buildingId) throw new AppError('building is required', 400);
   if (!allowed.includes(String(buildingId))) {
     throw new AppError('Forbidden building scope', 403, 'FORBIDDEN_BUILDING_SCOPE');
   }
-  const slots = await ParkingSlot.find({ building: buildingId, status: 'available' })
-    .select('_id code floor')
+
+  const filter = { building: buildingId, status: 'available' };
+  // Đối tượng khớp theo chuỗi fallback (giống check-in) để FE hiện đúng pool slot.
+  const chain = opts.usageType ? acceptableUsageTypes(opts.usageType) : [];
+  if (chain.length) filter.usageType = { $in: chain };
+
+  // Loại xe camera nhận diện → chỉ để XẾP HẠNG (không lọc).
+  const detectedVtId = opts.vehicleType
+    ? await resolveVehicleTypeId(buildingId, opts.vehicleType)
+    : null;
+
+  const slots = await ParkingSlot.find(filter)
+    .select('_id code floor zone vehicleType usageType')
     .populate('floor', 'name code')
-    .sort('code');
-  return slots;
+    .populate('zone', 'code usageType')
+    .populate('vehicleType', 'name code');
+
+  // Xếp: đúng loại xe camera nhận diện trước → đúng đối tượng (best-fit) → theo code.
+  const usageRank = (u) => {
+    const i = chain.indexOf(u);
+    return i === -1 ? chain.length : i;
+  };
+  const vtRank = (vt) =>
+    detectedVtId && vt && String(vt._id || vt) === String(detectedVtId) ? 0 : 1;
+  slots.sort(
+    (a, b) =>
+      vtRank(a.vehicleType) - vtRank(b.vehicleType) ||
+      usageRank(a.usageType) - usageRank(b.usageType) ||
+      String(a.code).localeCompare(String(b.code))
+  );
+
+  return {
+    items: slots,
+    suggestedSlotId: slots[0]?._id || null,
+  };
 };
 
 /* ─────────────────────────────────────────────

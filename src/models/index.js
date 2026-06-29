@@ -1,7 +1,7 @@
 const User = require("./user/User");
 const OtpVerification = require("./user/OtpVerification");
 
-const { Building, BuildingManager, Floor, Gate, ParkingSlot, VehicleType } = require("./building");
+const { Building, BuildingManager, Floor, Gate, ParkingSlot, VehicleType, Zone } = require("./building");
 const { PricePolicy, ReservationPolicy, LongTermPackage, LongTermSubscription } = require("./policy");
 const { ParkingSession, Reservation, Shift, StaffShift, Feedback } = require("./operations");
 const { Payment, WalletTransaction, BuildingWallet, BuildingWalletTransaction } = require("./finance");
@@ -14,6 +14,7 @@ module.exports = {
   VehicleType,
   Floor,
   Gate,
+  Zone,
   ParkingSlot,
   PricePolicy,
   LongTermPackage,
