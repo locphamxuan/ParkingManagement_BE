@@ -8,7 +8,7 @@ const {
   VehicleType,
 } = require('../../../models');
 const { getMaxHoldMs } = require('../../../utils/reservationHold');
-const { calculateParkingFee } = require('../../../utils/feeCalculator');
+const { calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
 
@@ -182,8 +182,12 @@ const findCompatibleSlots = async (buildingId, vehicleTypeId, usageType, session
     const i = chain.indexOf(u);
     return i === -1 ? chain.length : i;
   };
+  // Ưu tiên slot không dành cho đặt trước (reservable=false) để giữ slot reservable cho user tự đặt.
   return slots.sort(
-    (a, b) => rank(a.usageType) - rank(b.usageType) || String(a.code).localeCompare(String(b.code))
+    (a, b) =>
+      rank(a.usageType) - rank(b.usageType) ||
+      (a.reservable ? 1 : 0) - (b.reservable ? 1 : 0) ||
+      String(a.code).localeCompare(String(b.code))
   );
 };
 
@@ -231,7 +235,7 @@ const calculateLongTermOverageFee = async (parkingSession, now = new Date()) => 
  * PricePolicy, falling back to a flat hourly rate by kind. Mirrors checkOut.
  * Gói dài hạn (long_term): miễn phí trong hạn mức/ngày, chỉ tính phần vượt.
  */
-const calculateFee = async (parkingSession) => {
+const calculateFee = async (parkingSession, preloadedPolicies) => {
   if (parkingSession.fee && parkingSession.fee > 0) return parkingSession.fee;
   const now = new Date();
   if (parkingSession.paymentMethod === 'long_term') {
@@ -239,7 +243,7 @@ const calculateFee = async (parkingSession) => {
     return fee;
   }
   const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
-  let fee = await calculateParkingFee(parkingSession.building, vtId, parkingSession.entryTime, now);
+  let fee = await calculateParkingFee(parkingSession.building, vtId, parkingSession.entryTime, now, preloadedPolicies);
   if (!fee || fee <= 0) {
     const kind = vehicleKindFromType(parkingSession.vehicleType);
     const hours = Math.max(1, Math.ceil((now.getTime() - new Date(parkingSession.entryTime).getTime()) / (1000 * 60 * 60)));

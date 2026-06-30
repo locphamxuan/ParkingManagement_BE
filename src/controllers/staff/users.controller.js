@@ -28,7 +28,8 @@ const lookupPlateQr = asyncHandler(async (req, res) => {
  * token or an account ObjectId to the right lookup.
  */
 const resolveQr = asyncHandler(async (req, res) => {
-  const data = await usersService.resolveQr(req.user, req.params.code);
+  const buildingId = req.query.building || null;
+  const data = await usersService.resolveQr(req.user, req.params.code, buildingId);
   sendSuccess(res, { data });
 });
 

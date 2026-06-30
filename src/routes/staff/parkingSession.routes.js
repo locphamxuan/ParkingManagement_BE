@@ -5,35 +5,35 @@ const { authorizeBuildingAccess } = require("../../middlewares/rbac.middleware")
 const router = express.Router();
 
 router.post("/check-in", authorizeBuildingAccess, parkingSessionController.checkIn);
-router.get("/active", parkingSessionController.listActive);
-router.get("/search", parkingSessionController.search);
+router.get("/active", authorizeBuildingAccess, parkingSessionController.listActive);
+router.get("/search", authorizeBuildingAccess, parkingSessionController.search);
 
 // Plate lookup — returns hasAccount + user wallet info for staff at entry gate
-router.get("/lookup-plate/:plate", parkingSessionController.lookupPlate);
+router.get("/lookup-plate/:plate", authorizeBuildingAccess, parkingSessionController.lookupPlate);
 
 // Free slots of a building (for assigning a long-term package vehicle at check-in)
-router.get("/free-slots", parkingSessionController.listFreeSlots);
+router.get("/free-slots", authorizeBuildingAccess, parkingSessionController.listFreeSlots);
 
 // Doanh thu ca của nhân viên cổng ra (tiền đã thu hôm nay) — đặt trước "/:id"
-router.get("/my-shift-revenue", parkingSessionController.myShiftRevenue);
+router.get("/my-shift-revenue", authorizeBuildingAccess, parkingSessionController.myShiftRevenue);
 
 // Lịch sử xe vào hôm nay của nhân viên cổng vào — có location (cổng vào, tầng, ô đỗ)
-router.get("/my-checkins", parkingSessionController.myCheckIns);
+router.get("/my-checkins", authorizeBuildingAccess, parkingSessionController.myCheckIns);
 
 // AI camera (Camera 1) — recognize plate + brand from an image, resolve account
-router.post("/scan", parkingSessionController.scan);
+router.post("/scan", authorizeBuildingAccess, parkingSessionController.scan);
 
 // Staff rejects a check-in/check-out → notify the plate owner
-router.post("/reject", parkingSessionController.reject);
+router.post("/reject", authorizeBuildingAccess, parkingSessionController.reject);
 
-router.patch("/:id/check-out", parkingSessionController.checkOut);
+router.patch("/:id/check-out", authorizeBuildingAccess, parkingSessionController.checkOut);
 
 // PayOS payment — tạo QR + checkoutUrl để thu phí gửi xe tại chỗ
-router.post("/:id/initiate-payment", parkingSessionController.initiatePayment);
+router.post("/:id/initiate-payment", authorizeBuildingAccess, parkingSessionController.initiatePayment);
 
 // Reconcile a bank-transfer (PayOS) payment when the webhook didn't arrive
-router.get("/payment/:orderCode/status", parkingSessionController.verifyPayment);
+router.get("/payment/:orderCode/status", authorizeBuildingAccess, parkingSessionController.verifyPayment);
 
-router.get("/:id", parkingSessionController.getById);
+router.get("/:id", authorizeBuildingAccess, parkingSessionController.getById);
 
 module.exports = router;

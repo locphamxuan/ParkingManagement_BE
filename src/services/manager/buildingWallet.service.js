@@ -68,16 +68,27 @@ const credit = async (buildingId, amount, reason, relatedPaymentId, mongoSession
 
 /**
  * Debit (trừ tiền) từ BuildingWallet — atomic.
+ * options.allowNegative = true → cho phép số dư âm (dùng cho refund do manager hủy gói/đặt chỗ).
  */
-const debit = async (buildingId, amount, reason, relatedPaymentId, performedById, mongoSession) => {
+const debit = async (buildingId, amount, reason, relatedPaymentId, performedById, mongoSession, options = {}) => {
   const opts = mongoSession ? { session: mongoSession } : {};
+  const { allowNegative = false } = options;
 
-  const wallet = await BuildingWallet.findOneAndUpdate(
-    { building: buildingId, balance: { $gte: amount } },
-    { $inc: { balance: -amount } },
-    { new: true, ...opts },
-  );
-  if (!wallet) throw new AppError('Insufficient building wallet balance', 400);
+  let wallet;
+  if (allowNegative) {
+    wallet = await BuildingWallet.findOneAndUpdate(
+      { building: buildingId },
+      { $inc: { balance: -amount } },
+      { new: true, upsert: true, ...opts },
+    );
+  } else {
+    wallet = await BuildingWallet.findOneAndUpdate(
+      { building: buildingId, balance: { $gte: amount } },
+      { $inc: { balance: -amount } },
+      { new: true, ...opts },
+    );
+    if (!wallet) throw new AppError('Insufficient building wallet balance', 400);
+  }
 
   await BuildingWalletTransaction.create(
     [{

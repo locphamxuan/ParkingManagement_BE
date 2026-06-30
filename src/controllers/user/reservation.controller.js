@@ -1,7 +1,7 @@
 const asyncHandler = require('../../utils/asyncHandler');
 const { sendSuccess } = require('../../utils/response');
 const service = require('../../services/user/reservation.service');
-const calculateReservationFee = require('../../utils/calculateReservationFee');
+const { calculateReservationFee } = require('../../utils/feeEngine');
 const ReservationPolicy = require('../../models/policy/ReservationPolicy');
 const AppError = require('../../utils/AppError');
 

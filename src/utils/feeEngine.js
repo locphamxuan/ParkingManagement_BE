@@ -7,6 +7,8 @@
  *  - Cộng phí TẤT CẢ khung peak (mỗi khung theo rate riêng), phần còn lại = regular.
  */
 const PricePolicy = require('../models/policy/PricePolicy');
+const Building = require('../models/building/Building');
+const { FALLBACK_HOURLY_RATE } = require('../constants/pricing');
 
 /** Parse 'HH:MM' → minutes from midnight */
 function parseHHMM(str) {
@@ -57,7 +59,7 @@ function calculateTotalPeakMinutes(resStartMs, resEndMs, peakFrom, peakTo) {
  * @returns {Promise<{fee:number,totalMinutes:number,regularMinutes:number,peakMinutes:number,regularRate:number|null,peakRate:number|null,hasPolicy:boolean}>}
  *          fee = 0 và hasPolicy = false khi chưa có policy (caller tự quyết fallback).
  */
-async function computeFee({ buildingId, vehicleTypeId, start, end }) {
+async function computeFee({ buildingId, vehicleTypeId, start, end, preloadedPolicies }) {
   const empty = {
     fee: 0, totalMinutes: 0, regularMinutes: 0, peakMinutes: 0,
     regularRate: null, peakRate: null, hasPolicy: false,
@@ -70,13 +72,22 @@ async function computeFee({ buildingId, vehicleTypeId, start, end }) {
   const totalMinutes = (exit.getTime() - entry.getTime()) / 60_000;
 
   // Policy còn hiệu lực trong [entry, exit].
-  const policies = await PricePolicy.find({
-    building: buildingId,
-    vehicleType: vehicleTypeId,
-    isActive: true,
-    effectiveFrom: { $lte: exit },
-    $or: [{ effectiveTo: null }, { effectiveTo: { $gte: entry } }],
-  }).sort({ createdAt: -1 });
+  const policies = Array.isArray(preloadedPolicies)
+    ? preloadedPolicies
+        .filter(
+          (p) =>
+            p.isActive &&
+            new Date(p.effectiveFrom) <= exit &&
+            (p.effectiveTo == null || new Date(p.effectiveTo) >= entry),
+        )
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    : await PricePolicy.find({
+        building: buildingId,
+        vehicleType: vehicleTypeId,
+        isActive: true,
+        effectiveFrom: { $lte: exit },
+        $or: [{ effectiveTo: null }, { effectiveTo: { $gte: entry } }],
+      }).sort({ createdAt: -1 });
 
   if (policies.length === 0) return { ...empty, totalMinutes };
 
@@ -116,4 +127,57 @@ async function computeFee({ buildingId, vehicleTypeId, start, end }) {
   };
 }
 
-module.exports = { computeFee, calculateTotalPeakMinutes };
+/**
+ * Tính phí thực thu lúc checkout.
+ * Thin wrapper trên computeFee — trả về 0 khi chưa có PricePolicy.
+ */
+async function calculateParkingFee(buildingId, vehicleTypeId, entryTime, exitTime, preloadedPolicies) {
+  const { fee } = await computeFee({
+    buildingId,
+    vehicleTypeId,
+    start: entryTime,
+    end: exitTime,
+    preloadedPolicies,
+  });
+  return fee;
+}
+
+/**
+ * Ước tính phí cho một lượt đặt chỗ (reservation).
+ * Fallback về Building.pricing khi building chưa có PricePolicy.
+ */
+async function calculateReservationFee(buildingId, vehicleTypeId, startTime, endTime) {
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+
+  const r = await computeFee({ buildingId, vehicleTypeId, start, end });
+  const totalMinutes = r.totalMinutes || Math.max(0, (end - start) / 60_000);
+
+  let estimatedFee = r.fee;
+  let regularRate = r.regularRate;
+  let regularMinutes = r.regularMinutes;
+  let peakMinutes = r.peakMinutes;
+  let peakRate = r.peakRate;
+
+  if (!r.hasPolicy) {
+    const building = await Building.findById(buildingId).select('pricing').lean();
+    regularRate = building?.pricing?.hourlyRate ?? FALLBACK_HOURLY_RATE;
+    regularMinutes = totalMinutes;
+    peakMinutes = 0;
+    peakRate = null;
+    estimatedFee = Math.ceil((regularRate / 60) * totalMinutes);
+  }
+
+  return {
+    estimatedFee,
+    hourlyRate: regularRate,
+    durationMinutes: Math.round(totalMinutes),
+    hours: Math.ceil(totalMinutes / 60),
+    regularHours: regularMinutes / 60,
+    peakHours: peakMinutes / 60,
+    peakRate,
+    minimumApplied: false,
+  };
+}
+
+module.exports = { computeFee, calculateTotalPeakMinutes, calculateParkingFee, calculateReservationFee };

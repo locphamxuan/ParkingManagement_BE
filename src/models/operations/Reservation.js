@@ -53,6 +53,8 @@ const reservationSchema = new mongoose.Schema(
     checkedInAt: { type: Date, default: null },
     // Mốc đã gửi cảnh báo "đậu quá giờ" (overstay) — tránh báo trùng.
     overstayNotifiedAt: { type: Date, default: null },
+    // Mốc người dùng hủy đặt chỗ — dùng cho cooldown 24h re-booking (chính xác hơn updatedAt).
+    cancelledAt: { type: Date, default: null },
     // 15% deposit charged from user wallet at booking time.
     fee: { type: Number, default: 0, min: 0 },
     // Total estimated fee calculated from duration × price policy (100%).
@@ -68,6 +70,11 @@ const reservationSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+reservationSchema.index({ building: 1, status: 1, startTime: 1 }); // expiry cron + staff list
+reservationSchema.index({ user: 1, status: 1 });                   // user reservation list
+reservationSchema.index({ plateNumber: 1, status: 1 });            // plate-based lookup (partial)
+reservationSchema.index({ plateNumber: 1, building: 1, status: 1 }); // check-in lookup (plate + building scope)
 
 module.exports = mongoose.model("Reservation", reservationSchema);
 module.exports.RESERVATION_STATUS = RESERVATION_STATUS;

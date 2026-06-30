@@ -16,8 +16,12 @@ const authenticate = asyncHandler(async (req, _res, next) => {
   if (!user) throw new AppError("User no longer exists", 401);
   if (!user.isActive) throw new AppError("Account is deactivated", 403);
 
-  const assignments = await BuildingManager.find({ user: id, isActive: true }).select("building");
-  user.assignedBuildings = assignments.map((a) => a.building);
+  if (user.role === 'manager') {
+    const assignments = await BuildingManager.find({ user: id, isActive: true }).select('building');
+    user.assignedBuildings = assignments.map((a) => a.building);
+  } else {
+    user.assignedBuildings = [];
+  }
 
   req.user = user;
   next();

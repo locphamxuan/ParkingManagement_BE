@@ -45,6 +45,7 @@ const auditLogSchema = new mongoose.Schema(
 );
 
 auditLogSchema.index({ createdAt: -1 });
+auditLogSchema.index({ building: 1, createdAt: -1 }); // admin filter by building
 
 module.exports = mongoose.model("AuditLog", auditLogSchema);
 module.exports.AUDIT_SEVERITY = AUDIT_SEVERITY;

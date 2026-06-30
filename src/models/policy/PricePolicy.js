@@ -43,4 +43,22 @@ const pricePolicySchema = new mongoose.Schema(
 
 pricePolicySchema.index({ building: 1, vehicleType: 1, isActive: 1 });
 
+// Khi activate policy mới (isActive → true), tự deactivate các policy cùng
+// (building, vehicleType, type) đang active → tránh 2 regular policy cùng hiệu lực.
+pricePolicySchema.pre('save', async function (next) {
+  if (this.isActive && (this.isModified('isActive') || this.isNew)) {
+    await this.constructor.updateMany(
+      {
+        _id: { $ne: this._id },
+        building: this.building,
+        vehicleType: this.vehicleType,
+        type: this.type,
+        isActive: true,
+      },
+      { $set: { isActive: false } },
+    );
+  }
+  next();
+});
+
 module.exports = mongoose.model("PricePolicy", pricePolicySchema);

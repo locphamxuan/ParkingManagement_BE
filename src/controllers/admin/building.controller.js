@@ -3,6 +3,7 @@ const { sendSuccess } = require("../../utils/response");
 const buildingService = require("../../services/building.service");
 const buildingManagerService = require("../../services/buildingManager.service");
 const gateService = require("../../services/manager/gate.service");
+const LongTermPackage = require('../../models/policy/LongTermPackage');
 
 const listBuildings = asyncHandler(async (req, res) => {
   const data = await buildingService.listBuildings(req.query);
@@ -61,7 +62,6 @@ const getBuildingMembers = asyncHandler(async (req, res) => {
 });
 
 // Admin xem gói đăng ký dài hạn của building (read-only)
-const LongTermPackage = require('../../models/policy/LongTermPackage');
 const listBuildingPackages = asyncHandler(async (req, res) => {
   const items = await LongTermPackage.find({ building: req.params.id })
     .populate('vehicleType', 'name code')

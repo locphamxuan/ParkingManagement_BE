@@ -67,6 +67,19 @@ const checkIn = async (user, payload) => {
         throw new AppError('Building not found', 404);
       }
 
+      // Validate giờ hoạt động của tòa nhà
+      if (building.operatingHours?.open && building.operatingHours?.close) {
+        const now = new Date();
+        const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        if (hhmm < building.operatingHours.open || hhmm >= building.operatingHours.close) {
+          throw new AppError(
+            `Tòa nhà ngoài giờ hoạt động (${building.operatingHours.open}–${building.operatingHours.close})`,
+            400,
+            'BUILDING_CLOSED',
+          );
+        }
+      }
+
       // Chỉ cần nhân viên có ca HÔM NAY là được check-in (không còn ràng buộc theo
       // HƯỚNG cổng của ca — gate.direction chỉ là cấu hình vật lý + gợi ý tab ở FE).
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
@@ -107,6 +120,7 @@ const checkIn = async (user, payload) => {
         // Staff chọn → validate tương thích; không chọn → tự gợi ý slot phù hợp.
         let ltSlotId = asObjectId(payload?.slot || payload?.slotId);
         let ltSlot;
+        let ltSlotUsageBypassed = false;
         if (ltSlotId) {
           ltSlot = await ParkingSlot.findById(ltSlotId).session(session);
           if (!ltSlot || (ltSlot.building && String(ltSlot.building) !== String(buildingId))) {
@@ -115,8 +129,11 @@ const checkIn = async (user, payload) => {
           if (ltSlot.status !== 'available') {
             throw new AppError('The slot is occupied or unavailable', 409, 'SLOT_NOT_AVAILABLE');
           }
-          if (!forceCheckIn && !isSlotUsageCompatible(ltSlot, 'subscriber')) {
-            throw new AppError('The slot is not in a zone for long-term packages', 409, 'SLOT_USAGE_MISMATCH');
+          if (!isSlotUsageCompatible(ltSlot, 'subscriber')) {
+            if (!forceCheckIn) {
+              throw new AppError('The slot is not in a zone for long-term packages', 409, 'SLOT_USAGE_MISMATCH');
+            }
+            ltSlotUsageBypassed = true;
           }
         } else {
           const [suggested] = await findCompatibleSlots(buildingId, vehicleType, 'subscriber', session);
@@ -151,12 +168,18 @@ const checkIn = async (user, payload) => {
 
         await logAudit(session, {
           actor: user._id,
-          action: 'LONG_TERM_SUBSCRIPTION_CHECK_IN',
+          action: ltSlotUsageBypassed ? 'FORCE_SLOT_USAGE_BYPASS' : 'LONG_TERM_SUBSCRIPTION_CHECK_IN',
           entityType: 'ParkingSession',
           entityId: `${created[0]._id}`,
           building: buildingId,
           after: created[0].toObject(),
-          metadata: { plateNumber, longTermSubscriptionId: `${longTerm._id}` },
+          metadata: {
+            plateNumber,
+            longTermSubscriptionId: `${longTerm._id}`,
+            forceCheckIn: ltSlotUsageBypassed,
+            slotUsageBypassed: ltSlotUsageBypassed,
+            bypassedSlotUsageType: ltSlotUsageBypassed ? ltSlot?.usageType : null,
+          },
         });
 
         return created[0];
@@ -206,6 +229,8 @@ const checkIn = async (user, payload) => {
       const slotId = reservation?.slot?._id || reservation?.slot || selectedSlotId || null;
       // Loại xe của phiên sẽ lấy theo slot/dãy (manager cấu hình) khi có slot.
       let assignedSlotVehicleType = null;
+      let walkInSlotUsageBypassed = false;
+      let walkInBypassedSlotUsageType = null;
       if (slotId) {
         const slot = await ParkingSlot.findById(slotId).session(session);
         if (slot?.status === 'maintenance') {
@@ -216,8 +241,12 @@ const checkIn = async (user, payload) => {
         }
         // Chỉ chặn theo ĐỐI TƯỢNG (reservation đã định sẵn slot nên bỏ qua). Loại xe do
         // dãy/slot quyết định nên không chặn — staff tự do chọn dãy loại xe nào.
-        if (slot && !reservation && !forceCheckIn && !isSlotUsageCompatible(slot, usageType)) {
-          throw new AppError('The slot is not in a zone for this usage class', 409, 'SLOT_USAGE_MISMATCH');
+        if (slot && !reservation && !isSlotUsageCompatible(slot, usageType)) {
+          if (!forceCheckIn) {
+            throw new AppError('The slot is not in a zone for this usage class', 409, 'SLOT_USAGE_MISMATCH');
+          }
+          walkInSlotUsageBypassed = true;
+          walkInBypassedSlotUsageType = slot.usageType;
         }
         if (slot) {
           assignedSlotVehicleType = slot.vehicleType || null;
@@ -258,11 +287,13 @@ const checkIn = async (user, payload) => {
 
       await logAudit(session, {
         actor: user._id,
-        action: duplicate && forceCheckIn
-          ? 'DUPLICATE_PLATE_BYPASS'
-          : reservation
-            ? 'RESERVATION_CHECK_IN'
-            : 'PARKING_SESSION_CHECK_IN',
+        action: walkInSlotUsageBypassed
+          ? 'FORCE_SLOT_USAGE_BYPASS'
+          : duplicate && forceCheckIn
+            ? 'DUPLICATE_PLATE_BYPASS'
+            : reservation
+              ? 'RESERVATION_CHECK_IN'
+              : 'PARKING_SESSION_CHECK_IN',
         entityType: 'ParkingSession',
         entityId: `${created[0]._id}`,
         building: buildingId,
@@ -272,6 +303,8 @@ const checkIn = async (user, payload) => {
           duplicatePlateWarning: Boolean(duplicate),
           forceCheckIn,
           reservationId: reservation ? `${reservation._id}` : null,
+          slotUsageBypassed: walkInSlotUsageBypassed,
+          bypassedSlotUsageType: walkInBypassedSlotUsageType,
         },
       });
 
