@@ -14,7 +14,7 @@ const { activeSubscriptionMatch } = require('./parkingSession/helpers');
  * Returns user info + active parking sessions.
  * Used by staff to identify parking customers.
  */
-const lookupQr = async (staffUser, qrCode) => {
+const lookupQr = async (staffUser, qrCode, buildingId = null) => {
   if (!qrCode) throw new AppError('qrCode (userID) is required', 400);
 
   // Validate if qrCode is a valid ObjectId
@@ -27,6 +27,9 @@ const lookupQr = async (staffUser, qrCode) => {
   if (!allowedBuildings.length) {
     throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
   }
+
+  // Lọc theo tòa nhà hiện tại nếu truyền vào, ngược lại lấy tất cả tòa nhà được phân quyền.
+  const buildingFilter = buildingId ? buildingId : { $in: allowedBuildings };
 
   // Find user by ID
   const user = await User.findById(qrCode).select(
@@ -47,12 +50,12 @@ const lookupQr = async (staffUser, qrCode) => {
     ParkingSession.find({
       user: qrCode,
       status: 'active',
-      building: { $in: allowedBuildings },
+      building: buildingFilter,
     }).select('_id building plateNumber entryTime fee'),
     LongTermSubscription.find({
       user: qrCode,
       ...activeSubscriptionMatch(),
-      building: { $in: allowedBuildings },
+      building: buildingFilter,
     })
       .populate('package', 'name code')
       .select('_id plateNumber startDate endDate'),
@@ -148,7 +151,7 @@ const lookupPlateQr = async (staffUser, qrCode) => {
  *   - valid ObjectId   → account/user QR   (lookupQr)
  * Returns the underlying result tagged with `kind` ('plate' | 'user').
  */
-const resolveQr = async (staffUser, code) => {
+const resolveQr = async (staffUser, code, buildingId = null) => {
   const value = `${code || ''}`.trim();
   if (!value) throw new AppError('qrCode is required', 400);
 
@@ -158,7 +161,7 @@ const resolveQr = async (staffUser, code) => {
   }
 
   if (mongoose.Types.ObjectId.isValid(value)) {
-    const data = await lookupQr(staffUser, value);
+    const data = await lookupQr(staffUser, value, buildingId);
     return { kind: 'user', ...data };
   }
 

@@ -1,11 +1,67 @@
 const mongoose = require('mongoose');
 const AppError = require('../../utils/AppError');
-const { Reservation, ParkingSession, ParkingSlot, StaffShift } = require('../../models');
+const { Reservation, ParkingSession, ParkingSlot, StaffShift, Payment } = require('../../models');
 const { assertBuildingScope, logAudit } = require('../../utils/staffScope');
 const { normalizePlate } = require('../../utils/plate.util');
 const { getMaxHoldMs } = require('../../utils/reservationHold');
 
 const normalizeCode = (value) => `${value || ''}`.trim().toUpperCase();
+
+const { RESERVATION_STATUS } = require('../../models/operations/Reservation');
+
+const listReservations = async (buildingId, query = {}) => {
+  const { status, date, page = 1, limit = 50 } = query;
+
+  if (status && !RESERVATION_STATUS.includes(status)) {
+    throw new AppError(`Trạng thái không hợp lệ: "${status}"`, 400, 'INVALID_RESERVATION_STATUS');
+  }
+
+  const filter = { building: buildingId };
+  if (status) filter.status = status;
+  if (date) {
+    const parsed = new Date(date);
+    if (isNaN(parsed.getTime())) {
+      throw new AppError('Định dạng ngày không hợp lệ (dùng YYYY-MM-DD)', 400, 'INVALID_DATE_FORMAT');
+    }
+    const start = new Date(date); start.setHours(0, 0, 0, 0);
+    const end = new Date(date); end.setHours(23, 59, 59, 999);
+    filter.startTime = { $gte: start, $lte: end };
+  }
+
+  const pageNum = Math.max(Number(page) || 1, 1);
+  const limitNum = Math.min(Math.max(Number(limit) || 50, 1), 100);
+
+  const [items, total] = await Promise.all([
+    Reservation.find(filter)
+      .sort({ startTime: 1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum)
+      .populate('user', 'fullName email phone')
+      .populate('vehicleType', 'name code')
+      .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'code name' } })
+      .lean(),
+    Reservation.countDocuments(filter),
+  ]);
+
+  const ids = items.map((r) => r._id);
+  const paidRows = ids.length
+    ? await Payment.aggregate([
+        { $match: { reservation: { $in: ids }, type: 'reservation', status: 'success' } },
+        { $group: { _id: '$reservation', total: { $sum: '$amount' } } },
+      ])
+    : [];
+  const paidMap = new Map(paidRows.map((p) => [String(p._id), p.total]));
+
+  const itemsOut = items.map((r) => ({
+    ...r,
+    amountPaid: paidMap.get(String(r._id)) ?? (Number(r.fee) || 0),
+  }));
+
+  return {
+    items: itemsOut,
+    pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
+  };
+};
 
 // Tìm reservation linh hoạt: chấp nhận _id (ObjectId), mã code (RSV-...), hoặc
 // biển số xe — vì màn hình hiển thị _id cho khách, còn QR có thể là code/_id/biển.
@@ -213,4 +269,4 @@ const expireReservation = async (staffUser, payload = {}) => {
   }
 };
 
-module.exports = { processReservationCheckIn, expireReservation };
+module.exports = { listReservations, processReservationCheckIn, expireReservation };

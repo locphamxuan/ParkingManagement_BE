@@ -12,7 +12,7 @@ const Payment = require('../../models/finance/Payment');
 const AppError = require('../../utils/AppError');
 const generateBookingCode = require('../../utils/generateBookingCode');
 const buildingWalletService = require('../manager/buildingWallet.service');
-const calculateReservationFee = require('../../utils/calculateReservationFee');
+const { calculateReservationFee } = require('../../utils/feeEngine');
 
 const CANCELLABLE_STATUSES = ['pending', 'confirmed'];
 
@@ -65,22 +65,23 @@ const list = async (userId, query = {}) => {
   // Gắn % hoàn tiền (theo chính sách của từng tòa nhà) + số tiền đã hoàn thực tế
   // (với lượt đã hủy) để FE hiển thị đúng thay vì 0%.
   const buildingIds = [...new Set(docs.map((d) => String(d.building?._id || d.building)))];
-  const policies = buildingIds.length
-    ? await ReservationPolicy.find({ building: { $in: buildingIds } }).select('building refundPercent').lean()
-    : [];
-  const refundPctByBuilding = new Map(policies.map((p) => [String(p.building), p.refundPercent ?? 0]));
-
   const cancelledIds = docs.filter((d) => d.status === 'cancelled').map((d) => d._id);
-  const refundPayments = cancelledIds.length
-    ? await Payment.find({ reservation: { $in: cancelledIds }, type: 'refund', status: 'success' })
-        .select('reservation amount')
-        .lean()
-    : [];
-  const refundAmtByRes = new Map(refundPayments.map((p) => [String(p.reservation), p.amount]));
-
-  // Query associated parking sessions for these reservations
   const reservationIds = docs.map((d) => d._id);
-  const sessions = await ParkingSession.find({ reservation: { $in: reservationIds } }).lean();
+
+  const [policies, refundPayments, sessions] = await Promise.all([
+    buildingIds.length
+      ? ReservationPolicy.find({ building: { $in: buildingIds } }).select('building refundPercent').lean()
+      : [],
+    cancelledIds.length
+      ? Payment.find({ reservation: { $in: cancelledIds }, type: 'refund', status: 'success' })
+          .select('reservation amount')
+          .lean()
+      : [],
+    ParkingSession.find({ reservation: { $in: reservationIds } }).lean(),
+  ]);
+
+  const refundPctByBuilding = new Map(policies.map((p) => [String(p.building), p.refundPercent ?? 0]));
+  const refundAmtByRes = new Map(refundPayments.map((p) => [String(p.reservation), p.amount]));
 
   const sessionsMap = {};
   sessions.forEach((s) => {
@@ -101,7 +102,7 @@ const list = async (userId, query = {}) => {
             status: session.status,
             entryTime: session.entryTime,
             exitTime: session.exitTime,
-            paymentStatus: session.paymentStatus,
+            paymentMethod: session.paymentMethod,
           }
         : null,
     };
@@ -194,7 +195,7 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
     plateNumber: String(plateNumber).trim().toUpperCase(),
     building: resolvedBuildingId,
     status: 'cancelled',
-    updatedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    cancelledAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
   }).lean();
   if (recentCancelled) {
     throw new AppError(
@@ -264,20 +265,25 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
         building: resolvedBuildingId,
         status: { $ne: 'maintenance' },
       }).session(mongoSession);
-      if (totalSlots > 0) {
-        const overlapping = await Reservation.countDocuments({
-          building: resolvedBuildingId,
-          status: { $in: ['pending', 'confirmed', 'checked_in'] },
-          startTime: { $lt: end },
-          endTime: { $gt: start },
-        }).session(mongoSession);
-        if (overlapping >= totalSlots) {
-          throw new AppError(
-            'The building is fully booked for the selected time window. Please pick another time.',
-            409,
-            'BUILDING_FULLY_BOOKED',
-          );
-        }
+      if (totalSlots === 0) {
+        throw new AppError(
+          'Tòa nhà này chưa có ô đỗ xe nào — không thể đặt chỗ lúc này.',
+          503,
+          'BUILDING_NO_SLOTS',
+        );
+      }
+      const overlapping = await Reservation.countDocuments({
+        building: resolvedBuildingId,
+        status: { $in: ['pending', 'confirmed', 'checked_in'] },
+        startTime: { $lt: end },
+        endTime: { $gt: start },
+      }).session(mongoSession);
+      if (overlapping >= totalSlots) {
+        throw new AppError(
+          'The building is fully booked for the selected time window. Please pick another time.',
+          409,
+          'BUILDING_FULLY_BOOKED',
+        );
       }
 
       // Debit the deposit from user wallet — requires sufficient balance.
@@ -346,13 +352,21 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
         resolvedBuildingId, depositAmount, 'reservation_fee', payment._id, mongoSession,
       );
 
-      // Reserve the slot.
+      // Claim slot atomically — only succeeds if slot is still 'available' at commit time.
+      // Prevents double-booking when two concurrent requests pass the pre-transaction check.
       if (resolvedSlotId) {
-        await ParkingSlot.findByIdAndUpdate(
-          resolvedSlotId,
-          { status: 'reserved' },
+        const claimed = await ParkingSlot.findOneAndUpdate(
+          { _id: resolvedSlotId, status: 'available' },
+          { $set: { status: 'reserved' } },
           { session: mongoSession },
         );
+        if (!claimed) {
+          throw new AppError(
+            'Ô đỗ này vừa được người khác đặt, vui lòng chọn ô khác.',
+            409,
+            'SLOT_ALREADY_RESERVED',
+          );
+        }
       }
     });
   } finally {
@@ -412,6 +426,7 @@ const cancel = async (userId, id) => {
       }
 
       reservation.status = 'cancelled';
+      reservation.cancelledAt = new Date();
       await reservation.save({ session: mongoSession });
 
       // Hoàn lại refundPercent% tiền cọc vào ví khách (phần còn lại tòa nhà giữ).
@@ -450,6 +465,24 @@ const cancel = async (userId, id) => {
 
         await buildingWalletService.debit(
           reservation.building, refund, 'refund', refundPayment._id, null, mongoSession,
+        );
+      }
+
+      // Ghi nhận phần tòa nhà giữ lại (phí phạt hủy) để audit rõ trong báo cáo doanh thu.
+      const penalty = amountPaid - refund;
+      if (penalty > 0) {
+        await Payment.create(
+          [{
+            building: reservation.building,
+            reservation: reservation._id,
+            type: 'cancellation_fee',
+            method: 'wallet',
+            amount: penalty,
+            status: 'success',
+            user: userId,
+            note: `Reservation ${reservation.code} cancelled — ${100 - refundPercent}% penalty retained by building`,
+          }],
+          { session: mongoSession },
         );
       }
 

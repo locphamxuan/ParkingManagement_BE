@@ -139,8 +139,8 @@ const validateReservationPolicy = wrap((req) => {
     (req.body.depositPercent < 0 || req.body.depositPercent > 100)
   )
     throw new AppError("depositPercent must be 0..100", 400);
-  if (req.body.maxHoldMinutes !== undefined && Number(req.body.maxHoldMinutes) < 0)
-    throw new AppError("maxHoldMinutes must be >= 0", 400);
+  if (req.body.maxHoldMinutes !== undefined && Number(req.body.maxHoldMinutes) < 1)
+    throw new AppError("maxHoldMinutes must be >= 1", 400);
   if (req.body.maxAdvanceDays !== undefined && Number(req.body.maxAdvanceDays) < 1)
     throw new AppError("maxAdvanceDays must be >= 1", 400);
   if (req.body.maxDurationHours !== undefined && Number(req.body.maxDurationHours) < 1)

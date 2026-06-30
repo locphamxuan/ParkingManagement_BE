@@ -2,6 +2,7 @@ const { GoogleGenAI } = require('@google/genai');
 const env = require('../../config/env');
 const AppError = require('../../utils/AppError');
 const { normalizePlate } = require('../../utils/plate.util');
+const logger = require('../../utils/logger');
 
 /**
  * AI camera recognition — a single Google Gemini vision call reads BOTH the
@@ -88,7 +89,7 @@ const scanVehicleImage = async (image) => {
         brandConfidence: 0.99,
       };
     } catch (err) {
-      console.error('[AI CAMERA] Mock fallback failed, returning default plate:', err);
+      logger.error('[AI CAMERA] Mock fallback failed, returning default plate:', err.message);
       return {
         plateNumber: '59G2-038.80',
         plateConfidence: 0.99,

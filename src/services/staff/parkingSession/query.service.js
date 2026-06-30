@@ -1,5 +1,5 @@
 const AppError = require('../../../utils/AppError');
-const { ParkingSession, ParkingSlot, LongTermSubscription, Reservation, Payment, User, Notification } = require('../../../models');
+const { ParkingSession, ParkingSlot, LongTermSubscription, Reservation, Payment, User, Notification, PricePolicy } = require('../../../models');
 const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../../utils/plate.util');
 const visionScanService = require('../visionScan.service');
@@ -23,6 +23,27 @@ const listActive = async (user, query = {}) => {
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
     .populate('reservation', 'estimatedFee fee endTime');
 
+  // Preload PricePolicies cho tất cả (building, vehicleType) đang có session để tránh N+1.
+  const bIds = [...new Set(sessions.map((s) => String(s.building)))];
+  const vtIds = [...new Set(
+    sessions.map((s) => String(s.vehicleType?._id || s.vehicleType)).filter(Boolean),
+  )];
+  const rawPolicies = bIds.length
+    ? await PricePolicy.find({
+        building: { $in: bIds },
+        ...(vtIds.length ? { vehicleType: { $in: vtIds } } : {}),
+        isActive: true,
+      }).lean()
+    : [];
+  // Map: `${buildingId}|${vehicleTypeId}` → PricePolicy[] để calculateFee tra cứu O(1).
+  const policyMap = new Map();
+  for (const p of rawPolicies) {
+    const k = `${p.building}|${p.vehicleType}`;
+    const arr = policyMap.get(k) || [];
+    arr.push(p);
+    policyMap.set(k, arr);
+  }
+
   // Attach the current fee (per manager's PricePolicy, fallback by kind) + member flag
   // so the staff UI can show the amount and who owns the vehicle.
   return Promise.all(
@@ -45,7 +66,10 @@ const listActive = async (user, query = {}) => {
         obj.reservationRemainingFee = Math.max(0, estimated - deposit);
         obj.currentFee = obj.reservationRemainingFee;
       } else {
-        obj.currentFee = await calculateFee(s);
+        // Session thường: dùng policies đã preload, không query DB thêm.
+        const vtId = s.vehicleType?._id || s.vehicleType || null;
+        const sessionPolicies = policyMap.get(`${s.building}|${vtId}`) || [];
+        obj.currentFee = await calculateFee(s, sessionPolicies);
       }
       return obj;
     })

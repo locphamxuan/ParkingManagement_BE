@@ -52,6 +52,7 @@ const staffShiftSchema = new mongoose.Schema(
 );
 
 staffShiftSchema.index({ staff: 1, workDate: 1, shift: 1 }, { unique: true });
+staffShiftSchema.index({ staff: 1, building: 1, workDate: 1 }); // checkout shift-verify query
 
 module.exports = mongoose.model("StaffShift", staffShiftSchema);
 module.exports.STAFF_SHIFT_STATUS = STAFF_SHIFT_STATUS;

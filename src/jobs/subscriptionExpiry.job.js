@@ -1,6 +1,7 @@
 const { LongTermSubscription, User, Notification } = require('../models');
 const logger = require("../utils/logger");
 const { sendNotificationEmail } = require('../utils/email');
+const { acquireLock, releaseLock } = require('../utils/jobLock');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REMINDER_WINDOW_DAYS = 7; // cửa sổ nhắc TRƯỚC hạn (= mốc lớn nhất)
@@ -130,6 +131,11 @@ const expireActiveSubscriptions = async () => {
 };
 
 const runOnce = async () => {
+  const acquired = await acquireLock('subscriptionExpiry', 55 * 60 * 1000);
+  if (!acquired) {
+    logger.info('[subscriptionExpiry] skipped — another instance is running');
+    return;
+  }
   // Mỗi bước try/catch riêng để một bước lỗi không chặn bước còn lại.
   try {
     await sendExpiryReminders();
@@ -141,6 +147,7 @@ const runOnce = async () => {
   } catch (err) {
     logger.error('[subscriptionExpiry] expireActiveSubscriptions error:', err.message);
   }
+  await releaseLock('subscriptionExpiry');
 };
 
 let timer = null;

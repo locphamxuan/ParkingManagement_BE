@@ -26,7 +26,15 @@ const resolvePlateFromQr = async ({ qrCode }) => {
     );
   }
 
-  return { plateNumber: normalizePlate(plate.plateNumber) || plate.plateNumber, user: owner._id };
+  const plateNumber = normalizePlate(plate.plateNumber);
+  if (!plateNumber) {
+    throw new AppError(
+      'Biển số QR bị lỗi định dạng, vui lòng gặp nhân viên để check-in.',
+      400,
+      'KIOSK_INVALID_PLATE_FORMAT',
+    );
+  }
+  return { plateNumber, user: owner._id };
 };
 
 /**

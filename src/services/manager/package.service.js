@@ -4,6 +4,7 @@ const LongTermSubscription = require("../../models/policy/LongTermSubscription")
 const WalletTransaction = require("../../models/finance/WalletTransaction");
 const Payment = require("../../models/finance/Payment");
 const User = require("../../models/user/User");
+const Notification = require("../../models/log/Notification");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
@@ -219,8 +220,20 @@ const cancelSubscription = async (managerUser, buildingId, subscriptionId, reaso
             { session: mongoSession }
           );
           await buildingWalletService.debit(
-            buildingId, refundAmount, "refund", refundPayment._id, null, mongoSession
+            buildingId, refundAmount, "refund", refundPayment._id, null, mongoSession, { allowNegative: true }
           );
+        }
+
+        try {
+          await Notification.create([{
+            user: subscription.user,
+            type: 'subscription_cancelled',
+            title: 'Gói dài hạn bị hủy bởi quản lý',
+            message: `Gói "${subscription.package?.name || 'dài hạn'}" (biển số ${subscription.plateNumber}) của bạn đã bị hủy bởi quản lý. Số tiền hoàn lại: ${refundAmount.toLocaleString('vi-VN')} VND (95% giá trị gói).`,
+            building: buildingId,
+          }], { session: mongoSession });
+        } catch (e) {
+          // Notification không được block transaction
         }
       }
 

@@ -10,7 +10,6 @@ const router = express.Router();
 router.use("/admin", adminRoutes);
 router.use("/manager", managerRoutes);
 router.use("/staff", staffRoutes);
-router.use("/user", userRoutes);
 router.use("/users", userRoutes);
 router.use("/kiosk", kioskRoutes);
 

@@ -7,6 +7,7 @@
  * Currency: VND (integer, no conversion needed)
  */
 
+const { randomBytes } = require('crypto');
 const { PayOS } = require('@payos/node');
 const env = require('../../config/env');
 
@@ -24,7 +25,7 @@ const payos = new PayOS({
 
 const generateOrderCode = () => {
   const ts = String(Math.floor(Date.now() / 1000)).slice(-8); // 8 digits
-  const rand = String(Math.floor(Math.random() * 100)).padStart(2, '0'); // 2 digits
+  const rand = String(parseInt(randomBytes(3).toString('hex'), 16) % 1_000_000).padStart(6, '0'); // 6 digits (1M values)
   return Number(`${ts}${rand}`);
 };
 

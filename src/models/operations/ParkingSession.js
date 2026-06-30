@@ -105,6 +105,9 @@ const parkingSessionSchema = new mongoose.Schema(
 );
 
 parkingSessionSchema.index({ building: 1, entryTime: -1 });
+parkingSessionSchema.index({ building: 1, status: 1 });       // active sessions per building
+parkingSessionSchema.index({ plateNumber: 1, status: 1 });    // check-in duplicate-plate check
+parkingSessionSchema.index({ user: 1, createdAt: -1 });       // user parking history (sorted)
 
 module.exports = mongoose.model("ParkingSession", parkingSessionSchema);
 module.exports.SESSION_STATUS = SESSION_STATUS;

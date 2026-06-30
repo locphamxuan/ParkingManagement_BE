@@ -1,5 +1,6 @@
 const LongTermPackage = require('../../models/policy/LongTermPackage');
 const LongTermSubscription = require('../../models/policy/LongTermSubscription');
+const ParkingSession = require('../../models/operations/ParkingSession');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const Payment = require('../../models/finance/Payment');
 const User = require('../../models/user/User');
@@ -195,13 +196,24 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
         throw new AppError('Chỉ được phép hủy gói đang hoạt động (active)', 400);
       }
 
+      // Không cho hủy khi biển số thuộc gói này đang có xe trong bãi.
+      const vehicleParked = await ParkingSession.exists({
+        plateNumber: subscription.plateNumber,
+        building: subscription.building,
+        paymentMethod: 'long_term',
+        status: 'active',
+      });
+      if (vehicleParked) {
+        throw new AppError('Không thể hủy gói khi xe đang đỗ trong bãi — vui lòng cho xe ra trước.', 400, 'VEHICLE_CURRENTLY_PARKED');
+      }
+
       const now = new Date();
       const startDate = new Date(subscription.startDate);
-      const diffMs = now.getTime() - startDate.getTime();
       const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+      const cancellationDeadline = new Date(startDate.getTime() + threeDaysMs);
 
-      if (now.getTime() > startDate.getTime() && diffMs > threeDaysMs) {
-        throw new AppError('Gói dài hạn đã vượt quá thời hạn cho phép tự hủy (3 ngày)', 400);
+      if (now > cancellationDeadline) {
+        throw new AppError('Gói dài hạn đã vượt quá thời hạn cho phép tự hủy (3 ngày kể từ ngày bắt đầu).', 400, 'CANCELLATION_WINDOW_EXPIRED');
       }
 
       subscription.status = 'cancelled';

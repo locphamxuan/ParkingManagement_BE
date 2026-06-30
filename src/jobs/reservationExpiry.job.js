@@ -1,7 +1,10 @@
-const { Reservation, ParkingSlot, User, Notification } = require('../models');
+const mongoose = require('mongoose');
+const { Reservation, ParkingSlot, User, Notification, Payment, WalletTransaction, ReservationPolicy } = require('../models');
 const logger = require("../utils/logger");
 const { sendNotificationEmail } = require('../utils/email');
 const { getMaxHoldMs } = require('../utils/reservationHold');
+const buildingWalletService = require('../services/manager/buildingWallet.service');
+const { acquireLock, releaseLock } = require('../utils/jobLock');
 
 const CHECKINABLE_STATUSES = ['pending', 'confirmed'];
 const RUN_INTERVAL_MS = 5 * 60 * 1000; // chạy mỗi 5 phút (reservation nhạy thời gian hơn gói)
@@ -77,18 +80,68 @@ const expireStaleReservations = async () => {
     const expiresAt = new Date(reservation.startTime).getTime() + holdMs;
     if (expiresAt >= now) continue; // còn trong thời gian giữ chỗ
 
-    try {
-      reservation.status = 'expired';
-      await reservation.save();
+    let refundAmount = 0;
+    let refundPercent = 0;
 
-      // Thả slot nếu có giữ (không đụng vào slot đang bảo trì).
-      const slotId = reservation.slot?._id || reservation.slot || null;
-      if (slotId) {
-        const slot = await ParkingSlot.findById(slotId);
-        if (slot && slot.status !== 'maintenance') {
-          slot.status = 'available';
-          await slot.save();
-        }
+    try {
+      const mongoSession = await mongoose.startSession();
+      try {
+        await mongoSession.withTransaction(async () => {
+          reservation.status = 'expired';
+          await reservation.save({ session: mongoSession });
+
+          // Thả slot nếu có giữ (không đụng vào slot đang bảo trì).
+          const slotId = reservation.slot?._id || reservation.slot || null;
+          if (slotId) {
+            const slot = await ParkingSlot.findById(slotId).session(mongoSession);
+            if (slot && slot.status !== 'maintenance') {
+              slot.status = 'available';
+              await slot.save({ session: mongoSession });
+            }
+          }
+
+          // Hoàn tiền theo refundPercent của chính sách tòa nhà (nếu manager cấu hình > 0).
+          const policy = await ReservationPolicy.findOne({ building: buildingId }).session(mongoSession);
+          refundPercent = Math.min(Math.max(Number(policy?.refundPercent ?? 0), 0), 100);
+          const deposit = Number(reservation.fee || 0);
+          refundAmount = Math.round(deposit * refundPercent / 100);
+
+          if (refundAmount > 0 && reservation.user) {
+            const updatedUser = await User.findByIdAndUpdate(
+              reservation.user,
+              { $inc: { walletBalance: refundAmount } },
+              { new: true, session: mongoSession },
+            );
+            if (updatedUser) {
+              await WalletTransaction.create([{
+                user: reservation.user,
+                type: 'credit',
+                amount: refundAmount,
+                balanceAfter: updatedUser.walletBalance,
+                status: 'success',
+                reason: 'reservation_refund',
+                metadata: { reservationId: `${reservation._id}`, code: reservation.code, percent: refundPercent, reason: 'expired' },
+              }], { session: mongoSession });
+
+              const [refundPayment] = await Payment.create([{
+                building: buildingId,
+                reservation: reservation._id,
+                type: 'refund',
+                method: 'wallet',
+                amount: refundAmount,
+                status: 'success',
+                user: reservation.user,
+                note: `Reservation ${reservation.code} expired — ${refundPercent}% partial refund`,
+              }], { session: mongoSession });
+
+              await buildingWalletService.debit(
+                buildingId, refundAmount, 'refund', refundPayment._id, null, mongoSession, { allowNegative: true }
+              );
+            }
+          }
+        });
+      } finally {
+        await mongoSession.endSession();
       }
     } catch (err) {
       logger.error('[reservationExpiry] expire reservation failed:', err.message);
@@ -96,10 +149,14 @@ const expireStaleReservations = async () => {
     }
 
     const holdMin = Math.round(holdMs / 60000);
+    const refundNote = refundAmount > 0
+      ? `A partial refund of ${refundPercent}% (${refundAmount.toLocaleString('vi-VN')} VND) has been credited to your wallet.`
+      : 'The deposit is non-refundable per the building policy.';
+
     const message =
       `Reservation ${reservation.code} for vehicle ${reservation.plateNumber} has expired because ` +
       `it was not checked in within ${holdMin} minutes of the start time (${formatDateTime(reservation.startTime)}). ` +
-      `The slot has been released and the deposit is non-refundable.`;
+      `The slot has been released. ${refundNote}`;
 
     await notifyUser(reservation, {
       type: 'reservation_expired',
@@ -109,7 +166,11 @@ const expireStaleReservations = async () => {
         <p>Reservation <strong>${reservation.code}</strong> for vehicle
         <strong>${reservation.plateNumber}</strong> has expired because it was not checked in within ${holdMin} minutes of the start time
         (${formatDateTime(reservation.startTime)}).</p>
-        <p>The reserved slot has been released and the <strong>deposit is non-refundable</strong>.</p>
+        <p>The reserved slot has been released.</p>
+        ${refundAmount > 0
+          ? `<p>A partial refund of <strong>${refundPercent}%</strong> (${refundAmount.toLocaleString('vi-VN')} VND) has been credited to your wallet.</p>`
+          : '<p>The <strong>deposit is non-refundable</strong> per the building policy.</p>'
+        }
         <p>You can make a new reservation at any time.</p>`,
     });
   }
@@ -132,7 +193,7 @@ const notifyOverstayingReservations = async () => {
     const message =
       `Vehicle ${reservation.plateNumber} (reservation ${reservation.code}) is overstaying ` +
       `(expired at ${formatDateTime(reservation.endTime)}). Overstayed time will be charged at standard ` +
-      `hourly rates plus penalty surcharges upon exit. Please check out soon to avoid additional fees.`;
+      `hourly rates upon exit. Please check out soon to avoid additional fees.`;
 
     await notifyUser(reservation, {
       type: 'reservation_overstay',
@@ -141,7 +202,7 @@ const notifyOverstayingReservations = async () => {
       emailHtml: `
         <p>Vehicle <strong>${reservation.plateNumber}</strong> (reservation <strong>${reservation.code}</strong>)
         is <strong>overstaying</strong> (expired at ${formatDateTime(reservation.endTime)}).</p>
-        <p>Overstayed time will be charged at standard hourly rates <strong>plus penalty surcharges</strong> upon exit.
+        <p>Overstayed time will be charged at <strong>standard hourly rates</strong> upon exit.
         Please exit soon to avoid additional fees.</p>`,
     });
 
@@ -150,6 +211,11 @@ const notifyOverstayingReservations = async () => {
 };
 
 const runOnce = async () => {
+  const acquired = await acquireLock('reservationExpiry', 8 * 60 * 1000);
+  if (!acquired) {
+    logger.info('[reservationExpiry] skipped — another instance is running');
+    return;
+  }
   try {
     await expireStaleReservations();
   } catch (err) {
@@ -160,6 +226,7 @@ const runOnce = async () => {
   } catch (err) {
     logger.error('[reservationExpiry] notifyOverstayingReservations error:', err.message);
   }
+  await releaseLock('reservationExpiry');
 };
 
 let timer = null;

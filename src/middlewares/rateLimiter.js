@@ -1,0 +1,31 @@
+const rateLimit = require('express-rate-limit');
+
+// Auth endpoints: login, register, forgot/reset password
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 phút
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Quá nhiều yêu cầu, vui lòng thử lại sau 15 phút.' },
+  skipSuccessfulRequests: true, // chỉ đếm request thất bại
+});
+
+// Forgot/reset password: nghiêm hơn để chống spam email
+const passwordResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 giờ
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Quá nhiều yêu cầu đặt lại mật khẩu, vui lòng thử lại sau 1 giờ.' },
+});
+
+// PayOS webhook: PayOS có thể gửi nhiều event/phút (retry), nhưng cần chặn flood từ bên ngoài.
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 phút
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Quá nhiều webhook request.' },
+});
+
+module.exports = { authLimiter, passwordResetLimiter, webhookLimiter };

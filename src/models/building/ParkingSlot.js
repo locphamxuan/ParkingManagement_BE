@@ -60,6 +60,7 @@ const parkingSlotSchema = new mongoose.Schema(
 );
 
 parkingSlotSchema.index({ floor: 1, code: 1 }, { unique: true });
+parkingSlotSchema.index({ building: 1, status: 1 });          // available-slots-by-building query
 
 module.exports = mongoose.model("ParkingSlot", parkingSlotSchema);
 module.exports.PARKING_SLOT_STATUS = PARKING_SLOT_STATUS;

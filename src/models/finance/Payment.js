@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const PAYMENT_STATUS = ["pending", "success", "failed", "refunded"];
-const PAYMENT_TYPES = ["session", "reservation", "subscription", "refund", "topup"];
+const PAYMENT_TYPES = ["session", "reservation", "subscription", "refund", "topup", "cancellation_fee"];
 const PAYMENT_METHODS = ["cash", "wallet", "qr", "card", "payos"];
 
 const paymentSchema = new mongoose.Schema(
@@ -63,6 +63,10 @@ const paymentSchema = new mongoose.Schema(
 );
 
 paymentSchema.index({ building: 1, createdAt: -1 });
+paymentSchema.index({ reservation: 1, type: 1, status: 1 }); // revenue aggregate per reservation
+paymentSchema.index({ parkingSession: 1 });                  // session payment lookup
+paymentSchema.index({ subscription: 1 });                    // subscription payment lookup
+paymentSchema.index({ user: 1, createdAt: -1 });             // user transaction history
 
 module.exports = mongoose.model("Payment", paymentSchema);
 module.exports.PAYMENT_STATUS = PAYMENT_STATUS;
