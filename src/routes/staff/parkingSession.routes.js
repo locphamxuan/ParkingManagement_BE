@@ -26,14 +26,17 @@ router.post("/scan", authorizeBuildingAccess, parkingSessionController.scan);
 // Staff rejects a check-in/check-out → notify the plate owner
 router.post("/reject", authorizeBuildingAccess, parkingSessionController.reject);
 
-router.patch("/:id/check-out", authorizeBuildingAccess, parkingSessionController.checkOut);
+// Các route dưới được scope theo :id (session) / :orderCode (payment) — KHÔNG dùng
+// authorizeBuildingAccess vì extractBuildingId sẽ nhầm params.id (sessionId/orderCode)
+// thành buildingId rồi chặn nhầm. Controller tự assertBuildingScope theo session.
+router.patch("/:id/check-out", parkingSessionController.checkOut);
 
 // PayOS payment — tạo QR + checkoutUrl để thu phí gửi xe tại chỗ
-router.post("/:id/initiate-payment", authorizeBuildingAccess, parkingSessionController.initiatePayment);
+router.post("/:id/initiate-payment", parkingSessionController.initiatePayment);
 
 // Reconcile a bank-transfer (PayOS) payment when the webhook didn't arrive
-router.get("/payment/:orderCode/status", authorizeBuildingAccess, parkingSessionController.verifyPayment);
+router.get("/payment/:orderCode/status", parkingSessionController.verifyPayment);
 
-router.get("/:id", authorizeBuildingAccess, parkingSessionController.getById);
+router.get("/:id", parkingSessionController.getById);
 
 module.exports = router;

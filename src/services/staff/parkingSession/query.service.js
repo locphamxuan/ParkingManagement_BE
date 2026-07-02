@@ -163,8 +163,9 @@ const lookupPlate = async (staffUser, plateNumber) => {
   if (user) {
     const matched = (user.licensePlates || []).find((p) => plateRx.test ? plateRx.test(p.plateNumber) : p.plateNumber === plate);
     const t = `${matched?.vehicleType || ''}`.toLowerCase();
-    if (t === 'motorcycle') registeredVehicleType = 'motorcycle';
-    else if (t) registeredVehicleType = 'car'; // car/suv/truck/other → car
+    // Xe 2 bánh (kể cả điện) → motorcycle; còn lại (car/suv/truck/other) → car.
+    if (['motorcycle', 'ebike', 'emotorbike'].includes(t)) registeredVehicleType = 'motorcycle';
+    else if (t) registeredVehicleType = 'car';
   }
 
   // Đối tượng (usageType) suy ra từ trạng thái biển số — khớp resolveCustomerUsageType
