@@ -37,16 +37,21 @@ const authorizeBuildingAccess = (req, _res, next) => {
   }
 
   const buildingId = extractBuildingId(req);
-  
-  // 🎯 THẮT CHẶT: Nếu không truyền buildingId, ném lỗi 400 rõ ràng chứ không để crash sập app
-  if (!buildingId) {
-    return next(new AppError("Validation Failed: buildingId is required in params/query/body to verify access scope.", 400));
-  }
 
   const assignedBuildings = Array.isArray(req.user.assignedBuildings)
     ? req.user.assignedBuildings
     : [];
-    
+
+  // Staff endpoints may work from already-known assigned buildings,
+  // so allow requests without explicit buildingId when the user has assignments.
+  if (!buildingId) {
+    if (req.user.role === ROLES.STAFF && assignedBuildings.length > 0) {
+      return next();
+    }
+
+    return next(new AppError("Validation Failed: buildingId is required in params/query/body to verify access scope.", 400));
+  }
+
   const allowed = assignedBuildings.some(
     (building) => `${building._id || building}` === `${buildingId}`,
   );
