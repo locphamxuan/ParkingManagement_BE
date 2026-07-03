@@ -61,7 +61,7 @@ const userSchema = new mongoose.Schema(
         },
         vehicleType: {
           type: String,
-          enum: ['motorcycle', 'car', 'suv', 'truck', 'other'],
+          enum: ['motorcycle', 'car', 'ebike', 'emotorbike', 'suv', 'truck', 'other'],
           default: 'car',
         },
         // Vehicle make chosen by the user (e.g. Toyota, Honda, VinFast). Optional.
