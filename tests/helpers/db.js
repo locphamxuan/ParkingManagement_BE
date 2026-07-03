@@ -11,6 +11,9 @@ let replset;
 async function connect() {
   replset = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replset.getUri());
+  // Đăng ký TẤT CẢ model để populate cross-ref (vd Feedback→Reservation) không lỗi
+  // MissingSchemaError khi test file chỉ require một service lẻ.
+  require('../../src/models');
 }
 
 async function clear() {

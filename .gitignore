@@ -49,3 +49,8 @@ Scope + database.txt
 .claude/commands/opsx/pbms-be.md
 exports/mongodb-2026-06-09T14-49-34-080Z/
 scratch_check.js
+
+# Claude Code — chi dung local, khong push len remote
+CLAUDE.md
+claude.md
+.claude.json
