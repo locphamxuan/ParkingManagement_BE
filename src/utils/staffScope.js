@@ -1,11 +1,18 @@
 const AppError = require('./AppError');
 const { AuditLog } = require('../models');
 
+const OBJECTID_RE = /^[0-9a-fA-F]{24}$/;
+
 const toIdString = (value) => `${value?._id || value}`;
 
 const assignedBuildingIds = (user) =>
   Array.isArray(user?.assignedBuildings)
-    ? user.assignedBuildings.map((item) => toIdString(item))
+    ? user.assignedBuildings
+        .filter(Boolean)
+        .map((item) => toIdString(item))
+        // Loại bỏ giá trị không phải ObjectId hợp lệ (null, "null", "undefined"…)
+        // để tránh Mongoose CastError khi dùng $in query.
+        .filter((id) => OBJECTID_RE.test(id))
     : [];
 
 const assertBuildingScope = (user, buildingId) => {

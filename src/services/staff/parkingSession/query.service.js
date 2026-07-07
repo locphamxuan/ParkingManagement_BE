@@ -25,8 +25,12 @@ const listActive = async (user, query = {}) => {
 
   // Preload PricePolicies cho tất cả (building, vehicleType) đang có session để tránh N+1.
   const bIds = [...new Set(sessions.map((s) => String(s.building)))];
+  // String(null) = "null" là truthy → filter(Boolean) không đủ; phải filter "null" ra
+  // để tránh Mongoose CastError khi session không có vehicleType.
   const vtIds = [...new Set(
-    sessions.map((s) => String(s.vehicleType?._id || s.vehicleType)).filter(Boolean),
+    sessions
+      .map((s) => (s.vehicleType ? String(s.vehicleType?._id || s.vehicleType) : null))
+      .filter((id) => id && id !== 'null' && id !== 'undefined'),
   )];
   const rawPolicies = bIds.length
     ? await PricePolicy.find({
