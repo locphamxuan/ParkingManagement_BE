@@ -22,6 +22,14 @@ describe('update', () => {
     await expect(profileService.update(u2._id, { phone: '0900000001' }))
       .rejects.toMatchObject({ errorCode: 'PHONE_TAKEN' });
   });
+
+  test('2 user cùng xóa phone (chuỗi rỗng) → không đụng sparse unique index', async () => {
+    const u1 = await f.createUser({ phone: '0900000002' });
+    const u2 = await f.createUser({ phone: '0900000003' });
+    await profileService.update(u1._id, { phone: '' });
+    const res2 = await profileService.update(u2._id, { phone: '' });
+    expect(res2.phone).toBeFalsy();
+  });
 });
 
 describe('changePassword', () => {

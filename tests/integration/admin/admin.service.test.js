@@ -25,6 +25,13 @@ describe('user.service', () => {
       .rejects.toMatchObject({ statusCode: 409 });
   });
 
+  test('tạo 2 user không nhập phone → không đụng sparse unique index', async () => {
+    const u1 = await userSvc.create(admin, { email: 'nophone1@test.com', password: 'secret1', fullName: 'A' });
+    const u2 = await userSvc.create(admin, { email: 'nophone2@test.com', password: 'secret1', fullName: 'B' });
+    expect(u1.phone).toBeFalsy();
+    expect(u2.phone).toBeFalsy();
+  });
+
   test('update set role staff trực tiếp → 400 USE_ASSIGNMENT_ENDPOINT', async () => {
     const u = await f.createUser({ role: 'user' });
     await expect(userSvc.update(admin, u._id, { role: 'staff' }))

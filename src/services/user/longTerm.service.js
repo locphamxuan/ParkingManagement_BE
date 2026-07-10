@@ -1,5 +1,6 @@
 const LongTermPackage = require('../../models/policy/LongTermPackage');
 const LongTermSubscription = require('../../models/policy/LongTermSubscription');
+const ReservationPolicy = require('../../models/policy/ReservationPolicy');
 const ParkingSession = require('../../models/operations/ParkingSession');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const Payment = require('../../models/finance/Payment');
@@ -216,13 +217,19 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
         throw new AppError('Gói dài hạn đã vượt quá thời hạn cho phép tự hủy (3 ngày kể từ ngày bắt đầu).', 400, 'CANCELLATION_WINDOW_EXPIRED');
       }
 
+      const packagePrice = subscription.package.price;
+      // % hoàn tiền do MANAGER cấu hình trong ReservationPolicy của tòa nhà
+      // (đồng bộ với luồng hủy reservation) — không hardcode.
+      const policy = await ReservationPolicy.findOne({ building: subscription.building }).session(mongoSession);
+      const refundPercent = Math.min(Math.max(Number(policy?.refundPercent ?? 80), 0), 100);
+      const refundAmount = Math.round((packagePrice * refundPercent) / 100);
+
       subscription.status = 'cancelled';
       subscription.cancelReason = cancelReason;
       subscription.cancelNote = cancelNote || '';
+      subscription.refundPercent = refundPercent;
+      subscription.refundAmount = refundAmount;
       await subscription.save({ session: mongoSession });
-
-      const packagePrice = subscription.package.price;
-      const refundAmount = Math.round(packagePrice * 0.95);
 
       const updatedUser = await User.findByIdAndUpdate(
         userId,
@@ -247,6 +254,7 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
             cancelReason,
             cancelNote,
             refundAmount,
+            refundPercent,
             originalPrice: packagePrice,
           },
         }],
@@ -264,7 +272,7 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
             amount: refundAmount,
             status: 'success',
             user: userId,
-            note: `Long-term ${subscription._id} cancelled — 95% refund`,
+            note: `Long-term ${subscription._id} cancelled — ${refundPercent}% refund`,
           }],
           { session: mongoSession },
         );
@@ -273,7 +281,7 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
         );
       }
 
-      result = subscription;
+      result = { subscription, refundAmount, refundPercent };
     });
 
     return result;

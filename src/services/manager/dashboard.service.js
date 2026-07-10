@@ -56,6 +56,8 @@ const getOverview = async (user, buildingId) => {
           status: "success",
           // Chỉ doanh thu thật: phí gửi xe / cọc đặt chỗ / mua gói. Loại 'refund' (tiền hoàn ra)
           // và 'topup' (manager tự nạp ví) — khớp định nghĩa của ví tòa nhà (getDailyRevenue).
+          // 'cancellation_fee' KHÔNG cộng thêm: cọc gốc đã tính qua 'reservation' lúc đặt,
+          // cộng thêm sẽ đếm trùng phần giữ lại trong chính cọc đó.
           type: { $in: ["session", "reservation", "subscription"] },
           createdAt: { $gte: today, $lt: tomorrow },
         },
@@ -84,7 +86,7 @@ const getOverview = async (user, buildingId) => {
         $match: {
           building: toObjectId(buildingId),
           status: "success",
-          // Cùng định nghĩa doanh thu với card "hôm nay": loại refund/topup.
+          // Cùng định nghĩa doanh thu với card "hôm nay": loại refund/topup/cancellation_fee.
           type: { $in: ["session", "reservation", "subscription"] },
           createdAt: { $gte: sevenDaysAgo, $lt: tomorrow },
         },

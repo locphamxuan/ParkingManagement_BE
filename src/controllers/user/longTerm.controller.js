@@ -18,8 +18,8 @@ const listSubscriptions = asyncHandler(async (req, res) => {
 });
 
 const cancelSubscription = asyncHandler(async (req, res) => {
-  const subscription = await service.cancelSubscription(req.user._id, req.params.id, req.body);
-  sendSuccess(res, { message: 'Subscription cancelled successfully', data: { subscription } });
+  const { subscription, refundAmount, refundPercent } = await service.cancelSubscription(req.user._id, req.params.id, req.body);
+  sendSuccess(res, { message: 'Subscription cancelled successfully', data: { subscription, refundAmount, refundPercent } });
 });
 
 const renewSubscription = asyncHandler(async (req, res) => {
