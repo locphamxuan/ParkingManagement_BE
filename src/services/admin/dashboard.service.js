@@ -50,6 +50,9 @@ const getOverview = async (period = "today") => {
     ParkingSession.countDocuments({ status: "active" }),
     Payment.aggregate([
       // Chỉ doanh thu thật (session/reservation/subscription) — loại 'refund'/'topup'.
+      // 'cancellation_fee' KHÔNG được cộng thêm: tiền cọc gốc đã tính vào revenue qua
+      // type 'reservation' lúc đặt chỗ; cancellation_fee chỉ là bản ghi audit của phần
+      // giữ lại trong cọc đó, cộng thêm sẽ đếm trùng (double-count).
       { $match: { status: "success", type: { $in: ["session", "reservation", "subscription"] }, createdAt: { $gte: from, $lte: to } } },
       { $group: { _id: "$method", amount: { $sum: "$amount" }, count: { $sum: 1 } } },
     ]),

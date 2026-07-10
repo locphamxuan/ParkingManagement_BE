@@ -9,6 +9,8 @@ const feedbackSvc = require('../../../src/services/manager/feedback.service');
 const PricePolicy = require('../../../src/models/policy/PricePolicy');
 const Feedback = require('../../../src/models/operations/Feedback');
 const ParkingSession = require('../../../src/models/operations/ParkingSession');
+const User = require('../../../src/models/user/User');
+const longTermSvc = require('../../../src/services/user/longTerm.service');
 
 let building, manager, vt;
 beforeAll(async () => { await db.connect(); });
@@ -53,6 +55,32 @@ describe('package.service', () => {
     expect(list).toHaveLength(1);
     const removed = await packageSvc.removePackage(manager, building._id, pkg._id);
     expect(String(removed.id)).toBe(String(pkg._id));
+  });
+
+  test('cancelSubscription: refund theo ReservationPolicy.refundPercent, không hardcode 95%', async () => {
+    const pkg = await packageSvc.createPackage(manager, building._id, {
+      vehicleType: vt._id, name: 'Tháng', code: 'M2', durationDays: 30, price: 300000,
+    });
+    await f.createReservationPolicy(building._id, { refundPercent: 60 });
+    const user = await f.createUser({ walletBalance: 300000 });
+    const sub = await longTermSvc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-999.99' });
+
+    await packageSvc.cancelSubscription(manager, building._id, sub._id, 'test');
+    const fresh = await User.findById(user._id);
+    // Mua trừ 300_000 → 0 dư; hoàn 60% × 300_000 = 180_000 → 180_000.
+    expect(fresh.walletBalance).toBe(180000);
+  });
+
+  test('cancelSubscription: building không có ReservationPolicy → fallback 80%', async () => {
+    const pkg = await packageSvc.createPackage(manager, building._id, {
+      vehicleType: vt._id, name: 'Tháng', code: 'M3', durationDays: 30, price: 300000,
+    });
+    const user = await f.createUser({ walletBalance: 300000 });
+    const sub = await longTermSvc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-888.88' });
+
+    await packageSvc.cancelSubscription(manager, building._id, sub._id, 'test');
+    const fresh = await User.findById(user._id);
+    expect(fresh.walletBalance).toBe(240000); // 80% × 300_000
   });
 });
 

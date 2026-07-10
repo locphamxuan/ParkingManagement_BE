@@ -1,6 +1,7 @@
 ﻿const mongoose = require("mongoose");
 const LongTermPackage = require("../../models/policy/LongTermPackage");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
+const ReservationPolicy = require("../../models/policy/ReservationPolicy");
 const WalletTransaction = require("../../models/finance/WalletTransaction");
 const Payment = require("../../models/finance/Payment");
 const User = require("../../models/user/User");
@@ -170,11 +171,17 @@ const cancelSubscription = async (managerUser, buildingId, subscriptionId, reaso
       }
 
       const packagePrice = subscription.package?.price ?? 0;
-      const refundAmount = Math.round(packagePrice * 0.95);
+      // % hoàn tiền do MANAGER cấu hình trong ReservationPolicy — đồng bộ với luồng
+      // user tự hủy (longTerm.service.js), không hardcode.
+      const policy = await ReservationPolicy.findOne({ building: buildingId }).session(mongoSession);
+      const refundPercent = Math.min(Math.max(Number(policy?.refundPercent ?? 80), 0), 100);
+      const refundAmount = Math.round((packagePrice * refundPercent) / 100);
 
       subscription.status = "cancelled";
       subscription.cancelReason = "manager_cancelled";
       subscription.cancelNote = reason || "Hủy bởi quản lý";
+      subscription.refundPercent = refundPercent;
+      subscription.refundAmount = refundAmount;
       await subscription.save({ session: mongoSession });
 
       if (subscription.user) {
@@ -197,6 +204,7 @@ const cancelSubscription = async (managerUser, buildingId, subscriptionId, reaso
                 subscriptionId: subscription._id,
                 cancelReason: "manager_cancelled",
                 refundAmount,
+                refundPercent,
                 originalPrice: packagePrice,
                 cancelledByManager: managerUser._id,
               },
@@ -215,7 +223,7 @@ const cancelSubscription = async (managerUser, buildingId, subscriptionId, reaso
               amount: refundAmount,
               status: "success",
               user: subscription.user,
-              note: `Subscription ${subscription._id} cancelled by manager — 95% refund`,
+              note: `Subscription ${subscription._id} cancelled by manager — ${refundPercent}% refund`,
             }],
             { session: mongoSession }
           );
@@ -229,7 +237,7 @@ const cancelSubscription = async (managerUser, buildingId, subscriptionId, reaso
             user: subscription.user,
             type: 'subscription_cancelled',
             title: 'Gói dài hạn bị hủy bởi quản lý',
-            message: `Gói "${subscription.package?.name || 'dài hạn'}" (biển số ${subscription.plateNumber}) của bạn đã bị hủy bởi quản lý. Số tiền hoàn lại: ${refundAmount.toLocaleString('vi-VN')} VND (95% giá trị gói).`,
+            message: `Gói "${subscription.package?.name || 'dài hạn'}" (biển số ${subscription.plateNumber}) của bạn đã bị hủy bởi quản lý. Số tiền hoàn lại: ${refundAmount.toLocaleString('vi-VN')} VND (${refundPercent}% giá trị gói).`,
             building: buildingId,
           }], { session: mongoSession });
         } catch (e) {
@@ -243,11 +251,11 @@ const cancelSubscription = async (managerUser, buildingId, subscriptionId, reaso
         targetTable: "long_term_subscriptions",
         targetId: subscription._id,
         building: buildingId,
-        metadata: { refundAmount, originalPrice: packagePrice },
+        metadata: { refundAmount, refundPercent, originalPrice: packagePrice },
         severity: "medium",
       });
 
-      result = { subscription, refundAmount };
+      result = { subscription, refundAmount, refundPercent };
     });
     return result;
   } finally {

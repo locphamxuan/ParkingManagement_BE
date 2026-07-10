@@ -4,6 +4,7 @@ const { validateCreateReservation } = require('../../validators/user/reservation
 
 const router = express.Router();
 
+router.get('/policy', controller.getPolicy);
 router.get('/estimate', controller.estimate);
 router.get('/', controller.list);
 router.post('/', validateCreateReservation, controller.create);

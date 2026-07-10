@@ -56,7 +56,7 @@ const cancelSubscription = asyncHandler(async (req, res) => {
     req.body?.reason
   );
   sendSuccess(res, {
-    message: "Gói đã được hủy — hoàn 95% vào ví người dùng.",
+    message: `Gói đã được hủy — hoàn ${result.refundPercent}% vào ví người dùng.`,
     data: result,
   });
 });

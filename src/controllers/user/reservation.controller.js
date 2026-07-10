@@ -29,6 +29,24 @@ const cancel = asyncHandler(async (req, res) => {
   });
 });
 
+// GET /users/reservations/policy?buildingId= — giới hạn đặt chỗ công khai (không nhạy cảm)
+// để FE ràng buộc date/duration picker TRƯỚC khi user chọn giờ cụ thể (estimate cần
+// startTime/endTime nên không dùng được cho việc này).
+const getPolicy = asyncHandler(async (req, res) => {
+  const { buildingId } = req.query;
+  if (!buildingId) throw new AppError('buildingId is required', 400);
+  const policy = await ReservationPolicy.findOne({ building: buildingId, isActive: true });
+  sendSuccess(res, {
+    data: {
+      maxAdvanceDays: policy?.maxAdvanceDays ?? 7,
+      maxDurationHours: policy?.maxDurationHours ?? 24,
+      depositPercent: policy?.depositPercent ?? 15,
+      refundPercent: policy?.refundPercent ?? 80,
+      cancellationCutoffHours: policy?.cancellationCutoffHours ?? 0,
+    },
+  });
+});
+
 // GET /users/reservations/estimate?buildingId=&vehicleTypeId=&startTime=&endTime=
 const estimate = asyncHandler(async (req, res) => {
   const { buildingId, vehicleTypeId, startTime, endTime } = req.query;
@@ -60,4 +78,4 @@ const estimate = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { list, get, create, cancel, estimate };
+module.exports = { list, get, create, cancel, estimate, getPolicy };

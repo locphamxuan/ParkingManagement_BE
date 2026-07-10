@@ -94,18 +94,18 @@ describe('renew & cancel', () => {
     expect(u.walletBalance).toBe(2000000 - 2 * PRICE);
   });
 
-  test('cancel trong 3 ngày: hoàn 95% + thả slot + status cancelled', async () => {
+  test('cancel trong 3 ngày: hoàn theo refundPercent (fallback 80% khi building không có ReservationPolicy) + thả slot + status cancelled', async () => {
     const { pkg, slot, user } = await seed();
     const sub = await longTerm.subscribe(user._id, { packageId: pkg._id, plateNumber: '59G2-81000', slotId: slot._id });
 
     const res = await longTerm.cancelSubscription(user._id, sub._id, { cancelReason: 'no_longer_needed' });
-    expect(res.status).toBe('cancelled');
+    expect(res.subscription.status).toBe('cancelled');
 
     const s = await ParkingSlot.findById(slot._id);
     expect(s.status).toBe('available');
 
     const u = await User.findById(user._id).select('walletBalance');
-    // 1,000,000 - 500,000 + round(500,000*0.95)=475,000 → 975,000
-    expect(u.walletBalance).toBe(1000000 - PRICE + Math.round(PRICE * 0.95));
+    // Không seed ReservationPolicy → fallback 80%: 1,000,000 - 500,000 + round(500,000*0.8)=400,000 → 900,000
+    expect(u.walletBalance).toBe(1000000 - PRICE + Math.round(PRICE * 0.8));
   });
 });

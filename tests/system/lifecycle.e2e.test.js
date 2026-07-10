@@ -196,6 +196,19 @@ describe('E2E · Reservation lifecycle (đặt chỗ trừ cọc → hủy hoàn
     expect(estimate.estimatedFee).toBe(20000); // 2h × 10.000
     expect(estimate.depositAmount).toBe(3000);  // 15%
 
+    // 1b) Policy qua HTTP — dùng để FE ràng buộc date/duration picker trước khi chọn giờ.
+    const policyRes = await request(app)
+      .get('/api/users/reservations/policy')
+      .query({ buildingId: String(s.building._id) })
+      .set('Authorization', bearer(s.userToken));
+    expect(policyRes.status).toBe(200);
+    expect(policyRes.body.data).toMatchObject({
+      maxAdvanceDays: 7,
+      maxDurationHours: 24,
+      depositPercent: 15,
+      refundPercent: 80,
+    });
+
     // 2) Tạo reservation qua HTTP → ví bị trừ đúng số cọc.
     const before = (await User.findById(s.customer._id)).walletBalance;
     const createRes = await request(app)

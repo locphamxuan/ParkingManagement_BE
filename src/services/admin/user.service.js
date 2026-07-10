@@ -67,7 +67,9 @@ const create = async (actor, payload) => {
     email: String(payload.email).trim().toLowerCase(),
     password: payload.password,
     fullName: String(payload.fullName).trim(),
-    phone: payload.phone || "",
+    // undefined (không phải "") để field hoàn toàn không tồn tại trên document —
+    // khớp với sparse unique index của phone, tránh 2 user không nhập SĐT đụng E11000.
+    phone: payload.phone ? String(payload.phone).trim() : undefined,
     role: payload.role || ROLES.USER,
     isActive: payload.isActive !== false,
   });

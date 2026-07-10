@@ -1,5 +1,20 @@
 ﻿/**
  * @swagger
+ * /api/user/reservations/policy:
+ *   get:
+ *     tags: [User - Reservations]
+ *     summary: Giới hạn đặt chỗ công khai của building (maxAdvanceDays, maxDurationHours...) — dùng để ràng buộc date/duration picker trước khi chọn giờ cụ thể
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: buildingId
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Chính sách đặt chỗ của building
+ *
  * /api/user/reservations/estimate:
  *   get:
  *     tags: [User - Reservations]

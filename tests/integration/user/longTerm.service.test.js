@@ -4,6 +4,7 @@ const f = require('../../helpers/fixtures');
 const svc = require('../../../src/services/user/longTerm.service');
 const User = require('../../../src/models/user/User');
 const LongTermSubscription = require('../../../src/models/policy/LongTermSubscription');
+const ReservationPolicy = require('../../../src/models/policy/ReservationPolicy');
 
 let building, vt, user, pkg;
 
@@ -15,6 +16,8 @@ beforeEach(async () => {
   vt = await f.createVehicleType(building._id);
   pkg = await f.createPackage(building._id, vt._id, { price: 300000, durationDays: 30 });
   user = await f.createUser({ walletBalance: 1000000 });
+  // refundPercent do MANAGER cấu hình theo building — không hardcode trong service.
+  await f.createReservationPolicy(building._id, { refundPercent: 95 });
 });
 
 describe('subscribe', () => {
@@ -48,7 +51,8 @@ describe('cancelSubscription', () => {
   test('hủy trong 3 ngày → hoàn 95%, status cancelled', async () => {
     const sub = await svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' });
     const res = await svc.cancelSubscription(user._id, sub._id, { cancelReason: 'no_longer_needed' });
-    expect(res.status).toBe('cancelled');
+    expect(res.subscription.status).toBe('cancelled');
+    expect(res.refundPercent).toBe(95);
     const fresh = await User.findById(user._id);
     // 700_000 còn lại + hoàn 95% × 300_000 = 285_000 → 985_000
     expect(fresh.walletBalance).toBe(985000);
@@ -58,6 +62,24 @@ describe('cancelSubscription', () => {
     const sub = await svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' });
     await expect(svc.cancelSubscription(user._id, sub._id, { cancelReason: 'bad' }))
       .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  test('refundPercent lấy theo ReservationPolicy của building, không hardcode', async () => {
+    await ReservationPolicy.findOneAndUpdate({ building: building._id }, { refundPercent: 50 });
+    const sub = await svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' });
+    await svc.cancelSubscription(user._id, sub._id, { cancelReason: 'no_longer_needed' });
+    const fresh = await User.findById(user._id);
+    // 700_000 còn lại + hoàn 50% × 300_000 = 150_000 → 850_000
+    expect(fresh.walletBalance).toBe(850000);
+  });
+
+  test('building không có ReservationPolicy → fallback hoàn 80%', async () => {
+    await ReservationPolicy.deleteMany({ building: building._id });
+    const sub = await svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' });
+    await svc.cancelSubscription(user._id, sub._id, { cancelReason: 'no_longer_needed' });
+    const fresh = await User.findById(user._id);
+    // 700_000 còn lại + hoàn 80% × 300_000 = 240_000 → 940_000
+    expect(fresh.walletBalance).toBe(940000);
   });
 
   test('quá 3 ngày kể từ startDate → 400 CANCELLATION_WINDOW_EXPIRED', async () => {

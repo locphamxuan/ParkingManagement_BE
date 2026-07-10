@@ -33,6 +33,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       match: [/^[0-9+\-\s()]{8,20}$/, 'Please provide a valid phone number'],
+      // Partial unique index: chỉ enforce unique khi có giá trị, tránh lỗi
+      // duplicate-key giữa nhiều user chưa nhập số điện thoại (null/undefined).
+      unique: true,
+      sparse: true,
     },
     role: {
       type: String,

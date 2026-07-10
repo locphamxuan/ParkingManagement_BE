@@ -44,6 +44,16 @@ const longTermSubscriptionSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Snapshot % và số tiền đã hoàn lúc hủy (theo ReservationPolicy tại thời điểm đó) —
+    // để hiển thị lại chính xác trong lịch sử, tránh tính lại sai nếu policy đổi sau này.
+    refundPercent: {
+      type: Number,
+      default: null,
+    },
+    refundAmount: {
+      type: Number,
+      default: null,
+    },
     // Các mốc ngày nhắc (7/5/3/1) đã gửi cho gói này, tránh gửi trùng.
     remindersSent: {
       type: [Number],
