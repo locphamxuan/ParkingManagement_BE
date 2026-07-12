@@ -119,12 +119,10 @@ const resolveReservation = async (plateNumber, allowedBuildings) => {
   const expired = expiresAt && expiresAt < now;
 
   if (expired) {
-    reservation.status = 'expired';
-    await reservation.save();
-    // Nếu có giữ ô đỗ, hãy chuyển trạng thái ô đỗ về 'available'
-    if (reservation.slot) {
-      await ParkingSlot.findByIdAndUpdate(reservation.slot, { status: 'available' });
-    }
+    // Đánh dấu expired + thả slot + hoàn % cọc theo chính sách — dùng CHUNG một
+    // đường code với job/staff để không lệch nghiệp vụ hoàn tiền.
+    const { expireReservationWithRefund } = require('../../reservationLifecycle.service');
+    await expireReservationWithRefund(reservation._id);
     return null;
   }
 
@@ -172,9 +170,11 @@ const acceptableUsageTypes = (usageType) =>
  */
 const findCompatibleSlots = async (buildingId, vehicleTypeId, usageType, session = null) => {
   const filter = { building: buildingId, status: 'available' };
-  if (vehicleTypeId) filter.vehicleType = vehicleTypeId;
+  // Slot có vehicleType/usageType = null là slot "vạn năng" (không gắn zone) —
+  // nhận mọi loại xe/đối tượng, nhất quán với isSlotUsageCompatible khi chọn tay.
+  if (vehicleTypeId) filter.vehicleType = { $in: [vehicleTypeId, null] };
   const chain = acceptableUsageTypes(usageType);
-  if (chain.length) filter.usageType = { $in: chain };
+  if (chain.length) filter.usageType = { $in: [...chain, null] };
   const q = ParkingSlot.find(filter);
   if (session) q.session(session);
   const slots = await q;
@@ -182,10 +182,13 @@ const findCompatibleSlots = async (buildingId, vehicleTypeId, usageType, session
     const i = chain.indexOf(u);
     return i === -1 ? chain.length : i;
   };
-  // Ưu tiên slot không dành cho đặt trước (reservable=false) để giữ slot reservable cho user tự đặt.
+  // Thứ tự gợi ý: đúng đối tượng trước (slot vạn năng xếp cuối) → đúng loại xe
+  // trước slot vạn năng → ưu tiên slot không dành cho đặt trước (reservable=false)
+  // để giữ slot reservable cho user tự đặt.
   return slots.sort(
     (a, b) =>
       rank(a.usageType) - rank(b.usageType) ||
+      (a.vehicleType ? 0 : 1) - (b.vehicleType ? 0 : 1) ||
       (a.reservable ? 1 : 0) - (b.reservable ? 1 : 0) ||
       String(a.code).localeCompare(String(b.code))
   );

@@ -261,9 +261,12 @@ const create = async (userId, { buildingId, vehicleTypeId, vehicleType, plateNum
       // Chặn overbooking: số đặt chỗ CÒN HIỆU LỰC chồng khung giờ [start, end]
       // không được vượt tổng số ô đỗ của tòa nhà. Áp cho cả đặt chỗ KHÔNG kèm slot
       // (trước đây không giới hạn → đặt vô hạn vượt sức chứa).
+      // Loại slot dãy 'subscriber' khỏi sức chứa: dãy này dành riêng cho gói dài
+      // hạn, reservation không bao giờ được xếp vào (cả lúc đặt lẫn lúc check-in).
       const totalSlots = await ParkingSlot.countDocuments({
         building: resolvedBuildingId,
         status: { $ne: 'maintenance' },
+        usageType: { $ne: 'subscriber' },
       }).session(mongoSession);
       if (totalSlots === 0) {
         throw new AppError(
@@ -420,9 +423,13 @@ const cancel = async (userId, id) => {
       const refundPercent = Math.min(Math.max(Number(policy?.refundPercent ?? 0), 0), 100);
       const refund = Math.round((amountPaid * refundPercent) / 100);
 
-      // Release the reserved slot.
+      // Release the reserved slot (không ghi đè slot đang bảo trì).
       if (reservation.slot) {
-        await ParkingSlot.findByIdAndUpdate(reservation.slot, { status: 'available' }, { session: mongoSession });
+        await ParkingSlot.updateOne(
+          { _id: reservation.slot, status: { $ne: 'maintenance' } },
+          { $set: { status: 'available' } },
+          { session: mongoSession },
+        );
       }
 
       reservation.status = 'cancelled';

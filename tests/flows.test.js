@@ -17,7 +17,7 @@ const ReservationPolicy = require('../src/models/policy/ReservationPolicy');
 const LongTermPackage = require('../src/models/policy/LongTermPackage');
 const LongTermSubscription = require('../src/models/policy/LongTermSubscription');
 const Reservation = require('../src/models/operations/Reservation');
-const { ParkingSession } = require('../src/models');
+const { ParkingSession, StaffShift } = require('../src/models');
 
 const svc = require('../src/services/staff/parkingSession.service');
 
@@ -41,6 +41,11 @@ const seedBase = async () => {
   await PricePolicy.create({ building: building._id, vehicleType: vt._id, name: 'Reg', type: 'regular', hourlyRate: RATE });
   await ReservationPolicy.create({ building: building._id });
   const staff = { _id: new mongoose.Types.ObjectId(), assignedBuildings: [building._id] };
+  // Check-in/out yêu cầu nhân viên có ca làm việc HÔM NAY tại tòa nhà.
+  await StaffShift.create({
+    staff: staff._id, building: building._id, shift: new mongoose.Types.ObjectId(),
+    workDate: new Date(), status: 'scheduled',
+  });
   return { building, vt, floor, staff };
 };
 
@@ -57,12 +62,12 @@ describe('Walk-in (khách vãng lai)', () => {
     ).rejects.toMatchObject({ errorCode: 'PORTRAIT_REQUIRED' });
   });
 
-  test('vãng lai có chân dung nhưng thiếu ảnh biển → WALKIN_PLATE_IMAGE_REQUIRED', async () => {
+  test('vãng lai có chân dung nhưng thiếu ảnh biển → PLATE_IMAGE_REQUIRED', async () => {
     const { building, staff } = await seedBase();
     await ParkingSlot.create({ building: building._id, floor: (await Floor.findOne())._id, code: 'A1' });
     await expect(
       svc.checkIn(staff, { building: building._id, plateNumber: '59G2-10000', vehicleType: 'car', portraitImage: 'FACE_IN' }),
-    ).rejects.toMatchObject({ errorCode: 'WALKIN_PLATE_IMAGE_REQUIRED' });
+    ).rejects.toMatchObject({ errorCode: 'PLATE_IMAGE_REQUIRED' });
   });
 
   test('đủ ảnh → tạo session; checkout lưu ảnh ra + tính phí theo policy', async () => {
@@ -87,12 +92,43 @@ describe('Walk-in (khách vãng lai)', () => {
   });
 });
 
-describe('Capacity bypass cho gói có slot cố định', () => {
-  test('vãng lai bị chặn khi đầy; gói có slot cố định vẫn vào', async () => {
+describe('Gói floating & capacity', () => {
+  const mkPkgSub = async (building, vt, plateNumber) => {
+    const pkg = await LongTermPackage.create({ building: building._id, vehicleType: vt._id, name: 'M', code: 'M1', durationDays: 30, price: 100, maxHoursPerDay: 5 });
+    return LongTermSubscription.create({
+      user: new mongoose.Types.ObjectId(), package: pkg._id, building: building._id,
+      plateNumber, status: 'active',
+      startDate: new Date(Date.now() - HOUR), endDate: new Date(Date.now() + 30 * 24 * HOUR),
+    });
+  };
+
+  test('gói floating: tự gán slot trống dãy subscriber; vãng lai KHÔNG được lấn dãy subscriber', async () => {
     const { building, vt, floor, staff } = await seedBase();
-    // 1 slot duy nhất (đang reserved cho gói) → totalSlots = 1
-    const slot = await ParkingSlot.create({ building: building._id, floor: floor._id, code: 'A1', status: 'reserved' });
-    // 1 session active → activeSessions = 1 → đầy
+    // Chỉ còn 1 slot trống thuộc dãy subscriber.
+    const subSlot = await ParkingSlot.create({
+      building: building._id, floor: floor._id, code: 'S1',
+      usageType: 'subscriber', vehicleType: vt._id, status: 'available',
+    });
+
+    // Vãng lai không được tự gán vào dãy subscriber → bắt chọn tay.
+    await expect(
+      svc.checkIn(staff, { building: building._id, plateNumber: '59G2-20000', vehicleType: 'car', plateImage: 'x', portraitImage: 'y' }),
+    ).rejects.toMatchObject({ errorCode: 'SLOT_REQUIRED' });
+
+    // Xe có gói (floating, không giữ slot cố định) → staff check-in, hệ thống gán S1.
+    await mkPkgSub(building, vt, '59G2-300.00');
+    // user mua gói VẪN phải có ảnh chân dung (chống người khác lấy xe)
+    const session = await svc.checkIn(staff, { building: building._id, plateNumber: '59G2-300.00', vehicleType: 'car', portraitImage: 'FACE_IN' });
+    expect(session.paymentMethod).toBe('long_term');
+    expect(session.fee).toBe(0);
+    expect(session.portraitImage).toBe('FACE_IN');
+    expect(String(session.slot)).toBe(String(subSlot._id));
+    expect((await ParkingSlot.findById(subSlot._id)).status).toBe('occupied');
+  });
+
+  test('đầy bãi: mọi check-in bị chặn (gói floating cũng theo capacity)', async () => {
+    const { building, vt, floor, staff } = await seedBase();
+    await ParkingSlot.create({ building: building._id, floor: floor._id, code: 'A1', status: 'occupied' });
     await ParkingSession.create({ building: building._id, plateNumber: '59G2-000.01', vehicleType: vt._id, status: 'active' });
 
     // walk-in (đủ ảnh) → at capacity
@@ -100,18 +136,11 @@ describe('Capacity bypass cho gói có slot cố định', () => {
       svc.checkIn(staff, { building: building._id, plateNumber: '59G2-20000', vehicleType: 'car', plateImage: 'x', portraitImage: 'y' }),
     ).rejects.toMatchObject({ statusCode: 409 });
 
-    // gói có slot cố định
-    const pkg = await LongTermPackage.create({ building: building._id, vehicleType: vt._id, name: 'M', code: 'M1', durationDays: 30, price: 100, maxHoursPerDay: 5 });
-    await LongTermSubscription.create({
-      user: new mongoose.Types.ObjectId(), package: pkg._id, building: building._id,
-      plateNumber: '59G2-300.00', slot: slot._id, status: 'active',
-      startDate: new Date(Date.now() - HOUR), endDate: new Date(Date.now() + 30 * 24 * HOUR),
-    });
-    // user mua gói VẪN phải có ảnh chân dung (chống người khác lấy xe)
-    const session = await svc.checkIn(staff, { building: building._id, plateNumber: '59G2-300.00', vehicleType: 'car', portraitImage: 'FACE_IN' });
-    expect(session.paymentMethod).toBe('long_term');
-    expect(session.fee).toBe(0);
-    expect(session.portraitImage).toBe('FACE_IN');
+    // gói floating cũng bị chặn khi bãi đầy (không còn bypass như mô hình slot cố định cũ)
+    await mkPkgSub(building, vt, '59G2-300.00');
+    await expect(
+      svc.checkIn(staff, { building: building._id, plateNumber: '59G2-300.00', vehicleType: 'car', portraitImage: 'FACE_IN' }),
+    ).rejects.toMatchObject({ statusCode: 409 });
   });
 });
 

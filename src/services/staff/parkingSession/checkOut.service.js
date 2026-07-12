@@ -15,6 +15,7 @@ const {
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const buildingWalletService = require('../../manager/buildingWallet.service');
 const { normalizePlate } = require('../../../utils/plate.util');
+const { getOverstayPenaltyPercent } = require('../../../utils/reservationHold');
 const { calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { sendNotificationEmail } = require('../../../utils/email');
@@ -267,7 +268,9 @@ async function _computeRegularFee(parkingSession, payload, mongoSession) {
       fee += earlyFee;
     }
 
-    // OVERSTAY: đỗ quá endTime đã đặt → tính thêm phần vượt theo giá thường.
+    // OVERSTAY: đỗ quá endTime đã đặt → tính thêm phần vượt theo giá thường,
+    // cộng phụ phí phạt overstayPenaltyPercent do manager cấu hình trong
+    // ReservationPolicy (0 = không phạt).
     const endTime = linkedReservation.endTime ? new Date(linkedReservation.endTime) : null;
     if (endTime && now.getTime() > endTime.getTime()) {
       let overstayFee = await calculateParkingFee(parkingSession.building, vtId, endTime, now);
@@ -275,6 +278,10 @@ async function _computeRegularFee(parkingSession, payload, mongoSession) {
         const kind = vehicleKindFromType(parkingSession.vehicleType);
         const hours = Math.max(1, Math.ceil((now.getTime() - endTime.getTime()) / (1000 * 60 * 60)));
         overstayFee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
+      }
+      const penaltyPercent = await getOverstayPenaltyPercent(parkingSession.building, mongoSession);
+      if (penaltyPercent > 0) {
+        overstayFee = Math.ceil(overstayFee * (1 + penaltyPercent / 100));
       }
       fee += overstayFee;
     }

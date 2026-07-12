@@ -4,6 +4,7 @@ const { Reservation, ParkingSession, ParkingSlot, StaffShift, Payment } = requir
 const { assertBuildingScope, logAudit } = require('../../utils/staffScope');
 const { normalizePlate } = require('../../utils/plate.util');
 const { getMaxHoldMs } = require('../../utils/reservationHold');
+const { expireReservationWithRefund } = require('../reservationLifecycle.service');
 
 const normalizeCode = (value) => `${value || ''}`.trim().toUpperCase();
 
@@ -151,8 +152,9 @@ const processReservationCheckIn = async (staffUser, payload = {}) => {
 
       const expirationTime = reservation.startTime ? new Date(reservation.startTime).getTime() + holdMs : null;
       if (expirationTime && expirationTime < now) {
-        reservation.status = 'expired';
-        await reservation.save({ session });
+        // Expire + thả slot + hoàn % cọc qua đường code chung (transaction riêng,
+        // vẫn commit dù transaction check-in này abort vì throw bên dưới).
+        await expireReservationWithRefund(reservation._id);
         const holdMin = Math.round(holdMs / 60000);
         throw new AppError(`Lượt đặt chỗ đã hết hạn (quá ${holdMin} phút so với giờ bắt đầu)`, 409, 'RESERVATION_EXPIRED');
       }
@@ -216,57 +218,53 @@ const processReservationCheckIn = async (staffUser, payload = {}) => {
 };
 
 const expireReservation = async (staffUser, payload = {}) => {
-  const session = await mongoose.startSession();
-  try {
-    const result = await session.withTransaction(async () => {
-      const reservationId = payload.reservationId || payload.id || null;
-      const code = normalizeCode(payload.code || payload.reservationCode);
+  const reservationId = payload.reservationId || payload.id || null;
+  const code = normalizeCode(payload.code || payload.reservationCode);
 
-      let reservation = null;
-      if (reservationId) {
-        reservation = await Reservation.findById(reservationId).session(session);
-      } else if (code) {
-        reservation = await Reservation.findOne({ code }).session(session);
-      }
-
-      if (!reservation) {
-        throw new AppError('Reservation not found', 404, 'RESERVATION_NOT_FOUND');
-      }
-
-      assertBuildingScope(staffUser, reservation.building);
-
-      const previousValue = reservation.toObject();
-      reservation.status = 'expired';
-      await reservation.save({ session });
-
-      const slotId = reservation.slot?._id || reservation.slot || null;
-      if (slotId) {
-        const slot = await ParkingSlot.findById(slotId).session(session);
-        if (slot && slot.status !== 'maintenance') {
-          slot.status = 'available';
-          await slot.save({ session });
-        }
-      }
-
-      await logAudit(session, {
-        actor: staffUser._id,
-        action: 'RESERVATION_EXPIRED_CLEANUP',
-        entityType: 'Reservation',
-        entityId: `${reservation._id}`,
-        building: reservation.building,
-        before: previousValue,
-        after: reservation.toObject(),
-        severity: 'low',
-        description: `Reservation ${reservation.code} expired and cleaned up`,
-      });
-
-      return reservation;
-    });
-
-    return result;
-  } finally {
-    session.endSession();
+  let reservation = null;
+  if (reservationId) {
+    reservation = await Reservation.findById(reservationId);
+  } else if (code) {
+    reservation = await Reservation.findOne({ code });
   }
+
+  if (!reservation) {
+    throw new AppError('Reservation not found', 404, 'RESERVATION_NOT_FOUND');
+  }
+
+  assertBuildingScope(staffUser, reservation.building);
+
+  // Chỉ được expire lượt đang chờ/đã xác nhận — expire lượt đã check-in sẽ thả
+  // slot trong khi xe còn trong bãi.
+  if (!CHECKINABLE_STATUSES.includes(reservation.status)) {
+    throw new AppError(
+      `Không thể expire lượt đặt ở trạng thái "${reservation.status}"`,
+      409,
+      'RESERVATION_NOT_EXPIRABLE',
+    );
+  }
+
+  const previousValue = reservation.toObject();
+
+  // Expire + thả slot + hoàn % cọc — dùng chung một đường code với job auto-expire.
+  const outcome = await expireReservationWithRefund(reservation._id);
+  if (!outcome) {
+    throw new AppError('Lượt đặt vừa được xử lý bởi tiến trình khác', 409, 'RESERVATION_ALREADY_PROCESSED');
+  }
+
+  await logAudit(null, {
+    actor: staffUser._id,
+    action: 'RESERVATION_EXPIRED_CLEANUP',
+    entityType: 'Reservation',
+    entityId: `${reservation._id}`,
+    building: reservation.building,
+    before: previousValue,
+    after: outcome.reservation.toObject(),
+    severity: 'low',
+    description: `Reservation ${reservation.code} expired and cleaned up (refund ${outcome.refundPercent}% = ${outcome.refundAmount} VND)`,
+  });
+
+  return outcome.reservation;
 };
 
 module.exports = { listReservations, processReservationCheckIn, expireReservation };
