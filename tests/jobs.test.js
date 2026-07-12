@@ -53,51 +53,18 @@ describe('subscriptionExpiry job', () => {
     expect(await Notification.countDocuments({ type: 'subscription_expiring' })).toBe(1); // vẫn 1
   });
 
-  test('expireActiveSubscriptions: active→expired, GIỮ slot, báo user', async () => {
+  test('expireActiveSubscriptions: active→expired + báo user (gói floating không đụng slot)', async () => {
     const b = await mkBuilding();
-    const slot = await ParkingSlot.create({ building: b._id, floor: new mongoose.Types.ObjectId(), code: 'A1', status: 'reserved' });
-    const sub = await mkSub({ building: b._id, endDate: new Date(Date.now() - 1 * DAY), slot: slot._id });
+    const slot = await ParkingSlot.create({ building: b._id, floor: new mongoose.Types.ObjectId(), code: 'A1', status: 'available' });
+    const sub = await mkSub({ building: b._id, endDate: new Date(Date.now() - 1 * DAY) });
 
     await subJob.expireActiveSubscriptions();
 
     const s = await LongTermSubscription.findById(sub._id);
     expect(s.status).toBe('expired');
-    expect(s.lastGraceReminderAt).toBeTruthy();
-    expect((await ParkingSlot.findById(slot._id)).status).toBe('reserved'); // GIỮ slot
+    // Gói floating không giữ slot → job hết hạn không thay đổi trạng thái slot nào.
+    expect((await ParkingSlot.findById(slot._id)).status).toBe('available');
     expect(await Notification.countDocuments({ type: 'subscription_expired' })).toBe(1);
-  });
-
-  test('sendGraceReminders: 1 lần/ngày trong grace', async () => {
-    const b = await mkBuilding();
-    const slot = await ParkingSlot.create({ building: b._id, floor: new mongoose.Types.ObjectId(), code: 'A1', status: 'reserved' });
-    await mkSub({
-      building: b._id, status: 'expired', slot: slot._id, slotReleased: false,
-      endDate: new Date(Date.now() - 2 * DAY), // còn trong grace 7
-      lastGraceReminderAt: new Date(Date.now() - 1 * DAY), // hôm qua
-    });
-
-    await subJob.sendGraceReminders();
-    expect(await Notification.countDocuments({ type: 'subscription_expiring' })).toBe(1);
-
-    await subJob.sendGraceReminders(); // cùng ngày → không gửi nữa
-    expect(await Notification.countDocuments({ type: 'subscription_expiring' })).toBe(1);
-  });
-
-  test('releaseGraceSlots: quá grace → thả slot + báo; trong grace → giữ', async () => {
-    const b = await mkBuilding();
-    // quá grace (endDate cách 8 ngày > 7)
-    const slotOld = await ParkingSlot.create({ building: b._id, floor: new mongoose.Types.ObjectId(), code: 'A1', status: 'reserved' });
-    const subOld = await mkSub({ building: b._id, status: 'expired', slot: slotOld._id, slotReleased: false, endDate: new Date(Date.now() - 8 * DAY), plateNumber: '59G2-901.00' });
-    // còn trong grace
-    const slotNew = await ParkingSlot.create({ building: b._id, floor: new mongoose.Types.ObjectId(), code: 'A2', status: 'reserved' });
-    await mkSub({ building: b._id, status: 'expired', slot: slotNew._id, slotReleased: false, endDate: new Date(Date.now() - 2 * DAY), plateNumber: '59G2-902.00' });
-
-    await subJob.releaseGraceSlots();
-
-    expect((await ParkingSlot.findById(slotOld._id)).status).toBe('available');
-    expect((await LongTermSubscription.findById(subOld._id)).slotReleased).toBe(true);
-    expect((await ParkingSlot.findById(slotNew._id)).status).toBe('reserved'); // còn grace → giữ
-    expect(await Notification.countDocuments({ type: 'subscription_slot_released' })).toBe(1);
   });
 });
 

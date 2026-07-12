@@ -1,9 +1,7 @@
 const mongoose = require('mongoose');
 const { connect, clearAll, stop } = require('./db');
 const PricePolicy = require('../src/models/policy/PricePolicy');
-const { computeFee } = require('../src/utils/feeEngine');
-const { calculateParkingFee } = require('../src/utils/feeCalculator');
-const calculateReservationFee = require('../src/utils/calculateReservationFee');
+const { computeFee, calculateParkingFee, calculateReservationFee } = require('../src/utils/feeEngine');
 
 jest.setTimeout(120000);
 

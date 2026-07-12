@@ -16,14 +16,14 @@ jest.setTimeout(120000);
 
 const PRICE = 500000;
 
-const seed = async ({ balance = 1000000, allowDedicatedSlot = true } = {}) => {
+const seed = async ({ balance = 1000000 } = {}) => {
   const building = await Building.create({ name: 'B', code: 'B1', totalFloors: 1, pricing: { hourlyRate: 15000 } });
   const vt = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô' });
   const floor = await Floor.create({ building: building._id, code: 'F1', capacity: 10 });
   const slot = await ParkingSlot.create({ building: building._id, floor: floor._id, code: 'A1', vehicleType: vt._id, status: 'available' });
   const pkg = await LongTermPackage.create({
     building: building._id, vehicleType: vt._id, name: 'Tháng', code: 'M1',
-    durationDays: 30, price: PRICE, allowDedicatedSlot,
+    durationDays: 30, price: PRICE,
   });
   const user = await User.create({ email: 'u@test.com', password: '123456', fullName: 'U', walletBalance: balance });
   return { building, vt, floor, slot, pkg, user };
@@ -34,41 +34,40 @@ afterAll(stop);
 afterEach(clearAll);
 
 describe('subscribe (mua gói + ví)', () => {
-  test('thành công: trừ ví, sub active, slot reserved, có WalletTransaction', async () => {
+  test('thành công: trừ ví, sub active, KHÔNG giữ slot (gói floating), có WalletTransaction', async () => {
     const { pkg, slot, user } = await seed();
-    const sub = await longTerm.subscribe(user._id, { packageId: pkg._id, plateNumber: '59G2-81000', slotId: slot._id });
+    const sub = await longTerm.subscribe(user._id, { packageId: pkg._id, plateNumber: '59G2-81000' });
 
     expect(sub.status).toBe('active');
-    expect(String(sub.slot)).toBe(String(slot._id));
     expect(sub.plateNumber).toBe('59G2-810.00');
 
     const u = await User.findById(user._id).select('walletBalance');
     expect(u.walletBalance).toBe(1000000 - PRICE);
 
+    // Gói floating: mua gói không giữ slot cố định — slot vẫn available,
+    // staff sẽ gán slot trống lúc check-in.
     const s = await ParkingSlot.findById(slot._id);
-    expect(s.status).toBe('reserved');
+    expect(s.status).toBe('available');
 
     const tx = await WalletTransaction.findOne({ user: user._id, reason: 'long_term_subscription' });
     expect(tx).toBeTruthy();
     expect(tx.amount).toBe(PRICE);
   });
 
-  test('số dư không đủ → lỗi, KHÔNG tạo sub, slot vẫn available', async () => {
-    const { pkg, slot, user } = await seed({ balance: 100 });
+  test('số dư không đủ → lỗi, KHÔNG tạo sub', async () => {
+    const { pkg, user } = await seed({ balance: 100 });
     await expect(
-      longTerm.subscribe(user._id, { packageId: pkg._id, plateNumber: '59G2-81000', slotId: slot._id }),
+      longTerm.subscribe(user._id, { packageId: pkg._id, plateNumber: '59G2-81000' }),
     ).rejects.toMatchObject({ statusCode: 400 });
 
     expect(await LongTermSubscription.countDocuments()).toBe(0);
-    const s = await ParkingSlot.findById(slot._id);
-    expect(s.status).toBe('available');
   });
 
-  test('gói không hỗ trợ slot cố định mà gửi slotId → lỗi', async () => {
-    const { pkg, slot, user } = await seed({ allowDedicatedSlot: false });
-    await expect(
-      longTerm.subscribe(user._id, { packageId: pkg._id, plateNumber: '59G2-81000', slotId: slot._id }),
-    ).rejects.toMatchObject({ statusCode: 400 });
+  test('gói floating: slotId gửi lên bị bỏ qua, slot không bị giữ', async () => {
+    const { pkg, slot, user } = await seed();
+    const sub = await longTerm.subscribe(user._id, { packageId: pkg._id, plateNumber: '59G2-81000', slotId: slot._id });
+    expect(sub.status).toBe('active');
+    expect((await ParkingSlot.findById(slot._id)).status).toBe('available');
   });
 
   test('biển số đã có gói active → chặn mua trùng', async () => {
@@ -94,15 +93,12 @@ describe('renew & cancel', () => {
     expect(u.walletBalance).toBe(2000000 - 2 * PRICE);
   });
 
-  test('cancel trong 3 ngày: hoàn theo refundPercent (fallback 80% khi building không có ReservationPolicy) + thả slot + status cancelled', async () => {
-    const { pkg, slot, user } = await seed();
-    const sub = await longTerm.subscribe(user._id, { packageId: pkg._id, plateNumber: '59G2-81000', slotId: slot._id });
+  test('cancel trong 3 ngày: hoàn theo refundPercent (fallback 80% khi building không có ReservationPolicy) + status cancelled', async () => {
+    const { pkg, user } = await seed();
+    const sub = await longTerm.subscribe(user._id, { packageId: pkg._id, plateNumber: '59G2-81000' });
 
     const res = await longTerm.cancelSubscription(user._id, sub._id, { cancelReason: 'no_longer_needed' });
     expect(res.subscription.status).toBe('cancelled');
-
-    const s = await ParkingSlot.findById(slot._id);
-    expect(s.status).toBe('available');
 
     const u = await User.findById(user._id).select('walletBalance');
     // Không seed ReservationPolicy → fallback 80%: 1,000,000 - 500,000 + round(500,000*0.8)=400,000 → 900,000

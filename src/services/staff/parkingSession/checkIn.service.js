@@ -233,6 +233,11 @@ const checkIn = async (user, payload) => {
       let walkInBypassedSlotUsageType = null;
       if (slotId) {
         const slot = await ParkingSlot.findById(slotId).session(session);
+        // Slot do staff chọn phải thuộc đúng tòa nhà đang check-in (slot của
+        // reservation đã được validate lúc đặt).
+        if (slot && !reservation && slot.building && String(slot.building) !== String(buildingId)) {
+          throw new AppError('Invalid slot', 400, 'INVALID_SLOT');
+        }
         if (slot?.status === 'maintenance') {
           throw new AppError('Assigned slot is under maintenance', 409, 'SLOT_MAINTENANCE_NOT_AVAILABLE');
         }

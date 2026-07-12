@@ -1,9 +1,8 @@
-const mongoose = require('mongoose');
-const { Reservation, ParkingSlot, User, Notification, Payment, WalletTransaction, ReservationPolicy } = require('../models');
+const { Reservation, User, Notification } = require('../models');
 const logger = require("../utils/logger");
 const { sendNotificationEmail } = require('../utils/email');
 const { getMaxHoldMs } = require('../utils/reservationHold');
-const buildingWalletService = require('../services/manager/buildingWallet.service');
+const { expireReservationWithRefund } = require('../services/reservationLifecycle.service');
 const { acquireLock, releaseLock } = require('../utils/jobLock');
 
 const CHECKINABLE_STATUSES = ['pending', 'confirmed'];
@@ -84,65 +83,10 @@ const expireStaleReservations = async () => {
     let refundPercent = 0;
 
     try {
-      const mongoSession = await mongoose.startSession();
-      try {
-        await mongoSession.withTransaction(async () => {
-          reservation.status = 'expired';
-          await reservation.save({ session: mongoSession });
-
-          // Thả slot nếu có giữ (không đụng vào slot đang bảo trì).
-          const slotId = reservation.slot?._id || reservation.slot || null;
-          if (slotId) {
-            const slot = await ParkingSlot.findById(slotId).session(mongoSession);
-            if (slot && slot.status !== 'maintenance') {
-              slot.status = 'available';
-              await slot.save({ session: mongoSession });
-            }
-          }
-
-          // Hoàn tiền theo refundPercent của chính sách tòa nhà (nếu manager cấu hình > 0).
-          const policy = await ReservationPolicy.findOne({ building: buildingId }).session(mongoSession);
-          refundPercent = Math.min(Math.max(Number(policy?.refundPercent ?? 0), 0), 100);
-          const deposit = Number(reservation.fee || 0);
-          refundAmount = Math.round(deposit * refundPercent / 100);
-
-          if (refundAmount > 0 && reservation.user) {
-            const updatedUser = await User.findByIdAndUpdate(
-              reservation.user,
-              { $inc: { walletBalance: refundAmount } },
-              { new: true, session: mongoSession },
-            );
-            if (updatedUser) {
-              await WalletTransaction.create([{
-                user: reservation.user,
-                type: 'credit',
-                amount: refundAmount,
-                balanceAfter: updatedUser.walletBalance,
-                status: 'success',
-                reason: 'reservation_refund',
-                metadata: { reservationId: `${reservation._id}`, code: reservation.code, percent: refundPercent, reason: 'expired' },
-              }], { session: mongoSession });
-
-              const [refundPayment] = await Payment.create([{
-                building: buildingId,
-                reservation: reservation._id,
-                type: 'refund',
-                method: 'wallet',
-                amount: refundAmount,
-                status: 'success',
-                user: reservation.user,
-                note: `Reservation ${reservation.code} expired — ${refundPercent}% partial refund`,
-              }], { session: mongoSession });
-
-              await buildingWalletService.debit(
-                buildingId, refundAmount, 'refund', refundPayment._id, null, mongoSession, { allowNegative: true }
-              );
-            }
-          }
-        });
-      } finally {
-        await mongoSession.endSession();
-      }
+      const outcome = await expireReservationWithRefund(reservation._id);
+      if (!outcome) continue; // đã được đường code khác xử lý (idempotent)
+      refundAmount = outcome.refundAmount;
+      refundPercent = outcome.refundPercent;
     } catch (err) {
       logger.error('[reservationExpiry] expire reservation failed:', err.message);
       continue;
