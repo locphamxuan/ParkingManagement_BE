@@ -160,7 +160,7 @@
  *                           items: { $ref: '#/components/schemas/Floor' }
  *   post:
  *     tags: [Manager - Floors]
- *     summary: Create a floor
+ *     summary: Create a floor (code is auto-generated from name, e.g. "Floor 1" → F1)
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -174,9 +174,9 @@
  *         application/json:
  *           schema:
  *             type: object
- *             required: [code, capacity]
+ *             required: [name, capacity]
  *             properties:
- *               code: { type: string, example: F1 }
+ *               name: { type: string, example: 'Floor 1' }
  *               capacity: { type: integer, minimum: 1, example: 120 }
  *               allowedVehicleTypes: { type: array, items: { type: string, format: objectId } }
  *               status: { type: string, enum: [active, inactive, maintenance], example: active }
@@ -215,7 +215,7 @@
  *     parameters:
  *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
  *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { code: { type: string, example: F1 }, capacity: { type: integer, example: 120 }, allowedVehicleTypes: { type: array, items: { type: string, format: objectId } }, status: { type: string, enum: [active, inactive, maintenance], example: active } } } } } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { name: { type: string, example: 'Floor 1' }, capacity: { type: integer, example: 120 }, allowedVehicleTypes: { type: array, items: { type: string, format: objectId } }, status: { type: string, enum: [active, inactive, maintenance], example: active } } } } } }
  *     responses:
  *       200: { description: Floor updated successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Floor updated }, data: { type: object, properties: { item: { $ref: '#/components/schemas/Floor' } } } } } ] } } } }
  *   delete:
@@ -290,22 +290,33 @@
  *       200: { description: Slots returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ParkingSlot' } } } } } } ] } } } }
  *   post:
  *     tags: [Manager - Slots]
- *     summary: Create a parking slot
+ *     summary: Create a parking slot (code auto-generated from the zone code when omitted)
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [code, floor], properties: { code: { type: string, example: A-101 }, floor: { type: string, format: objectId }, status: { type: string, enum: [available, occupied, reserved, maintenance], example: available }, reservable: { type: boolean, example: true }, note: { type: string, example: Near elevator } } } } } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [floor, zone], properties: { floor: { type: string, format: objectId }, zone: { type: string, format: objectId }, code: { type: string, example: A-01, description: 'Optional — auto-generated as {zoneCode}-01, -02… when omitted.' }, status: { type: string, enum: [available, occupied, reserved, maintenance], example: available }, reservable: { type: boolean, example: true }, note: { type: string, example: Near elevator } } } } } }
  *     responses:
  *       201: { description: Slot created successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Slot created }, data: { type: object, properties: { item: { $ref: '#/components/schemas/ParkingSlot' } } } } } ] } } } }
+ * /api/manager/buildings/{buildingId}/slots/batch:
+ *   post:
+ *     tags: [Manager - Slots]
+ *     summary: Create parking slots in batch — codes auto-generated sequentially from the zone code
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [floor, zone, quantity], properties: { floor: { type: string, format: objectId }, zone: { type: string, format: objectId }, quantity: { type: integer, minimum: 1, maximum: 50, example: 10 }, status: { type: string, enum: [available, occupied, reserved, maintenance], example: available }, reservable: { type: boolean, example: true }, note: { type: string, example: Row A } } } } } }
+ *     responses:
+ *       201: { description: Slots created successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: 10 slot(s) created }, data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ParkingSlot' } } } } } } ] } } } }
+ *       409: { description: Floor/zone capacity exceeded., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
  * /api/manager/buildings/{buildingId}/slots/{id}:
  *   put:
  *     tags: [Manager - Slots]
- *     summary: Update a parking slot
+ *     summary: Update a parking slot (code is not updatable)
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
  *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { code: { type: string, example: A-102 }, floor: { type: string, format: objectId }, status: { type: string, enum: [available, occupied, reserved, maintenance], example: available }, reservable: { type: boolean, example: true }, note: { type: string, example: Updated note } } } } } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { status: { type: string, enum: [available, occupied, reserved, maintenance], example: available }, reservable: { type: boolean, example: true }, note: { type: string, example: Updated note } } } } } }
  *     responses:
  *       200: { description: Slot updated successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Slot updated }, data: { type: object, properties: { item: { $ref: '#/components/schemas/ParkingSlot' } } } } } ] } } } }
  *   delete:
@@ -329,4 +340,47 @@
  *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [available, occupied, reserved, maintenance], example: maintenance } } } } } }
  *     responses:
  *       200: { description: Slot status updated successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Slot status updated }, data: { type: object, properties: { item: { $ref: '#/components/schemas/ParkingSlot' } } } } } ] } } } }
+ * /api/manager/buildings/{buildingId}/zones:
+ *   get:
+ *     tags: [Manager - Zones]
+ *     summary: List zones (each item includes server-computed slotCount)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
+ *       - { in: query, name: floor, schema: { type: string, format: objectId } }
+ *       - { in: query, name: usageType, schema: { type: string, enum: [walk_in, registered, subscriber, reserved] } }
+ *       - { in: query, name: status, schema: { type: string, enum: [active, inactive, maintenance] } }
+ *     responses:
+ *       200: { description: Zones returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Zone' } } } } } } ] } } } }
+ *   post:
+ *     tags: [Manager - Zones]
+ *     summary: Create a zone (code is auto-generated from name, unique per floor)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, floor, vehicleType, usageType, capacity], properties: { name: { type: string, example: 'Walk-in zone' }, floor: { type: string, format: objectId }, vehicleType: { type: string, format: objectId }, usageType: { type: string, enum: [walk_in, registered, subscriber, reserved], example: walk_in }, capacity: { type: integer, minimum: 1, example: 20 }, status: { type: string, enum: [active, inactive, maintenance], example: active } } } } } }
+ *     responses:
+ *       201: { description: Zone created successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Zone created }, data: { type: object, properties: { item: { $ref: '#/components/schemas/Zone' } } } } } ] } } } }
+ *       409: { description: Zone capacity exceeds the floor capacity budget., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+ * /api/manager/buildings/{buildingId}/zones/{id}:
+ *   put:
+ *     tags: [Manager - Zones]
+ *     summary: Update a zone (code is not updatable)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { name: { type: string, example: 'VIP zone A' }, usageType: { type: string, enum: [walk_in, registered, subscriber, reserved] }, capacity: { type: integer, minimum: 1, example: 25 }, status: { type: string, enum: [active, inactive, maintenance] } } } } } }
+ *     responses:
+ *       200: { description: Zone updated successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Zone updated }, data: { type: object, properties: { item: { $ref: '#/components/schemas/Zone' } } } } } ] } } } }
+ *   delete:
+ *     tags: [Manager - Zones]
+ *     summary: Remove a zone (must contain no slots)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     responses:
+ *       200: { description: Zone removed successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Zone removed }, data: { nullable: true, example: null } } } ] } } } }
+ *       409: { description: Zone still has slots., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
  */
