@@ -53,7 +53,7 @@ beforeEach(async () => {
     operatingHours: { open: '00:00', close: '23:59' },
   });
   vehicleType = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô' });
-  floor = await Floor.create({ building: building._id, code: 'F1', capacity: 100 });
+  floor = await Floor.create({ building: building._id, code: 'F1', name: 'Floor 1', capacity: 100 });
   await ReservationPolicy.create({
     building: building._id, depositPercent: 15, refundPercent: 80,
     maxDurationHours: 24, maxAdvanceDays: 7, cancellationCutoffHours: 0,

@@ -59,6 +59,7 @@ const createFloor = (buildingId, over = {}) => {
   return Floor.create({
     building: buildingId,
     code: over.code || `F${n}`,
+    name: over.name || `Floor ${n}`,
     capacity: over.capacity ?? 100,
     ...(over.allowedVehicleTypes ? { allowedVehicleTypes: over.allowedVehicleTypes } : {}),
   });

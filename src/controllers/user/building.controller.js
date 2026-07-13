@@ -54,10 +54,10 @@ const listFloorsWithAvailability = asyncHandler(async (req, res) => {
   }
 
   const floors = await Floor.find(floorFilter)
-    .select('_id code name levelNumber capacity allowedVehicleTypes pricePolicy status')
+    .select('_id code name capacity allowedVehicleTypes pricePolicy status')
     .populate('allowedVehicleTypes', 'name code')
     .populate('pricePolicy', 'name hourlyRate type')
-    .sort('levelNumber');
+    .sort('code');
 
   // Đếm slots theo status cho mỗi tầng
   const floorIds = floors.map((f) => f._id);

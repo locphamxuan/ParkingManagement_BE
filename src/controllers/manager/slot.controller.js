@@ -16,6 +16,15 @@ const create = asyncHandler(async (req, res) => {
   });
 });
 
+const createBatch = asyncHandler(async (req, res) => {
+  const items = await service.createMany(req.user, req.params.buildingId, req.body);
+  sendSuccess(res, {
+    statusCode: 201,
+    message: `${items.length} slot(s) created`,
+    data: { items },
+  });
+});
+
 const update = asyncHandler(async (req, res) => {
   const item = await service.update(
     req.user,
@@ -41,4 +50,4 @@ const remove = asyncHandler(async (req, res) => {
   sendSuccess(res, { message: "Slot removed", data: null });
 });
 
-module.exports = { list, create, update, updateStatus, remove };
+module.exports = { list, create, createBatch, update, updateStatus, remove };

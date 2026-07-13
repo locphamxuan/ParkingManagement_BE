@@ -37,7 +37,7 @@ const seedBase = async () => {
     name: 'B1', code: 'B1', totalFloors: 1, pricing: { hourlyRate: RATE },
   });
   const vt = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô' });
-  const floor = await Floor.create({ building: building._id, code: 'F1', capacity: 100 });
+  const floor = await Floor.create({ building: building._id, code: 'F1', name: 'Floor 1', capacity: 100 });
   await PricePolicy.create({ building: building._id, vehicleType: vt._id, name: 'Reg', type: 'regular', hourlyRate: RATE });
   await ReservationPolicy.create({ building: building._id });
   const staff = { _id: new mongoose.Types.ObjectId(), assignedBuildings: [building._id] };

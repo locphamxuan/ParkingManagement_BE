@@ -29,7 +29,7 @@ const nextDayAt = (h, addDays = 1) => {
 const seed = async ({ balance = 1000000, policy = {} } = {}) => {
   const building = await Building.create({ name: 'B', code: 'B1', totalFloors: 1, pricing: { hourlyRate: RATE } });
   const vt = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô' });
-  const floor = await Floor.create({ building: building._id, code: 'F1', capacity: 10 });
+  const floor = await Floor.create({ building: building._id, code: 'F1', name: 'Floor 1', capacity: 10 });
   const slot = await ParkingSlot.create({ building: building._id, floor: floor._id, code: 'A1', vehicleType: vt._id, status: 'available', reservable: true });
   await PricePolicy.create({ building: building._id, vehicleType: vt._id, name: 'Reg', type: 'regular', hourlyRate: RATE });
   await ReservationPolicy.create({ building: building._id, ...policy });

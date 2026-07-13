@@ -31,7 +31,9 @@ const validateVehicleType = wrap((req) => {
 
 const validateFloor = wrap((req) => {
   if (req.method === "POST")
-    requireFields(req.body, ["code", "capacity"]);
+    requireFields(req.body, ["name", "capacity"]);
+  if (req.body.name !== undefined && !isNonEmptyString(req.body.name))
+    throw new AppError("name must not be empty", 400);
   if (req.body.capacity !== undefined && Number(req.body.capacity) < 0)
     throw new AppError("capacity must be >= 0", 400);
 });
@@ -50,7 +52,18 @@ const validateGate = wrap((req) => {
 const SLOT_STATUS = ["available", "occupied", "reserved", "maintenance"];
 
 const validateSlot = wrap((req) => {
-  if (req.method === "POST") requireFields(req.body, ["code", "floor", "zone"]);
+  // code không còn bắt buộc — BE tự sinh từ code zone khi thiếu.
+  if (req.method === "POST") requireFields(req.body, ["floor", "zone"]);
+  if (req.body.status !== undefined && !SLOT_STATUS.includes(req.body.status)) {
+    throw new AppError(`status must be one of: ${SLOT_STATUS.join(", ")}`, 400);
+  }
+});
+
+const validateSlotBatch = wrap((req) => {
+  requireFields(req.body, ["floor", "zone", "quantity"]);
+  const qty = Number(req.body.quantity);
+  if (!Number.isInteger(qty) || qty < 1 || qty > 50)
+    throw new AppError("quantity must be an integer between 1 and 50", 400);
   if (req.body.status !== undefined && !SLOT_STATUS.includes(req.body.status)) {
     throw new AppError(`status must be one of: ${SLOT_STATUS.join(", ")}`, 400);
   }
@@ -67,7 +80,9 @@ const ZONE_STATUS = ["active", "inactive", "maintenance"];
 
 const validateZone = wrap((req) => {
   if (req.method === "POST")
-    requireFields(req.body, ["code", "floor", "vehicleType", "usageType", "capacity"]);
+    requireFields(req.body, ["name", "floor", "vehicleType", "usageType", "capacity"]);
+  if (req.body.name !== undefined && !isNonEmptyString(req.body.name))
+    throw new AppError("name must not be empty", 400);
   if (
     req.body.usageType !== undefined &&
     !ZONE_USAGE_TYPES.includes(req.body.usageType)
@@ -187,6 +202,7 @@ module.exports = {
   validateFloor,
   validateGate,
   validateSlot,
+  validateSlotBatch,
   validateSlotStatus,
   validateZone,
   validatePricePolicy,

@@ -5,6 +5,7 @@ const ParkingSlot = require("../../models/building/ParkingSlot");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
+const { initialsCode, STOP_WORDS_VI } = require("../../utils/codeFromName");
 
 const ensureFloorBelongsToBuilding = async (floorId, buildingId) => {
   const floor = await Floor.findOne({ _id: floorId, building: buildingId });
@@ -66,7 +67,7 @@ const list = async (user, buildingId, query = {}) => {
   if (query.usageType) filter.usageType = query.usageType;
   if (query.status) filter.status = query.status;
   const zones = await Zone.find(filter)
-    .populate("floor", "code")
+    .populate("floor", "code name")
     .populate("vehicleType", "code name")
     .sort({ floor: 1, code: 1 })
     .lean();
@@ -83,6 +84,17 @@ const list = async (user, buildingId, query = {}) => {
   return zones.map((z) => ({ ...z, slotCount: countMap.get(String(z._id)) || 0 }));
 };
 
+// Code zone sinh từ tên (bỏ từ phụ: "Dãy cho khách vãng lai" → VL),
+// unique theo tầng — trùng thì thêm số đuôi (VL → VL2).
+const nextZoneCode = async (floorId, name) => {
+  const base = initialsCode(name, { stopWords: STOP_WORDS_VI, maxLen: 4, fallback: "Z" });
+  const codes = new Set(await Zone.find({ floor: floorId }).distinct("code"));
+  if (!codes.has(base)) return base;
+  let n = 2;
+  while (codes.has(`${base}${n}`)) n += 1;
+  return `${base}${n}`;
+};
+
 const create = async (user, buildingId, payload) => {
   ensureManagerOwnsBuilding(user, buildingId);
   if (!payload.floor) throw new AppError("floor is required", 400);
@@ -91,16 +103,23 @@ const create = async (user, buildingId, payload) => {
   const capacity = assertValidZoneCapacity(Number(payload.capacity));
   await assertZoneCapacityFitsFloor(floor, capacity, null);
 
-  const created = await Zone.create({
+  const doc = {
     building: buildingId,
     floor: payload.floor,
-    code: String(payload.code || "").trim().toUpperCase(),
-    name: payload.name || "",
+    name: String(payload.name || "").trim(),
     vehicleType: payload.vehicleType,
     usageType: payload.usageType,
     capacity,
     status: payload.status || "active",
-  });
+  };
+  let created;
+  try {
+    created = await Zone.create({ ...doc, code: await nextZoneCode(payload.floor, doc.name) });
+  } catch (err) {
+    // Race hiếm: 2 request cùng sinh một code → thử lại một lần với code mới.
+    if (err?.code !== 11000) throw err;
+    created = await Zone.create({ ...doc, code: await nextZoneCode(payload.floor, doc.name) });
+  }
   await writeAuditLog({
     actor: user,
     action: "CREATE_ZONE",
@@ -126,9 +145,7 @@ const update = async (user, buildingId, id, payload) => {
   if (!current) throw new AppError("Zone not found", 404);
 
   const update = {};
-  if (payload.code !== undefined)
-    update.code = String(payload.code).trim().toUpperCase();
-  if (payload.name !== undefined) update.name = payload.name;
+  if (payload.name !== undefined) update.name = String(payload.name).trim();
   if (payload.usageType !== undefined) update.usageType = payload.usageType;
   if (payload.capacity !== undefined) update.capacity = Number(payload.capacity);
   if (payload.status !== undefined) update.status = payload.status;

@@ -58,10 +58,24 @@ const list = async (user, buildingId, query = {}) => {
   if (query.zone) filter.zone = query.zone;
   if (query.usageType) filter.usageType = query.usageType;
   return ParkingSlot.find(filter)
-    .populate("floor", "code")
+    .populate("floor", "code name")
     .populate("zone", "code usageType vehicleType")
     .populate("vehicleType", "code name")
     .sort({ floor: 1, code: 1 });
+};
+
+// Sinh `count` mã slot kế tiếp theo code của zone: {zoneCode}-01, {zoneCode}-02…
+// Scope unique là {floor, code} — prefix zone (unique theo tầng) tránh đụng zone khác.
+const nextSlotCodes = async (zone, floorId, count) => {
+  const codes = await ParkingSlot.find({ floor: floorId }).distinct("code");
+  const pattern = new RegExp(`^${zone.code}-(\\d+)$`);
+  const maxN = codes.reduce((max, code) => {
+    const m = pattern.exec(code);
+    return m ? Math.max(max, Number(m[1])) : max;
+  }, 0);
+  return Array.from({ length: count }, (_, i) =>
+    `${zone.code}-${String(maxN + i + 1).padStart(2, "0")}`
+  );
 };
 
 const create = async (user, buildingId, payload) => {
@@ -75,11 +89,15 @@ const create = async (user, buildingId, payload) => {
   await assertFloorCapacity(floor);
   await assertZoneCapacity(zone);
 
+  // Thiếu code → tự sinh từ code zone (client không cần đặt mã).
+  const code = payload.code
+    ? String(payload.code).trim().toUpperCase()
+    : (await nextSlotCodes(zone, payload.floor, 1))[0];
   const created = await ParkingSlot.create({
     building: buildingId,
     floor: payload.floor,
     zone: zone._id,
-    code: String(payload.code || "").trim().toUpperCase(),
+    code,
     vehicleType: zone.vehicleType,
     usageType: zone.usageType,
     status: payload.status || "available",
@@ -97,6 +115,64 @@ const create = async (user, buildingId, payload) => {
   return created;
 };
 
+// Tạo hàng loạt: mã sinh nối tiếp từ code zone trong 1 request (tránh race đánh số).
+const createMany = async (user, buildingId, payload) => {
+  ensureManagerOwnsBuilding(user, buildingId);
+  if (!payload.floor) throw new AppError("floor is required", 400);
+  const floor = await ensureFloorBelongsToBuilding(payload.floor, buildingId);
+  if (!payload.zone) throw new AppError("zone is required", 400);
+  const zone = await ensureZoneMatches(payload.zone, buildingId, payload.floor);
+  const quantity = Number(payload.quantity);
+
+  // Cả LÔ phải nằm trong sức chứa còn lại của tầng và dãy (0 = không giới hạn).
+  const floorCap = Number(floor.capacity || 0);
+  if (floorCap > 0) {
+    const count = await ParkingSlot.countDocuments({ floor: floor._id });
+    if (count + quantity > floorCap) {
+      throw new AppError(
+        `Floor capacity exceeded: ${count}/${floorCap} slot(s) used, cannot add ${quantity} more.`,
+        409,
+        "FLOOR_CAPACITY_REACHED",
+      );
+    }
+  }
+  const zoneCap = Number(zone.capacity || 0);
+  if (zoneCap > 0) {
+    const count = await ParkingSlot.countDocuments({ zone: zone._id });
+    if (count + quantity > zoneCap) {
+      throw new AppError(
+        `Zone "${zone.code}" capacity exceeded: ${count}/${zoneCap} slot(s) used, cannot add ${quantity} more.`,
+        409,
+        "ZONE_CAPACITY_REACHED",
+      );
+    }
+  }
+
+  const codes = await nextSlotCodes(zone, payload.floor, quantity);
+  const created = await ParkingSlot.insertMany(
+    codes.map((code) => ({
+      building: buildingId,
+      floor: payload.floor,
+      zone: zone._id,
+      code,
+      vehicleType: zone.vehicleType,
+      usageType: zone.usageType,
+      status: payload.status || "available",
+      reservable: payload.reservable !== false,
+      note: payload.note || "",
+    }))
+  );
+  await writeAuditLog({
+    actor: user,
+    action: "CREATE_SLOTS_BATCH",
+    targetTable: "parking_slots",
+    targetId: zone._id,
+    building: buildingId,
+    newValue: { zone: zone.code, quantity, codes },
+  });
+  return created;
+};
+
 const update = async (user, buildingId, id, payload) => {
   ensureManagerOwnsBuilding(user, buildingId);
   const current = await ParkingSlot.findOne({
@@ -106,8 +182,6 @@ const update = async (user, buildingId, id, payload) => {
   if (!current) throw new AppError("Slot not found", 404);
 
   const update = {};
-  if (payload.code !== undefined)
-    update.code = String(payload.code).trim().toUpperCase();
   if (payload.status !== undefined) update.status = payload.status;
   if (payload.reservable !== undefined) update.reservable = !!payload.reservable;
   if (payload.note !== undefined) update.note = payload.note;
@@ -178,5 +252,5 @@ const remove = async (user, buildingId, id) => {
   return { id };
 };
 
-module.exports = { list, create, update, updateStatus, remove };
+module.exports = { list, create, createMany, update, updateStatus, remove };
 

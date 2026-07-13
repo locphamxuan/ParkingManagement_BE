@@ -40,10 +40,17 @@ describe('vehicleType.service', () => {
 });
 
 describe('floor.service', () => {
-  test('create floor', async () => {
-    const fl = await floorSvc.create(manager, building._id, { code: 'F1', capacity: 50 });
-    expect(fl.code).toBe('F1');
+  test('create floor: code sinh từ tên, trùng thì thêm số đuôi', async () => {
+    const fl = await floorSvc.create(manager, building._id, { name: 'Tầng 1', capacity: 50 });
+    expect(fl.code).toBe('T1');
+    expect(fl.name).toBe('Tầng 1');
     expect(fl.capacity).toBe(50);
+    const fl2 = await floorSvc.create(manager, building._id, { name: 'Hầm B1', capacity: 30 });
+    expect(fl2.code).toBe('HB1');
+    const fl3 = await floorSvc.create(manager, building._id, { name: 'Tầng trệt', capacity: 20 });
+    expect(fl3.code).toBe('TT');
+    const fl4 = await floorSvc.create(manager, building._id, { name: 'Tầng trệt', capacity: 20 });
+    expect(fl4.code).toBe('TT2');
   });
 
   test('giảm capacity dưới tổng zone → 409 FLOOR_CAPACITY_BELOW_ZONES', async () => {
