@@ -4,6 +4,7 @@ const Zone = require("../../models/building/Zone");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
+const { initialsCode } = require("../../utils/codeFromName");
 
 const list = async (user, buildingId) => {
   ensureManagerOwnsBuilding(user, buildingId);
@@ -22,17 +23,36 @@ const getById = async (user, buildingId, id) => {
   return floor;
 };
 
+// Code tầng sinh từ tên ("Tầng 1" → T1, "Hầm B1" → HB1), unique theo tòa nhà —
+// trùng thì thêm số đuôi (TT → TT2). Client chỉ đặt tên.
+const nextFloorCode = async (buildingId, name) => {
+  const base = initialsCode(name, { fallback: "F" });
+  const codes = new Set(await Floor.find({ building: buildingId }).distinct("code"));
+  if (!codes.has(base)) return base;
+  let n = 2;
+  while (codes.has(`${base}${n}`)) n += 1;
+  return `${base}${n}`;
+};
+
 const create = async (user, buildingId, payload) => {
   ensureManagerOwnsBuilding(user, buildingId);
-  const created = await Floor.create({
+  const doc = {
     building: buildingId,
-    code: String(payload.code || "").trim().toUpperCase(),
+    name: String(payload.name || "").trim(),
     capacity: Number(payload.capacity ?? 0),
     allowedVehicleTypes: Array.isArray(payload.allowedVehicleTypes)
       ? payload.allowedVehicleTypes
       : [],
     status: payload.status || "active",
-  });
+  };
+  let created;
+  try {
+    created = await Floor.create({ ...doc, code: await nextFloorCode(buildingId, doc.name) });
+  } catch (err) {
+    // Race hiếm: 2 request cùng sinh một code → thử lại một lần với code mới.
+    if (err?.code !== 11000) throw err;
+    created = await Floor.create({ ...doc, code: await nextFloorCode(buildingId, doc.name) });
+  }
   await writeAuditLog({
     actor: user,
     action: "CREATE_FLOOR",
@@ -53,10 +73,7 @@ const update = async (user, buildingId, id, payload) => {
   ["status"].forEach((k) => {
     if (payload[k] !== undefined) update[k] = payload[k];
   });
-  if (payload.code !== undefined)
-    update.code = String(payload.code).trim().toUpperCase();
-  if (payload.levelNumber !== undefined)
-    update.levelNumber = Number(payload.levelNumber);
+  if (payload.name !== undefined) update.name = String(payload.name).trim();
   if (payload.capacity !== undefined) update.capacity = Number(payload.capacity);
   if (Array.isArray(payload.allowedVehicleTypes))
     update.allowedVehicleTypes = payload.allowedVehicleTypes;

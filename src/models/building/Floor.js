@@ -8,12 +8,19 @@ const floorSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // code do hệ thống tự sinh (F1, F2…) — khóa nội bộ, không cho client đặt.
     code: {
       type: String,
       required: [true, "Floor code is required"],
       uppercase: true,
       trim: true,
       maxlength: 20,
+    },
+    name: {
+      type: String,
+      required: [true, "Floor name is required"],
+      trim: true,
+      maxlength: 80,
     },
     capacity: {
       type: Number,

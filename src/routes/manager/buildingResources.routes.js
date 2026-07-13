@@ -84,6 +84,8 @@ router
   .route("/slots")
   .get(slotController.list)
   .post(v.validateSlot, slotController.create);
+// Tạo hàng loạt — phải khai báo trước /slots/:id để "batch" không bị nuốt làm :id.
+router.post("/slots/batch", v.validateSlotBatch, slotController.createBatch);
 router
   .route("/slots/:id")
   .put(v.validateSlot, slotController.update)
