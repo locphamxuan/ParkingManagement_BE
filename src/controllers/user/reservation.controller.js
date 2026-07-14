@@ -4,6 +4,7 @@ const service = require('../../services/user/reservation.service');
 const { calculateReservationFee } = require('../../utils/feeEngine');
 const ReservationPolicy = require('../../models/policy/ReservationPolicy');
 const AppError = require('../../utils/AppError');
+const { clampPercent, DEFAULT_REFUND_PERCENT } = require('../../utils/reservationHold');
 
 const list = asyncHandler(async (req, res) => {
   const data = await service.list(req.user._id, req.query);
@@ -35,14 +36,18 @@ const cancel = asyncHandler(async (req, res) => {
 const getPolicy = asyncHandler(async (req, res) => {
   const { buildingId } = req.query;
   if (!buildingId) throw new AppError('buildingId is required', 400);
-  const policy = await ReservationPolicy.findOne({ building: buildingId, isActive: true });
+  // KHÔNG lọc isActive: luồng hủy/hoàn tiền đọc policy bất kể isActive (đặt chỗ đang có
+  // vẫn được honor khi tòa tắt nhận đặt mới) — lọc ở đây sẽ hiển thị % sai với thực hoàn.
+  // isActive trả kèm để client biết tòa có đang nhận đặt chỗ mới hay không.
+  const policy = await ReservationPolicy.findOne({ building: buildingId });
   sendSuccess(res, {
     data: {
       maxAdvanceDays: policy?.maxAdvanceDays ?? 7,
       maxDurationHours: policy?.maxDurationHours ?? 24,
       depositPercent: policy?.depositPercent ?? 15,
-      refundPercent: policy?.refundPercent ?? 80,
+      refundPercent: clampPercent(policy?.refundPercent, DEFAULT_REFUND_PERCENT),
       cancellationCutoffHours: policy?.cancellationCutoffHours ?? 0,
+      isActive: policy?.isActive ?? true,
     },
   });
 });

@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
-const { Reservation, ParkingSlot, User, Payment, WalletTransaction, ReservationPolicy } = require('../models');
+const { Reservation, ParkingSlot, User, Payment, WalletTransaction } = require('../models');
 const buildingWalletService = require('./manager/buildingWallet.service');
+const { getRefundPercent } = require('../utils/reservationHold');
 
 /**
  * NGUỒN DUY NHẤT cho nghiệp vụ "reservation hết hạn (no-show)".
@@ -44,12 +45,10 @@ const expireReservationWithRefund = async (reservationId) => {
         );
       }
 
-      // Hoàn refundPercent% cọc theo chính sách tòa nhà (0 = mất toàn bộ cọc).
+      // Hoàn refundPercent% cọc theo chính sách tòa nhà — helper chung để default (80)
+      // nhất quán với hủy chủ động và hủy gói dài hạn.
       const buildingId = reservation.building?._id || reservation.building;
-      const policy = await ReservationPolicy.findOne({ building: buildingId })
-        .select('refundPercent')
-        .session(mongoSession);
-      const refundPercent = Math.min(Math.max(Number(policy?.refundPercent ?? 0), 0), 100);
+      const refundPercent = await getRefundPercent(buildingId, mongoSession);
       const deposit = Number(reservation.fee || 0);
       const refundAmount = Math.round((deposit * refundPercent) / 100);
 

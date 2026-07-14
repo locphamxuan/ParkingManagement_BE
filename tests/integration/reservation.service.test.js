@@ -149,4 +149,23 @@ describe('cancel — hoàn tiền theo %', () => {
     expect(cancelled.status).toBe('cancelled');
     expect(cancelled.cancelledAt).toBeTruthy();
   });
+
+  test('policy bị xóa sau khi đặt → hủy vẫn hoàn theo DEFAULT 80% (không còn 0%)', async () => {
+    await seedSlots(3);
+    const { start, end } = bookingWindow();
+    const { reservation } = await reservationService.create(user._id, {
+      buildingId: building._id, vehicleTypeId: vehicleType._id,
+      plateNumber: '51F-12345', startTime: start, endTime: end,
+    });
+    // Tòa gỡ policy sau khi user đã đặt — default hoàn tiền phải thống nhất 80%
+    // (trước đây nhánh này dùng ?? 0 → user mất toàn bộ cọc dù app hứa 80%).
+    await ReservationPolicy.deleteMany({ building: building._id });
+
+    const outcome = await reservationService.cancel(user._id, reservation._id);
+    expect(outcome.refundPercent).toBe(80);
+    expect(outcome.refund).toBe(2400);
+
+    const after = await User.findById(user._id);
+    expect(after.walletBalance).toBe(99400);
+  });
 });
