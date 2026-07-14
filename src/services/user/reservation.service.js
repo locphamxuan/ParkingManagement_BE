@@ -13,6 +13,7 @@ const AppError = require('../../utils/AppError');
 const generateBookingCode = require('../../utils/generateBookingCode');
 const buildingWalletService = require('../manager/buildingWallet.service');
 const { calculateReservationFee } = require('../../utils/feeEngine');
+const { getRefundPercent, clampPercent, DEFAULT_REFUND_PERCENT } = require('../../utils/reservationHold');
 
 const CANCELLABLE_STATUSES = ['pending', 'confirmed'];
 
@@ -80,7 +81,10 @@ const list = async (userId, query = {}) => {
     ParkingSession.find({ reservation: { $in: reservationIds } }).lean(),
   ]);
 
-  const refundPctByBuilding = new Map(policies.map((p) => [String(p.building), p.refundPercent ?? 0]));
+  // Cùng default/clamp với luồng hủy (utils/reservationHold) — tòa chưa có policy vẫn hoàn 80%.
+  const refundPctByBuilding = new Map(
+    policies.map((p) => [String(p.building), clampPercent(p.refundPercent, DEFAULT_REFUND_PERCENT)])
+  );
   const refundAmtByRes = new Map(refundPayments.map((p) => [String(p.reservation), p.amount]));
 
   const sessionsMap = {};
@@ -93,7 +97,7 @@ const list = async (userId, query = {}) => {
     const session = sessionsMap[d._id.toString()] || null;
     return {
       ...d,
-      refundPercent: refundPctByBuilding.get(String(d.building?._id || d.building)) ?? 0,
+      refundPercent: refundPctByBuilding.get(String(d.building?._id || d.building)) ?? DEFAULT_REFUND_PERCENT,
       refundAmount: refundAmtByRes.get(String(d._id)) ?? 0,
       parkingSession: session
         ? {
@@ -418,9 +422,9 @@ const cancel = async (userId, id) => {
       }).session(mongoSession);
       const amountPaid = paidPayment?.amount ?? (Number(reservation.fee) || 0);
 
-      // % hoàn tiền do MANAGER cấu hình trong ReservationPolicy của tòa nhà.
-      const policy = await ReservationPolicy.findOne({ building: reservation.building }).session(mongoSession);
-      const refundPercent = Math.min(Math.max(Number(policy?.refundPercent ?? 0), 0), 100);
+      // % hoàn tiền do MANAGER cấu hình — helper chung để default (80) nhất quán
+      // với hủy gói dài hạn và endpoint public /users/reservations/policy.
+      const refundPercent = await getRefundPercent(reservation.building, mongoSession);
       const refund = Math.round((amountPaid * refundPercent) / 100);
 
       // Release the reserved slot (không ghi đè slot đang bảo trì).

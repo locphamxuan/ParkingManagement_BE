@@ -13,7 +13,21 @@
  *         schema: { type: string }
  *     responses:
  *       200:
- *         description: Chính sách đặt chỗ của building
+ *         description: Chính sách đặt chỗ của building (default khi chưa cấu hình — refundPercent 80; isActive cho biết tòa có đang nhận đặt mới)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     maxAdvanceDays: { type: integer, example: 7 }
+ *                     maxDurationHours: { type: integer, example: 24 }
+ *                     depositPercent: { type: number, example: 15 }
+ *                     refundPercent: { type: number, example: 80 }
+ *                     cancellationCutoffHours: { type: number, example: 0 }
+ *                     isActive: { type: boolean, example: true }
  *
  * /api/user/reservations/estimate:
  *   get:

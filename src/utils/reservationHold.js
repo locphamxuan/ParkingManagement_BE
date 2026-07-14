@@ -27,4 +27,34 @@ const getOverstayPenaltyPercent = async (buildingId, session = null) => {
   return Math.max(Number(policy?.overstayPenaltyPercent ?? 0) || 0, 0);
 };
 
-module.exports = { getMaxHoldMs, getOverstayPenaltyPercent, DEFAULT_MAX_HOLD_MINUTES };
+// Default duy nhất toàn hệ thống khi tòa CHƯA có ReservationPolicy — khớp DEFAULTS
+// của manager/reservationPolicy.service và endpoint public /users/reservations/policy.
+// (Trước đây hủy reservation/expire dùng 0 còn hủy gói dùng 80 → user được hứa 80%
+// nhưng thực nhận 0đ ở tòa chưa cấu hình.)
+const DEFAULT_REFUND_PERCENT = 80;
+
+const clampPercent = (value, fallback) => {
+  const n = Number(value ?? fallback);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(n, 0), 100);
+};
+
+/**
+ * % hoàn tiền khi hủy (reservation + gói dài hạn) theo ReservationPolicy của tòa.
+ * Dùng chung cho MỌI luồng hoàn tiền để default/clamp luôn nhất quán.
+ */
+const getRefundPercent = async (buildingId, session = null) => {
+  const policy = await ReservationPolicy.findOne({ building: buildingId })
+    .select('refundPercent')
+    .session(session);
+  return clampPercent(policy?.refundPercent, DEFAULT_REFUND_PERCENT);
+};
+
+module.exports = {
+  getMaxHoldMs,
+  getOverstayPenaltyPercent,
+  getRefundPercent,
+  clampPercent,
+  DEFAULT_MAX_HOLD_MINUTES,
+  DEFAULT_REFUND_PERCENT,
+};
