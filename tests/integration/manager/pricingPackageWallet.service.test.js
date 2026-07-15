@@ -9,6 +9,7 @@ const feedbackSvc = require('../../../src/services/manager/feedback.service');
 const PricePolicy = require('../../../src/models/policy/PricePolicy');
 const Feedback = require('../../../src/models/operations/Feedback');
 const ParkingSession = require('../../../src/models/operations/ParkingSession');
+const Payment = require('../../../src/models/finance/Payment');
 const User = require('../../../src/models/user/User');
 const longTermSvc = require('../../../src/services/user/longTerm.service');
 
@@ -100,6 +101,36 @@ describe('buildingWallet.service', () => {
     await walletSvc.credit(building._id, 1000, 'parking_fee', null, null);
     await expect(walletSvc.debit(building._id, 5000, 'refund', null, null, null))
       .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  test('getRevenueBreakdown: gộp theo ngày × phương thức, allTimeTotal loại topup/failed', async () => {
+    const pay = async ({ type = 'session', method = 'cash', amount, status = 'success', daysAgo = 0 }) => {
+      const p = await Payment.create({ building: building._id, type, method, amount, status });
+      if (daysAgo) {
+        const d = new Date(); d.setDate(d.getDate() - daysAgo); d.setHours(12, 0, 0, 0);
+        // createdAt là immutable với Mongoose timestamps → bypass qua raw driver.
+        await Payment.collection.updateOne({ _id: p._id }, { $set: { createdAt: d } });
+      }
+      return p;
+    };
+    // Hôm nay: 3 phương thức doanh thu + 1 topup + 1 failed (phải bị loại).
+    await pay({ method: 'cash', amount: 100000 });
+    await pay({ method: 'wallet', amount: 50000 });
+    await pay({ method: 'qr', amount: 30000 });
+    await pay({ type: 'topup', method: 'payos', amount: 999999 });
+    await pay({ method: 'cash', amount: 77777, status: 'failed' });
+    // Hôm qua: 1 giao dịch tiền mặt.
+    await pay({ method: 'cash', amount: 20000, daysAgo: 1 });
+
+    const res = await walletSvc.getRevenueBreakdown(building._id);
+
+    expect(res.allTimeTotal).toBe(200000); // 100k+50k+30k+20k (loại topup + failed)
+    expect(res.days).toHaveLength(2);
+    const [today, yesterday] = res.days; // sort ngày giảm dần → hôm nay trước
+    expect(today.total).toBe(180000);
+    expect(today.byMethod).toEqual({ cash: 100000, wallet: 50000, online: 30000 });
+    expect(yesterday.total).toBe(20000);
+    expect(yesterday.byMethod.cash).toBe(20000);
   });
 });
 
