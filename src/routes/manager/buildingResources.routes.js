@@ -31,6 +31,7 @@ router.use(
 router.get("/wallet", buildingWalletController.getWallet);
 router.get("/wallet/transactions", buildingWalletController.listTransactions);
 router.get("/wallet/daily-revenue", buildingWalletController.getDailyRevenue);
+router.get("/wallet/revenue-breakdown", buildingWalletController.getRevenueBreakdown);
 
 // Giờ mở/đóng cửa của tòa nhà.
 router.put("/operating-hours", buildingController.updateOperatingHours);

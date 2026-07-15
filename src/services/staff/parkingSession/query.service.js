@@ -246,6 +246,15 @@ const listFreeSlots = async (staffUser, buildingId, opts = {}) => {
     .populate('zone', 'code usageType')
     .populate('vehicleType', 'name code');
 
+  // Bối cảnh sức chứa (KHÔNG lọc theo đối tượng) để FE phân biệt 3 trạng thái khi
+  // pool đúng đối tượng rỗng: (a) tòa không có slot cố định → đỗ theo sức chứa;
+  // (b) tòa còn slot trống nhưng thuộc đối tượng khác → vãng lai KHÔNG được lấn;
+  // (c) hết sạch slot trống → đầy. totalAvailable đếm slot 'available' toàn tòa.
+  const [totalSlots, totalAvailable] = await Promise.all([
+    ParkingSlot.countDocuments({ building: buildingId }),
+    ParkingSlot.countDocuments({ building: buildingId, status: 'available' }),
+  ]);
+
   // Xếp: đúng loại xe camera nhận diện trước → đúng đối tượng (best-fit) → theo code.
   const usageRank = (u) => {
     const i = chain.indexOf(u);
@@ -263,6 +272,8 @@ const listFreeSlots = async (staffUser, buildingId, opts = {}) => {
   return {
     items: slots,
     suggestedSlotId: slots[0]?._id || null,
+    totalSlots,
+    totalAvailable,
   };
 };
 

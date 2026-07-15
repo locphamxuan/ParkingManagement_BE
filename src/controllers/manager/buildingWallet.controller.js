@@ -19,6 +19,14 @@ const getDailyRevenue = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
+const getRevenueBreakdown = asyncHandler(async (req, res) => {
+  const data = await service.getRevenueBreakdown(req.params.buildingId, {
+    from: req.query.from,
+    to: req.query.to,
+  });
+  sendSuccess(res, { data });
+});
+
 // Initiate PayOS top-up for building wallet
 const initiateTopup = asyncHandler(async (req, res) => {
   const { buildingId } = req.params;
@@ -36,6 +44,6 @@ const verifyTopup = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  getWallet, listTransactions, getDailyRevenue,
+  getWallet, listTransactions, getDailyRevenue, getRevenueBreakdown,
   initiateTopup, verifyTopup,
 };
