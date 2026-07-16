@@ -95,11 +95,6 @@ const parkingSessionSchema = new mongoose.Schema(
       default: "active",
     },
     note: { type: String, trim: true, default: "" },
-    reservation: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Reservation",
-      default: null,
-    },
   },
   { timestamps: true }
 );

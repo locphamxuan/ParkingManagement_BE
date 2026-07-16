@@ -90,22 +90,20 @@ describe('gate.service', () => {
   });
 });
 
-describe('reservationPolicy.service', () => {
+describe('reservationPolicy.service (refund policy)', () => {
   test('get tạo policy mặc định nếu chưa có', async () => {
     const p = await rpSvc.get(manager, building._id);
-    expect(p.depositPercent).toBe(15);
     expect(p.refundPercent).toBe(80);
   });
 
   test('upsert cập nhật % hợp lệ', async () => {
     await rpSvc.get(manager, building._id);
-    const p = await rpSvc.upsert(manager, building._id, { depositPercent: 30, refundPercent: 50 });
-    expect(p.depositPercent).toBe(30);
+    const p = await rpSvc.upsert(manager, building._id, { refundPercent: 50 });
     expect(p.refundPercent).toBe(50);
   });
 
   test('% ngoài [0,100] → 400', async () => {
-    await expect(rpSvc.upsert(manager, building._id, { depositPercent: 150 }))
+    await expect(rpSvc.upsert(manager, building._id, { refundPercent: 150 }))
       .rejects.toMatchObject({ statusCode: 400 });
   });
 });

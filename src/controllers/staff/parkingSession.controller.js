@@ -87,15 +87,6 @@ const verifyPayment = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /api/staff/parking-sessions/my-shift-revenue
- * Doanh thu CA của nhân viên cổng ra: tổng tiền đã thu hôm nay + tách phương thức.
- */
-const myShiftRevenue = asyncHandler(async (req, res) => {
-  const data = await parkingSessionService.getMyShiftRevenue(req.user, req.query);
-  sendSuccess(res, { data });
-});
-
-/**
  * GET /api/staff/parking-sessions/my-checkins
  * Lịch sử xe vào hôm nay của nhân viên cổng VÀO — có location (cổng vào, tầng, ô đỗ).
  */
@@ -104,4 +95,4 @@ const myCheckIns = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: { items } });
 });
 
-module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment, myShiftRevenue, myCheckIns };
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment, myCheckIns };

@@ -59,10 +59,18 @@ const listFloorsWithAvailability = asyncHandler(async (req, res) => {
     .populate('pricePolicy', 'name hourlyRate type')
     .sort('code');
 
-  // Đếm slots theo status cho mỗi tầng
+  // Đếm slots theo status cho mỗi tầng. Luồng mua gói (usage=subscriber) chỉ đếm ô
+  // thuộc dãy 'subscriber' (+ đúng loại xe nếu có) để user thấy đúng số chỗ gói còn trống.
   const floorIds = floors.map((f) => f._id);
+  const countMatch = { floor: { $in: floorIds } };
+  if (req.query.usage === 'subscriber') {
+    countMatch.usageType = 'subscriber';
+    if (vehicleTypeId && mongoose.isValidObjectId(vehicleTypeId)) {
+      countMatch.vehicleType = new mongoose.Types.ObjectId(vehicleTypeId);
+    }
+  }
   const slotCounts = await ParkingSlot.aggregate([
-    { $match: { floor: { $in: floorIds } } },
+    { $match: countMatch },
     { $group: { _id: { floor: '$floor', status: '$status' }, count: { $sum: 1 } } },
   ]);
 
@@ -102,18 +110,37 @@ const listSlotsForFloor = asyncHandler(async (req, res) => {
   const floor = await Floor.findOne({ _id: floorId, building: building._id });
   if (!floor) throw new AppError('Floor not found', 404);
 
+  // Luồng MUA GÓI (usage=subscriber): chỉ hiển thị ô thuộc dãy 'subscriber' đúng loại
+  // xe của gói — các ô khác KHÔNG trả về. Luồng khác: hiển thị mọi ô (trừ ô subscriber
+  // không cho chọn).
+  const usage = req.query.usage;
+  const vehicleTypeId = req.query.vehicleTypeId;
+
+  const slotFilter = { floor: floorId };
+  if (usage === 'subscriber') {
+    slotFilter.usageType = 'subscriber';
+    if (vehicleTypeId && mongoose.isValidObjectId(vehicleTypeId)) {
+      slotFilter.vehicleType = vehicleTypeId;
+    }
+  }
+
   // Lọc theo floor là đủ (floor đã thuộc building). KHÔNG thêm điều kiện building
   // vào slot — nếu trường building của slot bị lệch dữ liệu, danh sách sẽ rỗng dù
-  // tầng vẫn đếm ra số ô (aggregate đếm theo floor). Đây là nguyên nhân "ô không hiện".
-  // Loại xe + đối tượng của ô đỗ lấy theo DÃY (zone), denormalize sẵn trên slot.
-  const slots = await ParkingSlot.find({ floor: floorId })
+  // tầng vẫn đếm ra số ô. Loại xe + đối tượng của ô lấy theo DÃY (zone), denormalize sẵn.
+  const slots = await ParkingSlot.find(slotFilter)
     .select('_id code status reservable vehicleType usageType')
     .populate('vehicleType', 'name code')
     .sort('code');
 
   const slotsOut = slots.map((s) => {
-    // Ô thuộc dãy GÓI DÀI HẠN (subscriber) KHÔNG cho khách đặt chỗ — chỉ dành cho gói.
-    const bookable = s.usageType !== 'subscriber';
+    let bookable;
+    if (usage === 'subscriber') {
+      // Ô dãy gói được chọn khi còn trống (giữ chỗ cố định lúc mua gói).
+      bookable = s.usageType === 'subscriber';
+    } else {
+      // Ô thuộc dãy GÓI DÀI HẠN (subscriber) KHÔNG cho khách thường đặt chỗ.
+      bookable = s.usageType !== 'subscriber';
+    }
     return {
       _id: s._id,
       code: s.code,

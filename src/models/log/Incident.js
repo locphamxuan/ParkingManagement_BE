@@ -27,6 +27,16 @@ const incidentSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // Ô đỗ liên quan (vd user báo bị chiếm slot cố định của gói).
+    slot: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ParkingSlot',
+      default: null,
+    },
+    // Biển số PHƯƠNG TIỆN VI PHẠM (khi sự cố là "có người đậu vào slot của tôi").
+    violatorPlate: { type: String, trim: true, uppercase: true, maxlength: 20, default: '' },
+    // Ghi chú xử lý của staff/manager khi giải quyết sự cố.
+    resolutionNote: { type: String, trim: true, maxlength: 1000, default: '' },
     severity: {
       type: String,
       enum: INCIDENT_SEVERITY,

@@ -14,9 +14,6 @@ router.get("/lookup-plate/:plate", authorizeBuildingAccess, parkingSessionContro
 // Free slots of a building (for assigning a long-term package vehicle at check-in)
 router.get("/free-slots", authorizeBuildingAccess, parkingSessionController.listFreeSlots);
 
-// Doanh thu ca của nhân viên cổng ra (tiền đã thu hôm nay) — đặt trước "/:id"
-router.get("/my-shift-revenue", authorizeBuildingAccess, parkingSessionController.myShiftRevenue);
-
 // Lịch sử xe vào hôm nay của nhân viên cổng vào — có location (cổng vào, tầng, ô đỗ)
 router.get("/my-checkins", authorizeBuildingAccess, parkingSessionController.myCheckIns);
 

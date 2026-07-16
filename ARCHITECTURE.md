@@ -75,6 +75,7 @@ mọi thao tác nhạy cảm ghi `AuditLog` (qua `staffScope.logAudit`).
   chưa có ReservationPolicy — có test chốt hành vi này); gia hạn cộng dồn từ
   `endDate`, cho phép trễ ≤ 7 ngày.
 
+
 ### Check-in / Check-out (staff)
 - Staff phải có **ca hôm nay** (`StaffShift`) tại building; checkout chấp nhận ca
   hôm qua (xe qua đêm). Building có `operatingHours` thì chặn ngoài giờ.
@@ -121,6 +122,7 @@ best-effort (lỗi SMTP không rollback nghiệp vụ).
 - Chạy: `npm test` (jest `--runInBand`). Test là **spec hành vi tiền bạc** — sửa
   logic refund/fee phải cập nhật test tương ứng trong cùng PR.
 
+
 ## 6. Nợ kỹ thuật / hướng cải thiện
 1. `docs/swagger.paths.js` + các file `*.swagger.js` (~2.3k dòng) — cân nhắc sinh
    từ JSDoc hoặc tách theo module để đỡ trôi so với route thật.
@@ -129,3 +131,5 @@ best-effort (lỗi SMTP không rollback nghiệp vụ).
 3. Chuẩn hóa fallback `refundPercent` (reservation: 0, long-term: 80) — hành vi
    đã chốt bằng test nhưng nên đưa cả hai về `ReservationPolicy` bắt buộc khi seed
    building mới.
+
+

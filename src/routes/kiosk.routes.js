@@ -1,10 +1,10 @@
 const express = require('express');
 const kioskController = require('../controllers/kiosk.controller');
 
-// Public gate-kiosk routes — no auth: a reservation driver self-admits by
+// Public gate-kiosk routes — no auth: a long-term package driver self-admits by
 // scanning the vehicle QR, without going through a staff member.
 const router = express.Router();
 
-router.post('/reservation-checkin', kioskController.reservationCheckIn);
+router.post('/package-checkin', kioskController.packageCheckIn);
 
 module.exports = router;

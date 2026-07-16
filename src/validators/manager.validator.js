@@ -75,7 +75,7 @@ const validateSlotStatus = wrap((req) => {
   }
 });
 
-const ZONE_USAGE_TYPES = ["walk_in", "registered", "subscriber", "reserved"];
+const ZONE_USAGE_TYPES = ["walk_in", "registered", "subscriber"];
 const ZONE_STATUS = ["active", "inactive", "maintenance"];
 
 const validateZone = wrap((req) => {
@@ -143,27 +143,13 @@ const validatePackage = wrap((req) => {
     throw new AppError("maxHoursPerDay must be >= 0", 400);
 });
 
+// Chính sách hoàn tiền gói (trước là reservation policy — chỉ còn refundPercent).
 const validateReservationPolicy = wrap((req) => {
   if (
     req.body.refundPercent !== undefined &&
     (req.body.refundPercent < 0 || req.body.refundPercent > 100)
   )
     throw new AppError("refundPercent must be 0..100", 400);
-  if (
-    req.body.depositPercent !== undefined &&
-    (req.body.depositPercent < 0 || req.body.depositPercent > 100)
-  )
-    throw new AppError("depositPercent must be 0..100", 400);
-  if (req.body.maxHoldMinutes !== undefined && Number(req.body.maxHoldMinutes) < 1)
-    throw new AppError("maxHoldMinutes must be >= 1", 400);
-  if (req.body.maxAdvanceDays !== undefined && Number(req.body.maxAdvanceDays) < 1)
-    throw new AppError("maxAdvanceDays must be >= 1", 400);
-  if (req.body.maxDurationHours !== undefined && Number(req.body.maxDurationHours) < 1)
-    throw new AppError("maxDurationHours must be >= 1", 400);
-  if (req.body.overstayPenaltyPercent !== undefined && Number(req.body.overstayPenaltyPercent) < 0)
-    throw new AppError("overstayPenaltyPercent must be >= 0", 400);
-  if (req.body.cancellationCutoffHours !== undefined && Number(req.body.cancellationCutoffHours) < 0)
-    throw new AppError("cancellationCutoffHours must be >= 0", 400);
 });
 
 const validateShift = wrap((req) => {

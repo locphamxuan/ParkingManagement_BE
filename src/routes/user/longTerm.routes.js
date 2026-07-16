@@ -5,8 +5,10 @@ const { validateSubscribe, validateRenew } = require('../../validators/user/long
 const router = express.Router();
 
 router.get('/packages', controller.listPackages);
+router.get('/packages/:id', controller.getPackage);
 router.post('/subscriptions', validateSubscribe, controller.subscribe);
 router.get('/subscriptions', controller.listSubscriptions);
+router.get('/subscriptions/:id', controller.getSubscription);
 router.post('/subscriptions/:id/cancel', controller.cancelSubscription);
 router.post('/subscriptions/:id/renew', validateRenew, controller.renewSubscription);
 

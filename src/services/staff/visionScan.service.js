@@ -75,12 +75,13 @@ const scanVehicleImage = async (image) => {
   // Demo Mock Mode Fallback when Gemini API key is missing
   if (!env.geminiApiKey) {
     try {
-      const Reservation = require('../../models/operations/Reservation');
-      const activeRes = await Reservation.findOne({ status: { $in: ['pending', 'confirmed', 'checked_in'] } })
+      // Demo: ưu tiên biển số của một gói dài hạn đang hoạt động để test luồng gói.
+      const LongTermSubscription = require('../../models/policy/LongTermSubscription');
+      const activeSub = await LongTermSubscription.findOne({ status: 'active' })
         .sort({ updatedAt: -1 })
         .lean();
-      
-      const targetPlate = activeRes ? activeRes.plateNumber : '59G2-038.80';
+
+      const targetPlate = activeSub ? activeSub.plateNumber : '59G2-038.80';
       return {
         plateNumber: normalizePlate(targetPlate),
         plateConfidence: 0.99,

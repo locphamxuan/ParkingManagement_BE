@@ -1,4 +1,4 @@
-const { LongTermSubscription, User, Notification } = require('../models');
+const { LongTermSubscription, User, Notification, ParkingSlot } = require('../models');
 const logger = require("../utils/logger");
 const { sendNotificationEmail } = require('../utils/email');
 const { acquireLock, releaseLock } = require('../utils/jobLock');
@@ -112,6 +112,15 @@ const expireActiveSubscriptions = async () => {
       { _id: sub._id },
       { $set: { status: 'expired' } },
     );
+
+    // Nhả slot cố định (nếu có) về 'available' — chỉ nhả ô đang giữ chỗ ('reserved'),
+    // không đụng ô xe đang đỗ ('occupied') hay 'maintenance'.
+    if (sub.slot) {
+      await ParkingSlot.updateOne(
+        { _id: sub.slot, status: 'reserved' },
+        { $set: { status: 'available' } },
+      );
+    }
 
     const pkgName = sub.package?.name || 'long-term package';
     const message =

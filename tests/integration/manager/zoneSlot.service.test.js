@@ -25,7 +25,7 @@ describe('zone.service', () => {
     expect(z.usageType).toBe('walk_in');
 
     const z2 = await zoneSvc.create(manager, building._id, {
-      floor: floor._id, name: 'Dãy cho khách vãng lai', vehicleType: vt._id, usageType: 'reserved', capacity: 2,
+      floor: floor._id, name: 'Dãy cho khách vãng lai', vehicleType: vt._id, usageType: 'walk_in', capacity: 2,
     });
     expect(z2.code).toBe('VL2');
   });
@@ -35,7 +35,7 @@ describe('zone.service', () => {
       floor: floor._id, name: 'Dãy A', vehicleType: vt._id, usageType: 'walk_in', capacity: 8,
     });
     await expect(zoneSvc.create(manager, building._id, {
-      floor: floor._id, name: 'Dãy B', vehicleType: vt._id, usageType: 'reserved', capacity: 5,
+      floor: floor._id, name: 'Dãy B', vehicleType: vt._id, usageType: 'walk_in', capacity: 5,
     })).rejects.toMatchObject({ errorCode: 'ZONE_CAPACITY_EXCEEDS_FLOOR' });
   });
 

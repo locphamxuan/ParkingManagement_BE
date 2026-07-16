@@ -35,7 +35,26 @@ const verifyTopup = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: result });
 });
 
+// Tiền mặt chờ xác nhận
+const listPendingCash = asyncHandler(async (req, res) => {
+  const data = await service.listPendingCash(req.params.buildingId, req.query);
+  sendSuccess(res, { data });
+});
+
+// Manager "Thu nhận" 1 khoản tiền mặt → cộng vào ví building
+const confirmCash = asyncHandler(async (req, res) => {
+  const payment = await service.confirmCash(req.params.buildingId, req.params.paymentId, req.user._id);
+  sendSuccess(res, { message: 'Đã thu nhận khoản tiền mặt vào ví tòa nhà', data: { payment } });
+});
+
+// Toàn bộ dòng tiền (Payment) của building theo phương thức/trạng thái
+const listPayments = asyncHandler(async (req, res) => {
+  const data = await service.listPayments(req.params.buildingId, req.query);
+  sendSuccess(res, { data });
+});
+
 module.exports = {
   getWallet, listTransactions, getDailyRevenue,
   initiateTopup, verifyTopup,
+  listPendingCash, confirmCash, listPayments,
 };

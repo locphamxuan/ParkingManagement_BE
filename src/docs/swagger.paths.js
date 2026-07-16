@@ -373,15 +373,11 @@
  *
  *     ReservationPolicy:
  *       type: object
+ *       description: Package refund policy (legacy model name kept after reservation removal)
  *       properties:
  *         _id: { $ref: '#/components/schemas/ObjectId' }
  *         building: { $ref: '#/components/schemas/ObjectId' }
- *         maxHoldMinutes: { type: number, example: 30 }
- *         longTermGraceDays: { type: number, example: 7 }
- *         maxAdvanceDays: { type: number, example: 7 }
- *         maxDurationHours: { type: number, example: 24 }
  *         refundPercent: { type: number, example: 80 }
- *         depositPercent: { type: number, example: 15 }
  *         isActive: { type: boolean, example: true }
  *         createdAt: { type: string, format: date-time, example: '2026-06-01T08:00:00.000Z' }
  *         updatedAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }

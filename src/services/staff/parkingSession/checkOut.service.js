@@ -4,7 +4,6 @@ const AppError = require('../../../utils/AppError');
 const {
   ParkingSession,
   ParkingSlot,
-  Reservation,
   LongTermSubscription,
   Payment,
   WalletTransaction,
@@ -15,7 +14,6 @@ const {
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const buildingWalletService = require('../../manager/buildingWallet.service');
 const { normalizePlate } = require('../../../utils/plate.util');
-const { getOverstayPenaltyPercent } = require('../../../utils/reservationHold');
 const { calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { sendNotificationEmail } = require('../../../utils/email');
@@ -30,7 +28,6 @@ async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
   }
 
   const parkingSession = await ParkingSession.findById(sessionId)
-    .populate('reservation')
     .populate('vehicleType', 'code name')
     .populate({ path: 'slot', select: 'floor', populate: { path: 'floor', select: '_id' } })
     .session(mongoSession);
@@ -205,12 +202,20 @@ async function _handleLongTermCheckout(user, parkingSession, payload, exitPlateI
   ].filter(Boolean).join(' | ');
   await parkingSession.save({ session: mongoSession });
 
-  // Gói floating: nhả slot về 'available' khi xe rời (giống session thường).
+  // Nhả slot khi xe rời. Slot CỐ ĐỊNH của gói → trả về 'reserved' (giữ riêng cả kỳ);
+  // slot floating → 'available' (giống session thường).
   if (parkingSession.slot) {
     const ltSlotId = parkingSession.slot._id || parkingSession.slot;
     const ltSlot = await ParkingSlot.findById(ltSlotId).session(mongoSession);
     if (ltSlot && ltSlot.status !== 'maintenance') {
-      ltSlot.status = 'available';
+      let isFixedSlot = false;
+      if (subMatch) {
+        const sub = await LongTermSubscription.findById(subMatch[1]).select('slot status').session(mongoSession);
+        if (sub && sub.slot && String(sub.slot) === String(ltSlotId) && sub.status === 'active') {
+          isFixedSlot = true;
+        }
+      }
+      ltSlot.status = isFixedSlot ? 'reserved' : 'available';
       await ltSlot.save({ session: mongoSession });
     }
   }
@@ -234,98 +239,44 @@ async function _handleLongTermCheckout(user, parkingSession, payload, exitPlateI
   return postCommitEmail;
 }
 
-// Tính phí cho checkout thường (reservation hoặc walk-in).
-// Returns { fee, feeMethod, walletUserId, isReservationCheckout, linkedReservation }.
-async function _computeRegularFee(parkingSession, payload, mongoSession) {
-  const linkedReservation = parkingSession.reservation;
-  const isReservationCheckout = Boolean(linkedReservation);
-
-  let fee;
-  let feeMethod;
-  let walletUserId = null;
-
-  if (isReservationCheckout) {
-    // Thu phần CÒN LẠI = tổng phí đã ghi khi đặt − tiền cọc đã thu.
-    // (cọc = depositPercent% do manager set; còn lại = 100 − depositPercent%).
-    // Đặt bao nhiêu tiếng thu đủ bấy nhiêu — checkout sớm vẫn thu đủ tiền đã đặt.
-    const estimatedFee = Number(linkedReservation.estimatedFee || 0);
-    const deposit = Number(linkedReservation.fee || 0);
-    fee = Math.max(0, estimatedFee - deposit);
-
+// Tính phí cho checkout thường (khách vãng lai / user thường).
+// Returns { fee, feeMethod }.
+async function _computeRegularFee(parkingSession, payload) {
+  const feeMethod = payload.paymentMethod || 'cash';
+  let fee = Number(parkingSession.fee || 0);
+  if (!fee) {
     const now = new Date();
     const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
-
-    // EARLY CHECK-IN: vào trước startTime → tính thêm phần sớm theo giá thường.
-    const startTime = linkedReservation.startTime ? new Date(linkedReservation.startTime) : null;
-    const actualEntry = parkingSession.entryTime ? new Date(parkingSession.entryTime) : null;
-    if (startTime && actualEntry && actualEntry.getTime() < startTime.getTime()) {
-      let earlyFee = await calculateParkingFee(parkingSession.building, vtId, actualEntry, startTime);
-      if (!earlyFee || earlyFee <= 0) {
-        const kind = vehicleKindFromType(parkingSession.vehicleType);
-        const hours = Math.max(1, Math.ceil((startTime.getTime() - actualEntry.getTime()) / (1000 * 60 * 60)));
-        earlyFee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
-      }
-      fee += earlyFee;
-    }
-
-    // OVERSTAY: đỗ quá endTime đã đặt → tính thêm phần vượt theo giá thường,
-    // cộng phụ phí phạt overstayPenaltyPercent do manager cấu hình trong
-    // ReservationPolicy (0 = không phạt).
-    const endTime = linkedReservation.endTime ? new Date(linkedReservation.endTime) : null;
-    if (endTime && now.getTime() > endTime.getTime()) {
-      let overstayFee = await calculateParkingFee(parkingSession.building, vtId, endTime, now);
-      if (!overstayFee || overstayFee <= 0) {
-        const kind = vehicleKindFromType(parkingSession.vehicleType);
-        const hours = Math.max(1, Math.ceil((now.getTime() - endTime.getTime()) / (1000 * 60 * 60)));
-        overstayFee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
-      }
-      const penaltyPercent = await getOverstayPenaltyPercent(parkingSession.building, mongoSession);
-      if (penaltyPercent > 0) {
-        overstayFee = Math.ceil(overstayFee * (1 + penaltyPercent / 100));
-      }
-      fee += overstayFee;
-    }
-
-    // Thanh toán phần còn lại: staff chọn cash/payos/wallet (mặc định wallet).
-    feeMethod = payload.paymentMethod || 'wallet';
-    walletUserId = linkedReservation.user;
-  } else {
-    feeMethod = payload.paymentMethod || 'cash';
-    fee = Number(parkingSession.fee || 0);
-    if (!fee) {
-      const now = new Date();
-      const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
-      // Price by vehicle type via PricePolicy (peak/regular split).
-      fee = await calculateParkingFee(parkingSession.building, vtId, parkingSession.entryTime, now);
-      if (!fee || fee <= 0) {
-        // No PricePolicy configured → fallback to a flat hourly rate by vehicle kind.
-        const kind = vehicleKindFromType(parkingSession.vehicleType);
-        const hours = Math.max(1, Math.ceil((now.getTime() - new Date(parkingSession.entryTime).getTime()) / (1000 * 60 * 60)));
-        fee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
-      }
-    }
-
-    if (payload.adjustedFee !== undefined && payload.adjustedFee !== null) {
-      if (!payload.adjustmentReason) {
-        throw new AppError('adjustmentReason is required when adjustedFee is provided', 400, 'ADJUSTMENT_REASON_REQUIRED');
-      }
-      if (Number.isNaN(Number(payload.adjustedFee)) || Number(payload.adjustedFee) < 0) {
-        throw new AppError('adjustedFee must be a non-negative number', 400, 'INVALID_ADJUSTED_FEE');
-      }
-      fee = Number(payload.adjustedFee);
-    }
-
-    if (payload.forceCheckoutReason) {
-      const surcharge = Math.max(1, Math.ceil(fee * 0.25));
-      fee += surcharge;
+    // Price by vehicle type via PricePolicy (peak/regular split).
+    fee = await calculateParkingFee(parkingSession.building, vtId, parkingSession.entryTime, now);
+    if (!fee || fee <= 0) {
+      // No PricePolicy configured → fallback to a flat hourly rate by vehicle kind.
+      const kind = vehicleKindFromType(parkingSession.vehicleType);
+      const hours = Math.max(1, Math.ceil((now.getTime() - new Date(parkingSession.entryTime).getTime()) / (1000 * 60 * 60)));
+      fee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
     }
   }
 
-  return { fee, feeMethod, walletUserId, isReservationCheckout, linkedReservation };
+  if (payload.adjustedFee !== undefined && payload.adjustedFee !== null) {
+    if (!payload.adjustmentReason) {
+      throw new AppError('adjustmentReason is required when adjustedFee is provided', 400, 'ADJUSTMENT_REASON_REQUIRED');
+    }
+    if (Number.isNaN(Number(payload.adjustedFee)) || Number(payload.adjustedFee) < 0) {
+      throw new AppError('adjustedFee must be a non-negative number', 400, 'INVALID_ADJUSTED_FEE');
+    }
+    fee = Number(payload.adjustedFee);
+  }
+
+  if (payload.forceCheckoutReason) {
+    const surcharge = Math.max(1, Math.ceil(fee * 0.25));
+    fee += surcharge;
+  }
+
+  return { fee, feeMethod };
 }
 
-// Trừ ví người dùng (reservation checkout hoặc walk-in chọn wallet).
-async function _processWalletDebit(fee, targetUserId, isReservationCheckout, parkingSession, linkedReservation, mongoSession) {
+// Trừ ví người dùng khi khách chọn thanh toán bằng ví lúc lấy xe.
+async function _processWalletDebit(fee, targetUserId, parkingSession, mongoSession) {
   if (!targetUserId) {
     throw new AppError('No user account linked to this session for wallet payment', 400);
   }
@@ -348,30 +299,30 @@ async function _processWalletDebit(fee, targetUserId, isReservationCheckout, par
       amount: fee,
       balanceAfter: paidUser.walletBalance,
       status: 'success',
-      reason: isReservationCheckout ? 'reservation_checkout' : 'parking_checkout',
-      metadata: isReservationCheckout
-        ? { sessionId: `${parkingSession._id}`, reservationId: `${linkedReservation._id}`, reservationCode: linkedReservation.code }
-        : { sessionId: `${parkingSession._id}` },
+      reason: 'parking_checkout',
+      metadata: { sessionId: `${parkingSession._id}` },
     }],
     { session: mongoSession },
   );
 }
 
 // Tạo bản ghi Payment và cộng vào ví tòa nhà.
-async function _createPaymentRecord(parkingSession, fee, feeMethod, isReservationCheckout, linkedReservation, walletUserId, staff, payload, mongoSession) {
+// Tiền mặt (cash) của khách vãng lai/user thường: KHÔNG cộng ví ngay mà để 'pending' —
+// manager sẽ "Thu nhận" ở tab Ví để xác nhận đã nhận tiền → lúc đó mới cộng ví building.
+// Các phương thức khác (wallet/qr/...) đã thu điện tử nên 'success' + cộng ví ngay.
+async function _createPaymentRecord(parkingSession, fee, feeMethod, staff, payload, mongoSession) {
+  const isCashPending = feeMethod === 'cash';
   const [payment] = await Payment.create(
     [{
       building: parkingSession.building,
       parkingSession: parkingSession._id,
-      reservation: isReservationCheckout ? linkedReservation._id : null,
       type: 'session',
       method: feeMethod,
       amount: fee,
-      status: 'success',
-      user: (walletUserId || parkingSession.user) || null,
+      status: isCashPending ? 'pending' : 'success',
+      user: parkingSession.user || null,
       staff: staff._id,
       note: [
-        isReservationCheckout ? `reservation_remaining:${linkedReservation.code}` : null,
         payload.adjustmentReason,
         payload.forceCheckoutReason,
       ].filter(Boolean).join(' | '),
@@ -379,11 +330,11 @@ async function _createPaymentRecord(parkingSession, fee, feeMethod, isReservatio
     { session: mongoSession },
   );
 
-  if (fee > 0) {
+  if (fee > 0 && !isCashPending) {
     await buildingWalletService.credit(
       parkingSession.building,
       fee,
-      isReservationCheckout ? 'reservation_fee' : 'parking_fee',
+      'parking_fee',
       payment._id,
       mongoSession,
     );
@@ -392,16 +343,8 @@ async function _createPaymentRecord(parkingSession, fee, feeMethod, isReservatio
   return payment;
 }
 
-// Cập nhật trạng thái session, nhả slot, đánh dấu reservation completed, ghi audit.
-async function _finalizeSession(user, parkingSession, payload, fee, feeMethod, isReservationCheckout, linkedReservation, exitPlateImage, exitPortraitImage, mongoSession) {
-  if (isReservationCheckout) {
-    await Reservation.findByIdAndUpdate(
-      linkedReservation._id,
-      { status: 'completed' },
-      { session: mongoSession },
-    );
-  }
-
+// Cập nhật trạng thái session, nhả slot, ghi audit.
+async function _finalizeSession(user, parkingSession, payload, fee, feeMethod, exitPlateImage, exitPortraitImage, mongoSession) {
   parkingSession.exitTime = new Date();
   parkingSession.status = 'completed';
   parkingSession.fee = fee;
@@ -423,23 +366,19 @@ async function _finalizeSession(user, parkingSession, payload, fee, feeMethod, i
 
   await logAudit(mongoSession, {
     actor: user._id,
-    action: isReservationCheckout
-      ? 'RESERVATION_CHECK_OUT'
-      : payload.forceCheckoutReason
-        ? 'FORCE_VEHICLE_CHECKOUT'
-        : payload.adjustedFee !== undefined && payload.adjustedFee !== null
-          ? 'OVERRIDE_FEE_CALCULATION'
-          : payload.bypassMismatch
-            ? 'PLATE_MISMATCH_BYPASS'
-            : 'PARKING_SESSION_CHECK_OUT',
+    action: payload.forceCheckoutReason
+      ? 'FORCE_VEHICLE_CHECKOUT'
+      : payload.adjustedFee !== undefined && payload.adjustedFee !== null
+        ? 'OVERRIDE_FEE_CALCULATION'
+        : payload.bypassMismatch
+          ? 'PLATE_MISMATCH_BYPASS'
+          : 'PARKING_SESSION_CHECK_OUT',
     entityType: 'ParkingSession',
     entityId: `${parkingSession._id}`,
     building: parkingSession.building,
     after: parkingSession.toObject(),
     metadata: {
       paymentMethod: feeMethod,
-      isReservationCheckout,
-      reservationId: isReservationCheckout ? `${linkedReservation._id}` : null,
       adjustedFee: payload.adjustedFee ?? null,
       adjustmentReason: payload.adjustmentReason || null,
       forceCheckoutReason: payload.forceCheckoutReason || null,
@@ -466,27 +405,20 @@ const checkOut = async (user, sessionId, payload = {}) => {
         return parkingSession;
       }
 
-      // Regular checkout (reservation or walk-in).
-      const { fee, feeMethod, walletUserId, isReservationCheckout, linkedReservation } =
-        await _computeRegularFee(parkingSession, payload, mongoSession);
+      // Regular checkout (khách vãng lai / user thường).
+      const { fee, feeMethod } = await _computeRegularFee(parkingSession, payload);
 
       if (feeMethod === 'wallet' && fee > 0) {
-        await _processWalletDebit(
-          fee, walletUserId || parkingSession.user,
-          isReservationCheckout, parkingSession, linkedReservation, mongoSession,
-        );
+        await _processWalletDebit(fee, parkingSession.user, parkingSession, mongoSession);
       }
 
       if (fee > 0) {
-        await _createPaymentRecord(
-          parkingSession, fee, feeMethod, isReservationCheckout, linkedReservation,
-          walletUserId, user, payload, mongoSession,
-        );
+        await _createPaymentRecord(parkingSession, fee, feeMethod, user, payload, mongoSession);
       }
 
       await _finalizeSession(
         user, parkingSession, payload, fee, feeMethod,
-        isReservationCheckout, linkedReservation, exitPlateImage, exitPortraitImage, mongoSession,
+        exitPlateImage, exitPortraitImage, mongoSession,
       );
 
       return parkingSession;

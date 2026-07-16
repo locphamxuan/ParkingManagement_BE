@@ -13,7 +13,7 @@ const upsert = asyncHandler(async (req, res) => {
     req.params.buildingId,
     req.body
   );
-  sendSuccess(res, { message: "Reservation policy saved", data: { item } });
+  sendSuccess(res, { message: "Refund policy saved", data: { item } });
 });
 
 module.exports = { get, upsert };

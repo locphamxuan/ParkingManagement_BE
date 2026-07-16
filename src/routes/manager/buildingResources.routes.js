@@ -13,7 +13,9 @@ const packageController = require("../../controllers/manager/package.controller"
 const reservationPolicyController = require("../../controllers/manager/reservationPolicy.controller");
 const shiftController = require("../../controllers/manager/shift.controller");
 const feedbackController = require("../../controllers/manager/feedback.controller");
+const incidentController = require("../../controllers/manager/incident.controller");
 const dashboardController = require("../../controllers/manager/dashboard.controller");
+const sessionController = require("../../controllers/manager/session.controller");
 const buildingWalletController = require("../../controllers/manager/buildingWallet.controller");
 const buildingController = require("../../controllers/manager/building.controller");
 
@@ -31,6 +33,11 @@ router.use(
 router.get("/wallet", buildingWalletController.getWallet);
 router.get("/wallet/transactions", buildingWalletController.listTransactions);
 router.get("/wallet/daily-revenue", buildingWalletController.getDailyRevenue);
+// Tiền mặt chờ xác nhận + "Thu nhận" vào ví building.
+router.get("/wallet/pending-cash", buildingWalletController.listPendingCash);
+router.post("/wallet/pending-cash/:paymentId/confirm", buildingWalletController.confirmCash);
+// Toàn bộ dòng tiền của building theo phương thức.
+router.get("/payments", buildingWalletController.listPayments);
 
 // Giờ mở/đóng cửa của tòa nhà.
 router.put("/operating-hours", buildingController.updateOperatingHours);
@@ -39,6 +46,10 @@ router.post("/wallet/topup", buildingWalletController.initiateTopup);
 router.get("/wallet/topup/:orderCode/verify", buildingWalletController.verifyTopup);
 
 router.get("/dashboard", dashboardController.getOverview);
+
+// Danh sách phiên xe đang đỗ trong tòa nhà (manager giám sát realtime).
+router.get("/sessions/active", sessionController.listParked);
+router.get("/sessions/:id", sessionController.getDetail);
 
 router
   .route("/vehicle-types")
@@ -116,8 +127,9 @@ router
 router.get("/subscriptions", packageController.listSubscriptions);
 router.delete("/subscriptions/:id", packageController.cancelSubscription);
 
+// Chính sách hoàn tiền khi hủy gói dài hạn (đổi từ /reservation-policy sau khi bỏ đặt chỗ).
 router
-  .route("/reservation-policy")
+  .route("/refund-policy")
   .get(reservationPolicyController.get)
   .put(v.validateReservationPolicy, reservationPolicyController.upsert);
 
@@ -139,8 +151,6 @@ router
   .put(shiftController.updateStaffShift)
   .delete(shiftController.removeStaffShift);
 router.get("/staff", shiftController.listAvailableStaff);
-router.get("/shift-revenues", shiftController.listShiftRevenues);
-router.get("/shift-report-submissions", shiftController.listShiftReportSubmissions);
 
 router.get("/feedbacks", feedbackController.list);
 router.patch(
@@ -148,5 +158,9 @@ router.patch(
   v.validateFeedbackResponse,
   feedbackController.respond
 );
+
+// ── Incidents (sự cố do user báo cáo) ─────────────────────────────────────────
+router.get("/incidents", incidentController.list);
+router.patch("/incidents/:id", incidentController.resolve);
 
 module.exports = router;

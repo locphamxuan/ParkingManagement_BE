@@ -1,5 +1,8 @@
 const mongoose = require("mongoose");
 
+// Chính sách HOÀN TIỀN khi user hủy gói dài hạn (per building). Trước đây model
+// này phục vụ đặt chỗ (reservation) — chức năng đó đã bỏ; giữ tên model/collection
+// để không phải migrate dữ liệu, chỉ còn dùng refundPercent cho luồng hủy gói.
 const reservationPolicySchema = new mongoose.Schema(
   {
     building: {
@@ -9,50 +12,12 @@ const reservationPolicySchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
-    maxHoldMinutes: {
-      type: Number,
-      default: 30,
-      min: 0,
-    },
-    // Cửa sổ đặt trước tối đa (số ngày) — manager quyết định được đặt trước bao xa.
-    maxAdvanceDays: {
-      type: Number,
-      default: 7,
-      min: 1,
-    },
-    // Thời lượng đỗ tối đa cho mỗi lượt đặt (số giờ) — manager giới hạn mỗi lượt.
-    maxDurationHours: {
-      type: Number,
-      default: 24,
-      min: 1,
-    },
-    // % phụ phí PHẠT áp lên phần đỗ quá giờ đặt (overstay). 0 = không phạt, chỉ
-    // tính giá thường cho phần vượt.
-    overstayPenaltyPercent: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
+    // % số tiền còn lại của gói được hoàn khi hủy (manager cấu hình).
     refundPercent: {
       type: Number,
       default: 80,
       min: 0,
       max: 100,
-    },
-    // % tổng phí ước tính được thu làm tiền CỌC khi đặt chỗ. Phần còn lại
-    // (100 - depositPercent) hệ thống tự thu sau khi checkout.
-    depositPercent: {
-      type: Number,
-      default: 15,
-      min: 0,
-      max: 100,
-    },
-    // Số GIỜ trước startTime mà user còn được phép hủy. Sau mốc này không hủy được.
-    // 0 = cho hủy bất kỳ lúc nào trước giờ đặt.
-    cancellationCutoffHours: {
-      type: Number,
-      default: 0,
-      min: 0,
     },
     isActive: { type: Boolean, default: true },
   },

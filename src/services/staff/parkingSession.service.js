@@ -23,7 +23,6 @@ module.exports = {
   listFreeSlots: query.listFreeSlots,
   scanVehicle: query.scanVehicle,
   rejectEntry: query.rejectEntry,
-  getMyShiftRevenue: query.getMyShiftRevenue,
   listMyCheckIns: query.listMyCheckIns,
   initiatePayment: payment.initiatePayment,
   settleSessionPayment: payment.settleSessionPayment,

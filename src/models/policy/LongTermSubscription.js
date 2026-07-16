@@ -28,6 +28,14 @@ const longTermSubscriptionSchema = new mongoose.Schema(
       trim: true,
       maxlength: 20,
     },
+    // Slot cố định (tùy chọn) do user chọn lúc mua gói. Giữ riêng cả kỳ: slot ở
+    // trạng thái 'reserved' suốt thời hạn; check-in → 'occupied', check-out → 'reserved'.
+    // null = gói floating (staff gán slot trống lúc check-in).
+    slot: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ParkingSlot",
+      default: null,
+    },
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
     status: {

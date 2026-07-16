@@ -21,13 +21,8 @@ describe('acceptableUsageTypes (fallback một chiều)', () => {
     expect(acceptableUsageTypes('subscriber')).toEqual(['subscriber', 'registered', 'walk_in']);
   });
 
-  test('reserved ưu tiên reserved, fallback registered → walk_in', () => {
-    expect(acceptableUsageTypes('reserved')).toEqual(['reserved', 'registered', 'walk_in']);
-  });
-
-  test('walk_in KHÔNG bao giờ chiếm slot subscriber/reserved', () => {
+  test('walk_in KHÔNG bao giờ chiếm slot subscriber', () => {
     expect(acceptableUsageTypes('walk_in')).not.toContain('subscriber');
-    expect(acceptableUsageTypes('walk_in')).not.toContain('reserved');
   });
 
   test('usageType lạ → chỉ chính nó; rỗng → []', () => {
@@ -36,18 +31,15 @@ describe('acceptableUsageTypes (fallback một chiều)', () => {
   });
 });
 
-describe('resolveCustomerUsageType (ưu tiên subscriber > reserved > registered > walk_in)', () => {
+describe('resolveCustomerUsageType (ưu tiên subscriber > registered > walk_in)', () => {
   test('có gói dài hạn → subscriber', () => {
-    expect(resolveCustomerUsageType({ longTerm: {}, reservation: {}, registeredOwner: {} })).toBe('subscriber');
-  });
-  test('có đặt chỗ (không gói) → reserved', () => {
-    expect(resolveCustomerUsageType({ longTerm: null, reservation: {}, registeredOwner: {} })).toBe('reserved');
+    expect(resolveCustomerUsageType({ longTerm: {}, registeredOwner: {} })).toBe('subscriber');
   });
   test('chỉ có tài khoản → registered', () => {
-    expect(resolveCustomerUsageType({ longTerm: null, reservation: null, registeredOwner: {} })).toBe('registered');
+    expect(resolveCustomerUsageType({ longTerm: null, registeredOwner: {} })).toBe('registered');
   });
   test('không gì → walk_in', () => {
-    expect(resolveCustomerUsageType({ longTerm: null, reservation: null, registeredOwner: null })).toBe('walk_in');
+    expect(resolveCustomerUsageType({ longTerm: null, registeredOwner: null })).toBe('walk_in');
   });
 });
 

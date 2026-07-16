@@ -16,7 +16,6 @@ const PricePolicy = require('../src/models/policy/PricePolicy');
 const ReservationPolicy = require('../src/models/policy/ReservationPolicy');
 const LongTermPackage = require('../src/models/policy/LongTermPackage');
 const LongTermSubscription = require('../src/models/policy/LongTermSubscription');
-const Reservation = require('../src/models/operations/Reservation');
 const { ParkingSession, StaffShift } = require('../src/models');
 
 const svc = require('../src/services/staff/parkingSession.service');
@@ -35,6 +34,8 @@ const approxFee = (actual, target, slack = 600) => {
 const seedBase = async () => {
   const building = await Building.create({
     name: 'B1', code: 'B1', totalFloors: 1, pricing: { hourlyRate: RATE },
+    // Mở 24/24 để test không flaky theo giờ chạy (mặc định 06:00–22:00 sẽ chặn check-in ban đêm).
+    operatingHours: { open: '00:00', close: '24:00' },
   });
   const vt = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô' });
   const floor = await Floor.create({ building: building._id, code: 'F1', name: 'Floor 1', capacity: 100 });
@@ -169,54 +170,4 @@ describe('Gói dài hạn — checkout & overage giờ/ngày', () => {
 
   // Số tiền phần vượt được kiểm chính xác (deterministic) ở usage.test.js qua
   // computeDailyOverageHours; ở đây chỉ xác nhận checkout thành công.
-});
-
-describe('Reservation — overstay + thanh toán tiền mặt; chặn check-in sớm', () => {
-  test('overstay: thu phần còn lại + phần đỗ quá giờ; cash không cần ví', async () => {
-    const { building, vt, staff } = await seedBase();
-    const res = await Reservation.create({
-      code: 'RSV-1', user: new mongoose.Types.ObjectId(), building: building._id, vehicleType: vt._id,
-      plateNumber: '59G2-500.00', startTime: new Date(Date.now() - 4 * HOUR), endTime: new Date(Date.now() - 2 * HOUR),
-      fee: 3000, estimatedFee: 20000, status: 'confirmed',
-    });
-    const ps = await ParkingSession.create({
-      building: building._id, plateNumber: '59G2-500.00', vehicleType: vt._id, user: res.user,
-      reservation: res._id, status: 'active', entryTime: new Date(Date.now() - 4 * HOUR),
-    });
-    const done = await svc.checkOut(staff, ps._id, { paymentMethod: 'cash' });
-    // (estimatedFee - deposit) + overstay(2h*15000) = 17000 + 30000
-    approxFee(done.fee, 17000 + 2 * RATE);
-    const r = await Reservation.findById(res._id);
-    expect(r.status).toBe('completed');
-  });
-
-  test('overstay + phụ phí phạt: phần đỗ quá giờ × (1 + penalty%)', async () => {
-    const { building, vt, staff } = await seedBase();
-    // Manager đặt phạt 50% cho phần overstay.
-    await ReservationPolicy.updateOne({ building: building._id }, { $set: { overstayPenaltyPercent: 50 } });
-    const res = await Reservation.create({
-      code: 'RSV-PEN', user: new mongoose.Types.ObjectId(), building: building._id, vehicleType: vt._id,
-      plateNumber: '59G2-510.00', startTime: new Date(Date.now() - 4 * HOUR), endTime: new Date(Date.now() - 2 * HOUR),
-      fee: 3000, estimatedFee: 20000, status: 'confirmed',
-    });
-    const ps = await ParkingSession.create({
-      building: building._id, plateNumber: '59G2-510.00', vehicleType: vt._id, user: res.user,
-      reservation: res._id, status: 'active', entryTime: new Date(Date.now() - 4 * HOUR),
-    });
-    const done = await svc.checkOut(staff, ps._id, { paymentMethod: 'cash' });
-    // (estimatedFee - deposit) + overstay(2h*15000)*1.5 = 17000 + 45000
-    approxFee(done.fee, 17000 + Math.ceil(2 * RATE * 1.5), 1000);
-  });
-
-  test('check-in trước giờ bắt đầu → RESERVATION_TOO_EARLY', async () => {
-    const { building, vt, floor, staff } = await seedBase();
-    await ParkingSlot.create({ building: building._id, floor: floor._id, code: 'A1' });
-    await Reservation.create({
-      code: 'RSV-2', user: new mongoose.Types.ObjectId(), building: building._id, vehicleType: vt._id,
-      plateNumber: '59G2-600.00', startTime: new Date(Date.now() + 3 * HOUR), status: 'confirmed',
-    });
-    await expect(
-      svc.checkIn(staff, { building: building._id, plateNumber: '59G2-600.00', vehicleType: 'car', plateImage: 'x', portraitImage: 'y' }),
-    ).rejects.toMatchObject({ errorCode: 'RESERVATION_TOO_EARLY' });
-  });
 });

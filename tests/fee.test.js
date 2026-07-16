@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const { connect, clearAll, stop } = require('./db');
 const PricePolicy = require('../src/models/policy/PricePolicy');
-const { computeFee, calculateParkingFee, calculateReservationFee } = require('../src/utils/feeEngine');
+const { computeFee, calculateParkingFee } = require('../src/utils/feeEngine');
 
 jest.setTimeout(120000);
 
@@ -64,7 +64,7 @@ describe('feeEngine.computeFee', () => {
   });
 });
 
-describe('checkout vs reservation-estimate consistency (the merge)', () => {
+describe('checkout fee wrapper', () => {
   test('calculateParkingFee == computeFee.fee', async () => {
     await seedRegular(10000);
     await seedPeak('07:00', '09:00', 20000);
@@ -73,19 +73,11 @@ describe('checkout vs reservation-estimate consistency (the merge)', () => {
     expect(fee).toBe(r.fee);
   });
 
-  test('reservation estimate == actual checkout fee on a peak BOUNDARY (split-minute)', async () => {
+  test('peak BOUNDARY (split-minute) tính đúng', async () => {
     await seedRegular(10000);
     await seedPeak('07:00', '09:00', 20000);
     // 06:30–07:30 = 30' regular (5000) + 30' peak (10000) = 15000
     const actual = await calculateParkingFee(building, vt, d('06:30'), d('07:30'));
-    const est = await calculateReservationFee(building, vt, d('06:30'), d('07:30'));
     expect(actual).toBe(15000);
-    expect(est.estimatedFee).toBe(actual); // hai bên nhất quán
-  });
-
-  test('reservation estimate fallback when building has no PricePolicy', async () => {
-    // không seed policy → dùng FALLBACK_HOURLY_RATE (5000) cho 2h = 10000
-    const est = await calculateReservationFee(building, vt, d('08:00'), d('10:00'));
-    expect(est.estimatedFee).toBe(10000);
   });
 });

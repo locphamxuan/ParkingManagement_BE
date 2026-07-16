@@ -13,9 +13,9 @@ beforeEach(async () => {
   building = await f.createBuilding();
 });
 
-const today = new Date().toISOString().slice(0, 10);
-const from = today;
-const to = today;
+// Nới ±1 ngày để không flaky quanh nửa đêm (toISOString là UTC, server chạy giờ VN).
+const from = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 10);
+const to = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
 
 describe('getReport', () => {
   test('loại cancellation_fee khỏi doanh thu — cọc gốc đã tính qua type reservation, tránh đếm trùng', async () => {

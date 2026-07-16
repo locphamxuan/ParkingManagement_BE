@@ -91,15 +91,11 @@ const createSlot = (buildingId, floorId, over = {}) => {
   });
 };
 
+// Chính sách hoàn tiền gói (model giữ tên ReservationPolicy sau khi bỏ đặt chỗ).
 const createReservationPolicy = (buildingId, over = {}) =>
   ReservationPolicy.create({
     building: buildingId,
-    depositPercent: over.depositPercent ?? 15,
     refundPercent: over.refundPercent ?? 80,
-    maxDurationHours: over.maxDurationHours ?? 24,
-    maxAdvanceDays: over.maxAdvanceDays ?? 7,
-    maxHoldMinutes: over.maxHoldMinutes ?? 30,
-    cancellationCutoffHours: over.cancellationCutoffHours ?? 0,
   });
 
 const createPricePolicy = (buildingId, vehicleTypeId, over = {}) => {
