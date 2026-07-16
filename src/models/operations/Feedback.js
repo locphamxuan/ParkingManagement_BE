@@ -59,12 +59,6 @@ const feedbackSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    reservation: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Reservation',
-      default: null,
-      index: true,
-    },
     portraitImageUrl: {
       type: String,
       trim: true,

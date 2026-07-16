@@ -26,7 +26,6 @@ const list = async (user, buildingId, query = {}) => {
       .populate("user", "fullName email phone")
       .populate("building", "name code address")
       .populate("parkingSession", "plateNumber entryTime exitTime fee status")
-      .populate("reservation", "code plateNumber startTime endTime fee estimatedFee status")
       .populate("repliedBy", "fullName email role")
       .sort("-createdAt")
       .skip((page - 1) * limit)
@@ -83,7 +82,6 @@ const respond = async (user, buildingId, id, payload = {}) => {
         .populate("user", "fullName email phone")
         .populate("building", "name code address")
         .populate("parkingSession", "plateNumber entryTime exitTime fee status")
-        .populate("reservation", "code plateNumber startTime endTime fee estimatedFee status")
         .populate("repliedBy", "fullName email role");
 
       if (update.staffReply) {

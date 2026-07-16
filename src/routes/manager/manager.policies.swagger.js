@@ -95,24 +95,24 @@
  */
 /**
  * @swagger
- * /api/manager/buildings/{buildingId}/reservation-policy:
+ * /api/manager/buildings/{buildingId}/refund-policy:
  *   get:
- *     tags: [Manager - Reservation Policy]
- *     summary: Get reservation policy for a building
+ *     tags: [Manager - Refund Policy]
+ *     summary: Get package refund policy for a building
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
  *     responses:
- *       200: { description: Reservation policy returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { item: { $ref: '#/components/schemas/ReservationPolicy' } } } } } ] } } } }
+ *       200: { description: Refund policy returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { item: { $ref: '#/components/schemas/ReservationPolicy' } } } } } ] } } } }
  *   put:
- *     tags: [Manager - Reservation Policy]
- *     summary: Create or update reservation policy
+ *     tags: [Manager - Refund Policy]
+ *     summary: Create or update package refund policy
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { maxHoldMinutes: { type: integer, example: 30 }, longTermGraceDays: { type: integer, example: 7 }, maxAdvanceDays: { type: integer, example: 7 }, maxDurationHours: { type: integer, example: 24 }, refundPercent: { type: number, example: 80 }, depositPercent: { type: number, example: 15 }, isActive: { type: boolean, example: true } } } } } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { refundPercent: { type: number, example: 80 }, isActive: { type: boolean, example: true } } } } } }
  *     responses:
- *       200: { description: Reservation policy saved successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Reservation policy saved }, data: { type: object, properties: { item: { $ref: '#/components/schemas/ReservationPolicy' } } } } } ] } } } }
+ *       200: { description: Refund policy saved successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Refund policy saved }, data: { type: object, properties: { item: { $ref: '#/components/schemas/ReservationPolicy' } } } } } ] } } } }
  * /api/manager/buildings/{buildingId}/shifts:
  *   get:
  *     tags: [Manager - Shifts]
@@ -201,18 +201,6 @@
  *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Available staff returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/PublicUser' } } } } } } ] } } } }
- * /api/manager/buildings/{buildingId}/shift-revenues:
- *   get:
- *     tags: [Manager - Shifts]
- *     summary: List shift revenue records
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
- *       - { in: query, name: from, schema: { type: string, format: date } }
- *       - { in: query, name: to, schema: { type: string, format: date } }
- *       - { in: query, name: staff, schema: { type: string, format: objectId } }
- *     responses:
- *       200: { description: Shift revenues returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { type: object } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
  * /api/manager/buildings/{buildingId}/feedbacks:
  *   get:
  *     tags: [Manager - Feedback]

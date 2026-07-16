@@ -1,7 +1,7 @@
 ﻿const mongoose = require("mongoose");
 const LongTermPackage = require("../../models/policy/LongTermPackage");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
-const { getRefundPercent } = require("../../utils/reservationHold");
+const { getRefundPercent } = require("../../utils/refundPolicy");
 const WalletTransaction = require("../../models/finance/WalletTransaction");
 const Payment = require("../../models/finance/Payment");
 const User = require("../../models/user/User");

@@ -3,14 +3,14 @@ const { sendSuccess } = require('../utils/response');
 const kioskService = require('../services/kiosk.service');
 
 /**
- * POST /api/kiosk/reservation-checkin
- * Self-service gate check-in for a reservation, identified ONLY by the registered
- * vehicle QR token (PLT-...). No staff / auth required — the gate device calls it.
- * Body: { qrCode, gate?, plateImage?, portraitImage? }
+ * POST /api/kiosk/package-checkin
+ * Self-service gate check-in for a long-term package holder, identified ONLY by the
+ * registered vehicle QR token (PLT-...). No staff / auth required — the gate device
+ * calls it. Body: { qrCode, gate?, building?, plateImage?, portraitImage? }
  */
-const reservationCheckIn = asyncHandler(async (req, res) => {
+const packageCheckIn = asyncHandler(async (req, res) => {
   const result = await kioskService.selfCheckInByQr(req.body || {});
-  sendSuccess(res, { message: 'Xe đặt chỗ đã vào bãi tự động thành công', data: result });
+  sendSuccess(res, { message: 'Xe gói dài hạn đã vào bãi tự động thành công', data: result });
 });
 
-module.exports = { reservationCheckIn };
+module.exports = { packageCheckIn };

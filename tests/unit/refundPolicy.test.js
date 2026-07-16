@@ -1,5 +1,5 @@
 /** unit: clampPercent + DEFAULT_REFUND_PERCENT — nguồn default hoàn tiền duy nhất toàn hệ thống. */
-const { clampPercent, DEFAULT_REFUND_PERCENT } = require('../../src/utils/reservationHold');
+const { clampPercent, DEFAULT_REFUND_PERCENT } = require('../../src/utils/refundPolicy');
 
 describe('clampPercent', () => {
   test('null/undefined → fallback', () => {

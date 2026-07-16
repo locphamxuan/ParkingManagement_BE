@@ -7,6 +7,16 @@ const listPackages = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: { packages } });
 });
 
+const getPackage = asyncHandler(async (req, res) => {
+  const pkg = await service.getPackage(req.params.id);
+  sendSuccess(res, { data: { package: pkg } });
+});
+
+const getSubscription = asyncHandler(async (req, res) => {
+  const subscription = await service.getSubscription(req.user._id, req.params.id);
+  sendSuccess(res, { data: { subscription } });
+});
+
 const subscribe = asyncHandler(async (req, res) => {
   const subscription = await service.subscribe(req.user._id, req.body);
   sendSuccess(res, { statusCode: 201, message: 'Subscription created', data: { subscription } });
@@ -27,4 +37,4 @@ const renewSubscription = asyncHandler(async (req, res) => {
   sendSuccess(res, { message: 'Subscription renewed successfully', data: { subscription } });
 });
 
-module.exports = { listPackages, subscribe, listSubscriptions, cancelSubscription, renewSubscription };
+module.exports = { listPackages, getPackage, subscribe, listSubscriptions, getSubscription, cancelSubscription, renewSubscription };

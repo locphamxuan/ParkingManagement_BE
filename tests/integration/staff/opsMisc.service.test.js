@@ -65,19 +65,3 @@ describe('wallet.service', () => {
       .rejects.toMatchObject({ errorCode: 'INSUFFICIENT_WALLET_BALANCE' });
   });
 });
-
-describe('shift.service (staff)', () => {
-  test('submitShiftReport tổng hợp doanh thu ca hôm nay', async () => {
-    const shift = await f.createShift(building._id);
-    const ss = await f.createStaffShift(building._id, staff._id, shift._id, { status: 'active' });
-    await Payment.create([
-      { building: building._id, staff: staff._id, type: 'session', method: 'cash', amount: 20000, status: 'success' },
-      { building: building._id, staff: staff._id, type: 'session', method: 'wallet', amount: 30000, status: 'success' },
-    ]);
-    const res = await shiftSvc.submitShiftReport(staff, ss._id);
-    expect(res.revenueReport.total).toBe(50000);
-    expect(res.revenueReport.byMethod.cash).toBe(20000);
-    expect(res.revenueReport.byMethod.wallet).toBe(30000);
-    expect(res.revenueReport.count).toBe(2);
-  });
-});

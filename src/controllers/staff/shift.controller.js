@@ -7,9 +7,4 @@ const listMyShifts = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: { items } });
 });
 
-const submitShiftReport = asyncHandler(async (req, res) => {
-  const item = await service.submitShiftReport(req.user, req.params.id);
-  sendSuccess(res, { message: 'Shift report submitted', data: { item } });
-});
-
-module.exports = { listMyShifts, submitShiftReport };
+module.exports = { listMyShifts };

@@ -1,14 +1,11 @@
 /**
- * feeEngine.js — LÕI tính phí dùng chung cho cả checkout (phí thực thu) lẫn ước
- * tính reservation, để hai bên LUÔN nhất quán (cùng thuật toán split-minute).
+ * feeEngine.js — LÕI tính phí lúc checkout (phí thực thu).
  *
  * Thuật toán: tách thời gian thành peak / regular theo từng phút.
  *  - Lọc policy còn hiệu lực trong [start, end] (effectiveFrom/effectiveTo).
  *  - Cộng phí TẤT CẢ khung peak (mỗi khung theo rate riêng), phần còn lại = regular.
  */
 const PricePolicy = require('../models/policy/PricePolicy');
-const Building = require('../models/building/Building');
-const { FALLBACK_HOURLY_RATE } = require('../constants/pricing');
 
 /** Parse 'HH:MM' → minutes from midnight */
 function parseHHMM(str) {
@@ -142,42 +139,4 @@ async function calculateParkingFee(buildingId, vehicleTypeId, entryTime, exitTim
   return fee;
 }
 
-/**
- * Ước tính phí cho một lượt đặt chỗ (reservation).
- * Fallback về Building.pricing khi building chưa có PricePolicy.
- */
-async function calculateReservationFee(buildingId, vehicleTypeId, startTime, endTime) {
-  const start = new Date(startTime);
-  const end = new Date(endTime);
-
-  const r = await computeFee({ buildingId, vehicleTypeId, start, end });
-  const totalMinutes = r.totalMinutes || Math.max(0, (end - start) / 60_000);
-
-  let estimatedFee = r.fee;
-  let regularRate = r.regularRate;
-  let regularMinutes = r.regularMinutes;
-  let peakMinutes = r.peakMinutes;
-  let peakRate = r.peakRate;
-
-  if (!r.hasPolicy) {
-    const building = await Building.findById(buildingId).select('pricing').lean();
-    regularRate = building?.pricing?.hourlyRate ?? FALLBACK_HOURLY_RATE;
-    regularMinutes = totalMinutes;
-    peakMinutes = 0;
-    peakRate = null;
-    estimatedFee = Math.ceil((regularRate / 60) * totalMinutes);
-  }
-
-  return {
-    estimatedFee,
-    hourlyRate: regularRate,
-    durationMinutes: Math.round(totalMinutes),
-    hours: Math.ceil(totalMinutes / 60),
-    regularHours: regularMinutes / 60,
-    peakHours: peakMinutes / 60,
-    peakRate,
-    minimumApplied: false,
-  };
-}
-
-module.exports = { computeFee, calculateTotalPeakMinutes, calculateParkingFee, calculateReservationFee };
+module.exports = { computeFee, calculateTotalPeakMinutes, calculateParkingFee };

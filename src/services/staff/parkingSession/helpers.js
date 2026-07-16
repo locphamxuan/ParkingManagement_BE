@@ -1,13 +1,10 @@
 const mongoose = require('mongoose');
-const AppError = require('../../../utils/AppError');
 const {
   ParkingSession,
   ParkingSlot,
-  Reservation,
   LongTermSubscription,
   VehicleType,
 } = require('../../../models');
-const { getMaxHoldMs } = require('../../../utils/reservationHold');
 const { calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
@@ -76,7 +73,9 @@ const resolveLongTermSubscription = async (plateNumber, allowedBuildings) => {
     plateNumber,
     ...activeSubscriptionMatch(now),
     building: { $in: allowedBuildings },
-  }).sort({ updatedAt: -1 });
+  })
+    .populate('slot')
+    .sort({ updatedAt: -1 });
 
   if (!subscription) {
     // Self-heal: nếu có gói 'active' nhưng đã quá endDate (job chưa chạy) → đánh dấu
@@ -91,73 +90,28 @@ const resolveLongTermSubscription = async (plateNumber, allowedBuildings) => {
   return subscription;
 };
 
-const resolveReservation = async (plateNumber, allowedBuildings) => {
-  const reservation = await Reservation.findOne({
-    plateNumber,
-    building: { $in: allowedBuildings },
-    status: { $in: ['pending', 'confirmed'] },
-  })
-    .sort({ updatedAt: -1 })
-    .populate('slot');
-
-  if (!reservation) {
-    return null;
-  }
-
-  const now = Date.now();
-  const holdMs = await getMaxHoldMs(reservation.building);
-
-  // Chặn check-in quá sớm: chỉ cho vào trong khoảng holdMs trước startTime.
-  if (reservation.startTime) {
-    const earliest = new Date(reservation.startTime).getTime() - holdMs;
-    if (now < earliest) {
-      throw new AppError('Chưa tới giờ check-in cho lượt đặt này', 409, 'RESERVATION_TOO_EARLY');
-    }
-  }
-
-  const expiresAt = reservation.startTime ? new Date(reservation.startTime).getTime() + holdMs : null;
-  const expired = expiresAt && expiresAt < now;
-
-  if (expired) {
-    // Đánh dấu expired + thả slot + hoàn % cọc theo chính sách — dùng CHUNG một
-    // đường code với job/staff để không lệch nghiệp vụ hoàn tiền.
-    const { expireReservationWithRefund } = require('../../reservationLifecycle.service');
-    await expireReservationWithRefund(reservation._id);
-    return null;
-  }
-
-  if (reservation.slot && reservation.slot.status === 'maintenance') {
-    throw new AppError('Assigned slot is under maintenance', 409, 'SLOT_MAINTENANCE_NOT_AVAILABLE');
-  }
-
-  return reservation;
-};
-
 /**
  * Suy ra "đối tượng sử dụng" (usageType) của một lượt check-in để khớp với dãy/slot:
  *  - subscriber : có gói dài hạn đang hiệu lực
- *  - reserved   : có lượt đặt chỗ hợp lệ
  *  - registered : biển số gắn với 1 tài khoản đã đăng ký
  *  - walk_in    : còn lại (khách vãng lai)
- * Thứ tự ưu tiên: subscriber > reserved > registered > walk_in.
+ * Thứ tự ưu tiên: subscriber > registered > walk_in.
  */
-const resolveCustomerUsageType = ({ longTerm, reservation, registeredOwner }) => {
+const resolveCustomerUsageType = ({ longTerm, registeredOwner }) => {
   if (longTerm) return 'subscriber';
-  if (reservation) return 'reserved';
   if (registeredOwner) return 'registered';
   return 'walk_in';
 };
 
 /**
- * Chuỗi ưu tiên đối tượng cho slot (fallback MỘT CHIỀU): hội viên/đặt chỗ có thể
- * dùng tạm slot "chung" (walk_in) khi hết slot đúng đối tượng, NHƯNG khách vãng lai
- * KHÔNG bao giờ chiếm slot dành cho hội viên/gói/đặt chỗ. Index nhỏ hơn = ưu tiên hơn.
+ * Chuỗi ưu tiên đối tượng cho slot (fallback MỘT CHIỀU): hội viên có thể dùng tạm
+ * slot "chung" (walk_in) khi hết slot đúng đối tượng, NHƯNG khách vãng lai KHÔNG bao
+ * giờ chiếm slot dành cho hội viên/gói. Index nhỏ hơn = ưu tiên hơn.
  */
 const USAGE_FALLBACK_CHAIN = {
   walk_in: ['walk_in'],
   registered: ['registered', 'walk_in'],
   subscriber: ['subscriber', 'registered', 'walk_in'],
-  reserved: ['reserved', 'registered', 'walk_in'],
 };
 
 const acceptableUsageTypes = (usageType) =>
@@ -262,7 +216,6 @@ module.exports = {
   findDuplicateActiveSession,
   activeSubscriptionMatch,
   resolveLongTermSubscription,
-  resolveReservation,
   resolveCustomerUsageType,
   acceptableUsageTypes,
   findCompatibleSlots,

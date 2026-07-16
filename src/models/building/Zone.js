@@ -1,11 +1,10 @@
 const mongoose = require("mongoose");
 
 // Đối tượng sử dụng của một dãy (zone) — chiều "ai được đậu", trực giao với loại xe.
-//  - walk_in    : khách vãng lai (không tài khoản / không gói / không đặt chỗ)
-//  - registered : user có tài khoản & biển số đăng ký nhưng không gói/đặt chỗ
+//  - walk_in    : khách vãng lai (không tài khoản / không gói)
+//  - registered : user có tài khoản & biển số đăng ký nhưng không mua gói
 //  - subscriber : xe mua gói dài hạn (long-term subscription)
-//  - reserved   : dãy dành cho lượt đặt chỗ trước (reservation)
-const ZONE_USAGE_TYPES = ["walk_in", "registered", "subscriber", "reserved"];
+const ZONE_USAGE_TYPES = ["walk_in", "registered", "subscriber"];
 
 const zoneSchema = new mongoose.Schema(
   {

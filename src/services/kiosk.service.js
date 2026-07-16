@@ -1,8 +1,9 @@
 const mongoose = require('mongoose');
 const AppError = require('../utils/AppError');
-const { Reservation, ParkingSession, ParkingSlot, User } = require('../models');
+const { LongTermSubscription, ParkingSession, ParkingSlot, User } = require('../models');
 const { logAudit } = require('../utils/staffScope');
 const { normalizePlate, plateMatchRegex } = require('../utils/plate.util');
+const { activeSubscriptionMatch } = require('./staff/parkingSession/helpers');
 
 /**
  * Resolve a REGISTERED vehicle QR token (PLT-...) to its canonical plate + owner.
@@ -39,93 +40,109 @@ const resolvePlateFromQr = async ({ qrCode }) => {
 
 /**
  * selfCheckInByQr
- * Gate-kiosk reservation check-in. Scans the vehicle QR, finds a valid (pending/
- * confirmed) reservation for that plate and admits the vehicle automatically —
- * no staff involved. Stores the camera snapshots (plate + portrait) for evidence.
+ * Kiosk self check-in cho khách có GÓI DÀI HẠN. Quét QR phương tiện → tìm gói còn
+ * hiệu lực cho biển số → nhận xe tự động (ưu tiên slot cố định của gói, nếu không có
+ * thì gán 1 slot trống thuộc dãy 'subscriber'). Không cần nhân viên. Lưu ảnh camera
+ * (biển + chân dung) làm bằng chứng. Khách không có gói phải check-in qua nhân viên.
  */
 const selfCheckInByQr = async (payload = {}) => {
   const { plateNumber } = await resolvePlateFromQr(payload);
+  const plateRx = plateMatchRegex(plateNumber) || plateNumber;
   const plateImage = payload.plateImage || null;
   const portraitImage = payload.portraitImage || null;
 
   const session = await mongoose.startSession();
   try {
     const result = await session.withTransaction(async () => {
-      const reservation = await Reservation.findOne({
-        plateNumber: plateMatchRegex(plateNumber) || plateNumber,
-        status: { $in: ['pending', 'confirmed'] },
-      })
-        .sort({ startTime: 1 })
+      const subFilter = {
+        plateNumber: plateRx,
+        ...activeSubscriptionMatch(),
+      };
+      if (payload.building) subFilter.building = payload.building;
+
+      const subscription = await LongTermSubscription.findOne(subFilter)
+        .sort({ updatedAt: -1 })
+        .populate('slot')
         .session(session);
 
-      if (!reservation) {
+      if (!subscription) {
         throw new AppError(
-          'Không tìm thấy đặt chỗ hợp lệ cho phương tiện này. Vui lòng liên hệ nhân viên.',
+          'Không tìm thấy gói dài hạn hợp lệ cho phương tiện này. Vui lòng liên hệ nhân viên.',
           404,
-          'RESERVATION_NOT_FOUND',
+          'SUBSCRIPTION_NOT_FOUND',
         );
       }
 
-      const now = Date.now();
-      const endTime = reservation.endTime ? new Date(reservation.endTime).getTime() : null;
-      if (endTime && endTime < now) {
-        reservation.status = 'expired';
-        await reservation.save({ session });
-        throw new AppError('Lượt đặt chỗ đã hết hạn.', 409, 'RESERVATION_EXPIRED');
+      const buildingId = subscription.building;
+
+      // Chặn trùng: xe đang có phiên active trong tòa này.
+      const duplicate = await ParkingSession.findOne({
+        plateNumber: plateRx,
+        building: buildingId,
+        status: 'active',
+      }).session(session);
+      if (duplicate) {
+        throw new AppError('Phương tiện đang có phiên gửi xe trong bãi.', 409, 'DUPLICATE_PLATE');
       }
 
-      const slotId = reservation.slot?._id || reservation.slot || null;
-      if (slotId) {
-        const slot = await ParkingSlot.findById(slotId).session(session);
-        if (slot?.status === 'maintenance') {
-          throw new AppError('Ô đỗ được gán đang bảo trì.', 409, 'SLOT_MAINTENANCE_NOT_AVAILABLE');
-        }
-        if (slot) {
-          slot.status = 'occupied';
-          await slot.save({ session });
-        }
+      // Slot: ưu tiên slot cố định của gói; nếu không có/không trống → gán slot trống
+      // thuộc dãy 'subscriber' cùng tòa.
+      let slot = null;
+      if (subscription.slot && subscription.slot.status !== 'maintenance') {
+        slot = await ParkingSlot.findById(subscription.slot._id || subscription.slot).session(session);
+        if (slot && slot.status === 'occupied') slot = null;
+      }
+      if (!slot) {
+        slot = await ParkingSlot.findOne({
+          building: buildingId,
+          status: 'available',
+          usageType: 'subscriber',
+        }).session(session);
+      }
+      if (!slot) {
+        throw new AppError(
+          'Hiện không còn ô đỗ trống cho gói. Vui lòng liên hệ nhân viên.',
+          409,
+          'NO_SLOT_AVAILABLE',
+        );
       }
 
-      const previousValue = reservation.toObject();
-      reservation.status = 'checked_in';
-      reservation.checkedInAt = new Date();
-      await reservation.save({ session });
+      slot.status = 'occupied';
+      await slot.save({ session });
 
       const created = await ParkingSession.create(
         [
           {
-            building: reservation.building,
-            slot: slotId,
-            vehicleType: reservation.vehicleType,
-            plateNumber: reservation.plateNumber,
-            user: reservation.user,
+            building: buildingId,
+            slot: slot._id,
+            vehicleType: slot.vehicleType || null,
+            plateNumber: subscription.plateNumber,
+            user: subscription.user,
             staff: null,
             entryGate: payload.gate || null,
             fee: 0,
-            paymentMethod: null,
+            paymentMethod: 'long_term',
             status: 'active',
             plateImage,
             portraitImage,
-            note: `kiosk_self_check_in:${reservation.code}`,
-            reservation: reservation._id,
+            note: `long_term:${subscription._id} | kiosk_self_check_in`,
           },
         ],
         { session },
       );
 
       await logAudit(session, {
-        actor: reservation.user,
-        action: 'RESERVATION_SELF_CHECK_IN',
-        entityType: 'Reservation',
-        entityId: `${reservation._id}`,
-        building: reservation.building,
-        before: previousValue,
-        after: reservation.toObject(),
+        actor: subscription.user,
+        action: 'LONG_TERM_SELF_CHECK_IN',
+        entityType: 'ParkingSession',
+        entityId: `${created[0]._id}`,
+        building: buildingId,
+        after: created[0].toObject(),
         severity: 'low',
-        description: `Reservation ${reservation.code} self check-in via kiosk QR`,
+        description: `Long-term subscription ${subscription._id} self check-in via kiosk QR`,
       });
 
-      return { reservation, parkingSession: created[0] };
+      return { subscription, parkingSession: created[0] };
     });
 
     return result;

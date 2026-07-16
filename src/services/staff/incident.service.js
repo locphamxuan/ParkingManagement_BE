@@ -4,6 +4,7 @@ const AppError = require('../../utils/AppError');
 const { Incident, ParkingSession, ParkingSlot, Payment } = require('../../models');
 const { assertBuildingScope, logAudit } = require('../../utils/staffScope');
 const generateBookingCode = require('../../utils/generateBookingCode');
+const { applyIncidentAction } = require('../shared/incidentResolve.service');
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -243,4 +244,22 @@ const _handleLostTicket = async (staffUser, payload, type) => {
   }
 };
 
-module.exports = { createIncident, listIncidents };
+// ─── updateIncident ──────────────────────────────────────────────────────────
+
+/**
+ * Staff xử lý sự cố: đổi trạng thái / ghi chú xử lý / xử lý người vi phạm.
+ * payload: { status?, resolutionNote?, violatorPlate?, action?, penaltyFee?, paymentMethod? }
+ */
+const updateIncident = async (staffUser, id, payload = {}) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new AppError('Invalid incident id', 400, 'INVALID_INCIDENT_ID');
+  }
+  const incident = await Incident.findById(id);
+  if (!incident) throw new AppError('Incident not found', 404, 'INCIDENT_NOT_FOUND');
+
+  assertBuildingScope(staffUser, incident.building);
+
+  return applyIncidentAction(staffUser, incident, payload);
+};
+
+module.exports = { createIncident, listIncidents, updateIncident };

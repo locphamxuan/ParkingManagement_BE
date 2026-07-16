@@ -5,7 +5,7 @@ const asyncHandler = require('../../utils/asyncHandler');
 const { sendSuccess } = require('../../utils/response');
 
 const createFeedback = asyncHandler(async (req, res) => {
-  const { parkingSession, rating, comment, building, reservation } = req.body;
+  const { parkingSession, rating, comment, building } = req.body;
   if (!parkingSession) throw new AppError('parkingSession is required', 400);
   if (!rating) throw new AppError('rating is required', 400);
   if (!comment) throw new AppError('comment is required', 400);
@@ -19,7 +19,6 @@ const createFeedback = asyncHandler(async (req, res) => {
     rating: Number(rating),
     comment: String(comment).trim(),
     building: building || null,
-    reservation: reservation || null,
   });
 
   sendSuccess(res, { message: 'Feedback submitted', data: { feedback } }, 201);

@@ -1,6 +1,7 @@
 const LongTermPackage = require('../../models/policy/LongTermPackage');
 const LongTermSubscription = require('../../models/policy/LongTermSubscription');
-const { getRefundPercent } = require('../../utils/reservationHold');
+const ParkingSlot = require('../../models/building/ParkingSlot');
+const { getRefundPercent } = require('../../utils/refundPolicy');
 const ParkingSession = require('../../models/operations/ParkingSession');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const Payment = require('../../models/finance/Payment');
@@ -59,7 +60,7 @@ function validateStartDateConstraint(startDate, durationDays) {
   }
 }
 
-const subscribe = async (userId, { packageId, plateNumber, startDate }) => {
+const subscribe = async (userId, { packageId, plateNumber, startDate, slotId }) => {
   // Chuẩn hoá biển số về dạng canonical (giống lúc check-in) để gói luôn được
   // nhận diện khi staff quét xe — tránh lệch '59G2-81000' vs '59G2-810.00'.
   const normalizedPlate = normalizePlate(plateNumber);
@@ -108,12 +109,40 @@ const subscribe = async (userId, { packageId, plateNumber, startDate }) => {
       ).select('walletBalance');
       if (!updatedUser) throw new AppError('Số dư ví không đủ', 400);
 
+      // Slot cố định (tùy chọn): validate ô thuộc dãy 'subscriber' đúng loại xe của gói,
+      // rồi claim atomic available→reserved (giữ riêng cả kỳ). null = gói floating.
+      let claimedSlotId = null;
+      if (slotId) {
+        if (!mongoose.Types.ObjectId.isValid(slotId)) {
+          throw new AppError('slotId không hợp lệ', 400, 'INVALID_SLOT');
+        }
+        const slot = await ParkingSlot.findOne({ _id: slotId, building: pkg.building }).session(mongoSession);
+        if (!slot) throw new AppError('Không tìm thấy ô đỗ trong tòa nhà của gói', 404, 'SLOT_NOT_FOUND');
+        if (slot.usageType !== 'subscriber') {
+          throw new AppError('Ô đỗ không thuộc dãy dành cho gói dài hạn', 409, 'SLOT_USAGE_MISMATCH');
+        }
+        if (slot.vehicleType && `${slot.vehicleType}` !== `${pkg.vehicleType}`) {
+          throw new AppError('Ô đỗ không đúng loại xe của gói', 409, 'SLOT_VEHICLE_TYPE_MISMATCH');
+        }
+        if (slot.reservable === false) {
+          throw new AppError('Ô đỗ không cho phép giữ chỗ', 409, 'SLOT_NOT_RESERVABLE');
+        }
+        const claimed = await ParkingSlot.findOneAndUpdate(
+          { _id: slotId, status: 'available' },
+          { $set: { status: 'reserved' } },
+          { new: true, session: mongoSession },
+        );
+        if (!claimed) throw new AppError('Ô đỗ vừa được người khác giữ, vui lòng chọn ô khác', 409, 'SLOT_NOT_AVAILABLE');
+        claimedSlotId = claimed._id;
+      }
+
       const [created] = await LongTermSubscription.create(
         [{
           user: userId,
           package: packageId,
           building: pkg.building,
           plateNumber: normalizedPlate,
+          slot: claimedSlotId,
           startDate: resolvedStart,
           endDate,
           status: 'active',
@@ -229,6 +258,16 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
       subscription.refundPercent = refundPercent;
       subscription.refundAmount = refundAmount;
       await subscription.save({ session: mongoSession });
+
+      // Nhả slot cố định (nếu có) về 'available' — chỉ nhả ô đang 'reserved' (giữ chỗ),
+      // không đụng ô đang 'occupied'/'maintenance'.
+      if (subscription.slot) {
+        await ParkingSlot.findOneAndUpdate(
+          { _id: subscription.slot, status: 'reserved' },
+          { $set: { status: 'available' } },
+          { session: mongoSession },
+        );
+      }
 
       const updatedUser = await User.findByIdAndUpdate(
         userId,
@@ -410,4 +449,22 @@ const listSubscriptions = async (userId, query = {}) => {
   return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
-module.exports = { listPackages, subscribe, listSubscriptions, cancelSubscription, renewSubscription };
+const getPackage = async (id) => {
+  const pkg = await LongTermPackage.findById(id)
+    .populate('vehicleType', 'name code')
+    .populate('building', 'name code address');
+  if (!pkg) throw new AppError('Package not found', 404, 'PACKAGE_NOT_FOUND');
+  return pkg;
+};
+
+// Scope theo user để không xem được đăng ký của người khác.
+const getSubscription = async (userId, id) => {
+  const subscription = await LongTermSubscription.findOne({ _id: id, user: userId })
+    .populate('package', 'name code price durationDays maxHoursPerDay')
+    .populate('building', 'name address')
+    .populate('slot', 'code');
+  if (!subscription) throw new AppError('Subscription not found', 404, 'SUBSCRIPTION_NOT_FOUND');
+  return subscription;
+};
+
+module.exports = { listPackages, getPackage, subscribe, listSubscriptions, getSubscription, cancelSubscription, renewSubscription };

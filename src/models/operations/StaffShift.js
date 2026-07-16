@@ -37,16 +37,6 @@ const staffShiftSchema = new mongoose.Schema(
       default: "scheduled",
     },
     note: { type: String, trim: true, maxlength: 300, default: "" },
-    revenueReport: {
-      submittedAt: { type: Date, default: null },
-      total: { type: Number, default: 0 },
-      count: { type: Number, default: 0 },
-      byMethod: {
-        cash: { type: Number, default: 0 },
-        wallet: { type: Number, default: 0 },
-        online: { type: Number, default: 0 },
-      },
-    },
   },
   { timestamps: true }
 );

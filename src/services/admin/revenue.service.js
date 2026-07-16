@@ -65,7 +65,8 @@ const getReport = async ({ from, to, buildingId } = {}) => {
 
   const grandTotal = rows.reduce((sum, r) => sum + r.totalRevenue, 0);
 
-  return { from: dateFrom, to: dateTo, items: rows, grandTotal };
+  // Echo lại đúng chuỗi ngày client gửi lên (YYYY-MM-DD) — không trả Date object.
+  return { from, to, items: rows, grandTotal };
 };
 
 module.exports = { getReport };

@@ -6,10 +6,9 @@
  * Khác với integration test (gọi thẳng service), bộ này đi qua toàn bộ tầng
  * để xác nhận hệ thống ráp lại vẫn đúng nghiệp vụ end-to-end.
  *
- * Bao phủ 3 kịch bản hệ thống:
+ * Bao phủ 2 kịch bản hệ thống:
  *   A. Auth & RBAC boundary  — login, thiếu token (401), sai role (403).
  *   B. Walk-in lifecycle     — staff check-in → check-out → phí vào ví tòa.
- *   C. Reservation lifecycle — user đặt chỗ (trừ cọc ví) → hủy (hoàn cọc).
  */
 const request = require('supertest');
 const mongoose = require('mongoose');
@@ -46,13 +45,18 @@ async function seedFullScene() {
   const shift = await f.createShift(building._id);
   await f.createStaffShift(building._id, staff._id, shift._id, { status: 'active' });
 
-  // Khách có số dư ví để đặt chỗ / trả phí.
+  // Manager của tòa: xác nhận tiền mặt pending (luồng ví building).
+  const manager = await f.createUser({ role: 'manager', password: 'secret1' });
+  await BuildingManager.create({ building: building._id, user: manager._id, isActive: true });
+
+  // Khách có số dư ví để trả phí.
   const customer = await f.createUser({ role: 'user', password: 'secret1', walletBalance: 1_000_000 });
 
   return {
-    building, vt, floor, zone, slot, staff, customer,
+    building, vt, floor, zone, slot, staff, customer, manager,
     staffToken: signToken(staff._id),
     userToken: signToken(customer._id),
+    managerToken: signToken(manager._id),
   };
 }
 
@@ -139,7 +143,24 @@ describe('E2E · Walk-in lifecycle (check-in → check-out → ví tòa)', () =>
     const freed = await ParkingSlot.findById(s.slot._id);
     expect(freed.status).toBe('available');
 
-    // Phí tiền mặt được cộng vào ví tòa nhà.
+    // Tiền mặt KHÔNG vào ví ngay — nằm ở pending chờ manager xác nhận.
+    const walletBefore = await BuildingWallet.findOne({ building: s.building._id });
+    expect(walletBefore?.balance ?? 0).toBe(0);
+
+    // 3) Manager thấy khoản pending và bấm "Thu nhận" qua HTTP → ví được cộng.
+    const pendingRes = await request(app)
+      .get(`/api/manager/buildings/${s.building._id}/wallet/pending-cash`)
+      .set('Authorization', bearer(s.managerToken));
+    expect(pendingRes.status).toBe(200);
+    const pendingItems = pendingRes.body.data.items;
+    expect(pendingItems.length).toBe(1);
+    expect(pendingItems[0].amount).toBe(done.fee);
+
+    const confirmRes = await request(app)
+      .post(`/api/manager/buildings/${s.building._id}/wallet/pending-cash/${pendingItems[0]._id}/confirm`)
+      .set('Authorization', bearer(s.managerToken));
+    expect(confirmRes.status).toBe(200);
+
     const wallet = await BuildingWallet.findOne({ building: s.building._id });
     expect(wallet).not.toBeNull();
     expect(wallet.balance).toBe(done.fee);
@@ -156,109 +177,6 @@ describe('E2E · Walk-in lifecycle (check-in → check-out → ví tòa)', () =>
         vehicleType: String(s.vt._id),
         plateImage: IMG,
       });
-    expect(res.status).toBe(400);
-  });
-});
-
-// ──────────────────── C. RESERVATION LIFECYCLE (USER) ──────────────────────
-describe('E2E · Reservation lifecycle (đặt chỗ trừ cọc → hủy hoàn cọc)', () => {
-  async function seedReservationScene() {
-    const s = await seedFullScene();
-    await f.createReservationPolicy(s.building._id, { depositPercent: 15, refundPercent: 80 });
-    await f.createPricePolicy(s.building._id, s.vt._id, { hourlyRate: 10000, type: 'regular' });
-    // Đảm bảo có ít nhất một ô reservable khớp loại xe (chống overbooking check).
-    await f.createSlot(s.building._id, s.floor._id, {
-      zone: s.zone._id, vehicleType: s.vt._id, usageType: 'walk_in', reservable: true,
-    });
-    return s;
-  }
-
-  test('ước tính → đặt chỗ (trừ cọc ví) → hủy (hoàn phần lớn cọc)', async () => {
-    const s = await seedReservationScene();
-
-    // Khung giờ nguyên trong tương lai gần (ngày mai 10:00 → 12:00 = 2h).
-    const start = new Date(); start.setDate(start.getDate() + 1); start.setHours(10, 0, 0, 0);
-    const end = new Date(start.getTime() + 2 * 3600 * 1000);
-
-    // 1) Estimate qua HTTP
-    const estRes = await request(app)
-      .get('/api/users/reservations/estimate')
-      .query({
-        buildingId: String(s.building._id),
-        vehicleTypeId: String(s.vt._id),
-        startTime: start.toISOString(),
-        endTime: end.toISOString(),
-      })
-      .set('Authorization', bearer(s.userToken));
-
-    expect(estRes.status).toBe(200);
-    const estimate = estRes.body.data;
-    expect(estimate.estimatedFee).toBe(20000); // 2h × 10.000
-    expect(estimate.depositAmount).toBe(3000);  // 15%
-
-    // 1b) Policy qua HTTP — dùng để FE ràng buộc date/duration picker trước khi chọn giờ.
-    const policyRes = await request(app)
-      .get('/api/users/reservations/policy')
-      .query({ buildingId: String(s.building._id) })
-      .set('Authorization', bearer(s.userToken));
-    expect(policyRes.status).toBe(200);
-    expect(policyRes.body.data).toMatchObject({
-      maxAdvanceDays: 7,
-      maxDurationHours: 24,
-      depositPercent: 15,
-      refundPercent: 80,
-    });
-
-    // 2) Tạo reservation qua HTTP → ví bị trừ đúng số cọc.
-    const before = (await User.findById(s.customer._id)).walletBalance;
-    const createRes = await request(app)
-      .post('/api/users/reservations')
-      .set('Authorization', bearer(s.userToken))
-      .send({
-        buildingId: String(s.building._id),
-        vehicleTypeId: String(s.vt._id),
-        plateNumber: '30A-555.55',
-        startTime: start.toISOString(),
-        endTime: end.toISOString(),
-      });
-
-    expect(createRes.status).toBe(201);
-    const reservationId = createRes.body.data.reservation._id;
-    expect(reservationId).toBeTruthy();
-
-    const afterCreate = (await User.findById(s.customer._id)).walletBalance;
-    expect(before - afterCreate).toBe(estimate.depositAmount);
-
-    // 3) Hủy reservation qua HTTP → hoàn refundPercent% cọc.
-    const cancelRes = await request(app)
-      .delete(`/api/users/reservations/${reservationId}`)
-      .set('Authorization', bearer(s.userToken));
-
-    expect(cancelRes.status).toBe(200);
-    expect(cancelRes.body.data.reservation.status).toBe('cancelled');
-
-    const afterCancel = (await User.findById(s.customer._id)).walletBalance;
-    // Hoàn 80% cọc → mất ròng 20% cọc so với ban đầu.
-    const expectedRefund = Math.round(estimate.depositAmount * 0.8);
-    expect(afterCancel - afterCreate).toBe(expectedRefund);
-  });
-
-  test('đặt chỗ với khung giờ lẻ (không nguyên giờ) → 400', async () => {
-    const s = await seedReservationScene();
-    const start = new Date(); start.setDate(start.getDate() + 1); start.setHours(10, 0, 0, 0);
-    const end = new Date(start.getTime() + 90 * 60 * 1000); // 1.5h
-
-    const res = await request(app)
-      .post('/api/users/reservations')
-      .set('Authorization', bearer(s.userToken))
-      .send({
-        buildingId: String(s.building._id),
-        vehicleTypeId: String(s.vt._id),
-        plateNumber: '30A-777.77',
-        startTime: start.toISOString(),
-        endTime: end.toISOString(),
-      });
-
     expect(res.status).toBe(400);
   });
 });

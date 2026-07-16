@@ -28,4 +28,13 @@ const listIncidents = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { createIncident, listIncidents };
+/**
+ * PATCH /staff/incidents/:id
+ * Xử lý sự cố: đổi trạng thái / ghi chú / xử lý người vi phạm.
+ */
+const updateIncident = asyncHandler(async (req, res) => {
+  const result = await incidentService.updateIncident(req.user, req.params.id, req.body);
+  sendSuccess(res, { message: 'Cập nhật xử lý sự cố thành công', data: result });
+});
+
+module.exports = { createIncident, listIncidents, updateIncident };
