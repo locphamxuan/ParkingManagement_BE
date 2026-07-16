@@ -2,6 +2,7 @@
 const BuildingManager = require("../../models/building/BuildingManager");
 const StaffShift = require("../../models/operations/StaffShift");
 const ParkingSession = require("../../models/operations/ParkingSession");
+const LongTermSubscription = require("../../models/policy/LongTermSubscription");
 const AppError = require("../../utils/AppError");
 const { ROLES, ROLE_LIST } = require("../../constants/roles");
 const { writeAuditLog } = require("../../utils/audit");
@@ -153,6 +154,16 @@ const updateStatus = async (actor, id, isActive) => {
     throw new AppError("Cannot change status of admin account", 400);
   }
 
+  // Khóa vẫn được phép khi user còn phiên gửi xe / gói active (chặn kẻ xấu ngay lập tức
+  // là ưu tiên; staff checkout không phụ thuộc login của user) — nhưng ghi rõ vào audit
+  // để admin biết xe của user vẫn đang trong bãi.
+  const [activeSessions, activeSubscriptions] = !isActive
+    ? await Promise.all([
+        ParkingSession.countDocuments({ user: id, status: "active" }),
+        LongTermSubscription.countDocuments({ user: id, status: "active" }),
+      ])
+    : [0, 0];
+
   const updated = await User.findByIdAndUpdate(
     id,
     { isActive: !!isActive },
@@ -165,8 +176,8 @@ const updateStatus = async (actor, id, isActive) => {
     targetTable: "users",
     targetId: id,
     previousValue: { isActive: current.isActive, role: current.role },
-    newValue: { isActive: !!isActive },
-    severity: "medium",
+    newValue: { isActive: !!isActive, activeSessions, activeSubscriptions },
+    severity: !isActive && (activeSessions > 0 || activeSubscriptions > 0) ? "high" : "medium",
   });
   return updated;
 };
@@ -176,6 +187,28 @@ const remove = async (actor, id, { force = false } = {}) => {
   if (current.role === ROLES.ADMIN) {
     throw new AppError("Cannot delete admin account", 400);
   }
+  // Chặn XÓA khi user còn phiên gửi xe active (xe vẫn trong bãi — xóa sẽ mồ côi
+  // session.user, checkout/ví sẽ gãy) hoặc gói dài hạn active (mất dấu tiền gói).
+  // force KHÔNG bypass được 2 guard này — chỉ bypass building assignment bên dưới.
+  const [activeSessions, activeSubs] = await Promise.all([
+    ParkingSession.countDocuments({ user: id, status: "active" }),
+    LongTermSubscription.countDocuments({ user: id, status: "active" }),
+  ]);
+  if (activeSessions > 0) {
+    throw new AppError(
+      `User has ${activeSessions} active parking session(s) — the vehicle is still parked. Check out first.`,
+      409,
+      "USER_HAS_ACTIVE_SESSION",
+    );
+  }
+  if (activeSubs > 0) {
+    throw new AppError(
+      `User has ${activeSubs} active long-term subscription(s). Cancel them first.`,
+      409,
+      "USER_HAS_ACTIVE_SUBSCRIPTION",
+    );
+  }
+
   const activeMappings = await BuildingManager.find({ user: id, isActive: true });
   if (activeMappings.length > 0) {
     if (!force) {

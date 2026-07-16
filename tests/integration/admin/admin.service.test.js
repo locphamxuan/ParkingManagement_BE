@@ -7,6 +7,8 @@ const auditSvc = require('../../../src/services/admin/audit.service');
 const pricePolicySvc = require('../../../src/services/admin/pricePolicy.service');
 const Payment = require('../../../src/models/finance/Payment');
 const AuditLog = require('../../../src/models/log/AuditLog');
+const ParkingSession = require('../../../src/models/operations/ParkingSession');
+const LongTermSubscription = require('../../../src/models/policy/LongTermSubscription');
 
 let admin;
 beforeAll(async () => { await db.connect(); });
@@ -55,6 +57,53 @@ describe('user.service', () => {
     await f.createUser({ role: 'staff' });
     const staffOnly = await userSvc.list({ role: 'staff' });
     expect(staffOnly.items.every((u) => u.role === 'staff')).toBe(true);
+  });
+
+  test('xóa user còn phiên gửi xe active → 409 USER_HAS_ACTIVE_SESSION (force cũng không bypass)', async () => {
+    const building = await f.createBuilding();
+    const u = await f.createUser({ role: 'user' });
+    await ParkingSession.create({
+      building: building._id, user: u._id, plateNumber: '51F-123.45',
+      entryTime: new Date(), status: 'active',
+    });
+    await expect(userSvc.remove(admin, u._id))
+      .rejects.toMatchObject({ errorCode: 'USER_HAS_ACTIVE_SESSION' });
+    await expect(userSvc.remove(admin, u._id, { force: true }))
+      .rejects.toMatchObject({ errorCode: 'USER_HAS_ACTIVE_SESSION' });
+  });
+
+  test('xóa user còn gói dài hạn active → 409 USER_HAS_ACTIVE_SUBSCRIPTION; hết active thì xóa được', async () => {
+    const building = await f.createBuilding();
+    const vt = await f.createVehicleType(building._id);
+    const pkg = await f.createPackage(building._id, vt._id);
+    const u = await f.createUser({ role: 'user' });
+    const sub = await LongTermSubscription.create({
+      user: u._id, package: pkg._id, building: building._id, plateNumber: '51F-123.45',
+      startDate: new Date(), endDate: new Date(Date.now() + 30 * 24 * 3600 * 1000), status: 'active',
+    });
+    await expect(userSvc.remove(admin, u._id))
+      .rejects.toMatchObject({ errorCode: 'USER_HAS_ACTIVE_SUBSCRIPTION' });
+
+    // Gói không còn active → xóa user được.
+    sub.status = 'cancelled';
+    await sub.save();
+    const out = await userSvc.remove(admin, u._id);
+    expect(String(out.id)).toBe(String(u._id));
+  });
+
+  test('khóa user còn phiên active: vẫn khóa được, audit ghi severity high kèm số phiên', async () => {
+    const building = await f.createBuilding();
+    const u = await f.createUser({ role: 'user' });
+    await ParkingSession.create({
+      building: building._id, user: u._id, plateNumber: '51F-123.45',
+      entryTime: new Date(), status: 'active',
+    });
+    const locked = await userSvc.updateStatus(admin, u._id, false);
+    expect(locked.isActive).toBe(false);
+
+    const log = await AuditLog.findOne({ action: 'LOCK_USER', targetId: u._id });
+    expect(log.severity).toBe('high');
+    expect(log.newValue.activeSessions).toBe(1);
   });
 });
 

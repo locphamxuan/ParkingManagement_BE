@@ -164,6 +164,24 @@ const update = async (user, buildingId, id, payload) => {
     update.vehicleType = payload.vehicleType;
   }
 
+  // Đổi loại xe / đối tượng sử dụng khi dãy còn xe ĐANG ĐỖ → chặn: propagate sẽ
+  // ghi đè type lên cả slot đang chứa xe, làm xe đang đỗ thành "sai loại" giữa phiên.
+  // (Gửi lại giá trị cũ không tính là đổi.)
+  const changesVehicleType =
+    update.vehicleType !== undefined && String(update.vehicleType) !== String(current.vehicleType);
+  const changesUsageType =
+    update.usageType !== undefined && update.usageType !== current.usageType;
+  if (changesVehicleType || changesUsageType) {
+    const occupiedCount = await ParkingSlot.countDocuments({ zone: current._id, status: "occupied" });
+    if (occupiedCount > 0) {
+      throw new AppError(
+        `Zone "${current.code}" has ${occupiedCount} occupied slot(s). Wait until they are checked out before changing the zone vehicle/usage type.`,
+        409,
+        "ZONE_HAS_OCCUPIED_SLOTS",
+      );
+    }
+  }
+
   // Đổi capacity hoặc chuyển tầng → kiểm tra lại ngân sách của tầng hiệu lực.
   if (payload.capacity !== undefined || payload.floor !== undefined) {
     const effectiveCapacity =

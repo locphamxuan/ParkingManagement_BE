@@ -4,6 +4,10 @@ const BuildingWalletTransaction = require('../../models/finance/BuildingWalletTr
 const Payment = require('../../models/finance/Payment');
 const AppError = require('../../utils/AppError');
 
+// Loại Payment tính là DOANH THU thật (loại 'topup' = manager tự nạp ví, 'refund' =
+// tiền hoàn ra). Khớp định nghĩa doanh thu ở dashboard manager/admin.
+const REVENUE_PAYMENT_TYPES = ['session', 'reservation', 'subscription'];
+
 // ─── Day helpers (local-server time) ───────────────────────────────────────────
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -130,6 +134,54 @@ const getDailyRevenue = async (buildingId, date) => {
   const totalRevenue = result[0]?.total ?? 0;
 
   return { date: key, totalRevenue };
+};
+
+/**
+ * Doanh thu THEO NGÀY × PHƯƠNG THỨC + tổng doanh thu all-time cho 1 tòa.
+ * Nguồn: Payment thành công loại doanh thu (session/reservation/subscription) — nhất
+ * quán với dashboard, và tách được theo phương thức (cash/wallet/online) mà ví tòa
+ * (BuildingWalletTransaction) không lưu. `allTimeTotal` KHÔNG gồm top-up nên phản ánh
+ * đúng "tổng doanh thu gửi xe" (khác `wallet.totalReceived` vốn cộng cả top-up).
+ * @param {string|ObjectId} buildingId
+ * @param {{ from?: string|Date, to?: string|Date }} [range] - mặc định 14 ngày gần nhất
+ */
+const getRevenueBreakdown = async (buildingId, { from, to } = {}) => {
+  const bId = new mongoose.Types.ObjectId(String(buildingId));
+
+  const end = to ? new Date(to) : new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = from ? new Date(from) : new Date(end);
+  if (!from) start.setDate(start.getDate() - 13); // 14 ngày gồm hôm nay
+  start.setHours(0, 0, 0, 0);
+
+  const baseMatch = { building: bId, status: 'success', type: { $in: REVENUE_PAYMENT_TYPES } };
+  const byMethodStage = {
+    total: { $sum: '$amount' },
+    cash: { $sum: { $cond: [{ $eq: ['$method', 'cash'] }, '$amount', 0] } },
+    wallet: { $sum: { $cond: [{ $eq: ['$method', 'wallet'] }, '$amount', 0] } },
+    online: { $sum: { $cond: [{ $in: ['$method', ['qr', 'payos', 'card']] }, '$amount', 0] } },
+  };
+
+  const [dayRows, allTime] = await Promise.all([
+    Payment.aggregate([
+      { $match: { ...baseMatch, createdAt: { $gte: start, $lte: end } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, ...byMethodStage } },
+      { $sort: { _id: -1 } },
+    ]),
+    Payment.aggregate([
+      { $match: baseMatch },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]),
+  ]);
+
+  return {
+    allTimeTotal: allTime[0]?.total ?? 0,
+    days: dayRows.map((r) => ({
+      date: r._id,
+      total: r.total,
+      byMethod: { cash: r.cash, wallet: r.wallet, online: r.online },
+    })),
+  };
 };
 
 /**
@@ -273,6 +325,7 @@ module.exports = {
   credit,
   debit,
   getDailyRevenue,
+  getRevenueBreakdown,
   listTransactions,
   listPendingCash,
   confirmCash,

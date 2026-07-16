@@ -38,12 +38,12 @@ const lookupPlate = asyncHandler(async (req, res) => {
 });
 
 const listFreeSlots = asyncHandler(async (req, res) => {
-  const { items, suggestedSlotId } = await parkingSessionService.listFreeSlots(
+  const { items, suggestedSlotId, totalSlots, totalAvailable } = await parkingSessionService.listFreeSlots(
     req.user,
     req.query.building || req.query.buildingId,
     { vehicleType: req.query.vehicleType, usageType: req.query.usageType }
   );
-  sendSuccess(res, { data: { items, suggestedSlotId } });
+  sendSuccess(res, { data: { items, suggestedSlotId, totalSlots, totalAvailable } });
 });
 
 /**

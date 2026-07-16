@@ -288,7 +288,8 @@
  *       properties:
  *         _id: { $ref: '#/components/schemas/ObjectId' }
  *         building: { $ref: '#/components/schemas/ObjectId' }
- *         code: { type: string, example: F1 }
+ *         code: { type: string, example: F1, description: 'Auto-generated from name — read-only for clients.' }
+ *         name: { type: string, example: 'Floor 1' }
  *         capacity: { type: number, example: 120 }
  *         allowedVehicleTypes:
  *           type: array
@@ -322,11 +323,28 @@
  *         _id: { $ref: '#/components/schemas/ObjectId' }
  *         building: { $ref: '#/components/schemas/ObjectId' }
  *         floor: { $ref: '#/components/schemas/ObjectId' }
- *         code: { type: string, example: A-101 }
+ *         zone: { $ref: '#/components/schemas/ObjectId' }
+ *         code: { type: string, example: A-01, description: 'Auto-generated from the zone code when omitted at creation; not updatable.' }
  *         vehicleType: { $ref: '#/components/schemas/ObjectId' }
+ *         usageType: { type: string, enum: [walk_in, registered, subscriber, reserved], description: 'Denormalized from the zone.' }
  *         status: { type: string, enum: [available, occupied, reserved, maintenance], example: available }
  *         reservable: { type: boolean, example: true }
  *         note: { type: string, example: Near elevator }
+ *         createdAt: { type: string, format: date-time, example: '2026-06-01T08:00:00.000Z' }
+ *         updatedAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
+ *
+ *     Zone:
+ *       type: object
+ *       properties:
+ *         _id: { $ref: '#/components/schemas/ObjectId' }
+ *         building: { $ref: '#/components/schemas/ObjectId' }
+ *         floor: { $ref: '#/components/schemas/ObjectId' }
+ *         code: { type: string, example: VL, description: 'Auto-generated from name — read-only for clients.' }
+ *         name: { type: string, example: 'Walk-in zone' }
+ *         vehicleType: { $ref: '#/components/schemas/ObjectId' }
+ *         usageType: { type: string, enum: [walk_in, registered, subscriber, reserved], example: walk_in }
+ *         capacity: { type: number, example: 20 }
+ *         status: { type: string, enum: [active, inactive, maintenance], example: active }
  *         createdAt: { type: string, format: date-time, example: '2026-06-01T08:00:00.000Z' }
  *         updatedAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
  *

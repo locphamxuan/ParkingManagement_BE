@@ -102,4 +102,25 @@ describe('slot.service', () => {
     await expect(slotSvc.remove(manager, building._id, slot._id))
       .rejects.toMatchObject({ statusCode: 409 });
   });
+
+  test('đổi usageType khi dãy còn xe đang đỗ → 409 ZONE_HAS_OCCUPIED_SLOTS', async () => {
+    const z = await zoneSvc.create(manager, building._id, {
+      floor: floor._id, name: 'Dãy A', vehicleType: vt._id, usageType: 'walk_in', capacity: 3,
+    });
+    const slot = await slotSvc.create(manager, building._id, { floor: floor._id, zone: z._id });
+    await slotSvc.update(manager, building._id, slot._id, { status: 'occupied' });
+
+    // Đổi đối tượng sử dụng khi còn xe đỗ → chặn (propagate sẽ retype slot đang chứa xe).
+    await expect(zoneSvc.update(manager, building._id, z._id, { usageType: 'subscriber' }))
+      .rejects.toMatchObject({ errorCode: 'ZONE_HAS_OCCUPIED_SLOTS' });
+
+    // Gửi lại GIÁ TRỊ CŨ (không đổi) hoặc sửa field khác vẫn được phép.
+    const same = await zoneSvc.update(manager, building._id, z._id, { usageType: 'walk_in', name: 'Dãy A mới' });
+    expect(same.name).toBe('Dãy A mới');
+
+    // Xe rời bãi → đổi được, và type mới propagate xuống slot.
+    await slotSvc.update(manager, building._id, slot._id, { status: 'available' });
+    const changed = await zoneSvc.update(manager, building._id, z._id, { usageType: 'subscriber' });
+    expect(changed.usageType).toBe('subscriber');
+  });
 });

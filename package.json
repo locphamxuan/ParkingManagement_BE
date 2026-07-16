@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon --watch src --ext js,json src/server.js",
+    "dev:memory": "node tools/run-dev-memory-db.js",
     "test": "jest --runInBand"
   },
   "keywords": [

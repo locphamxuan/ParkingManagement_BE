@@ -1,7 +1,7 @@
 const LongTermPackage = require('../../models/policy/LongTermPackage');
 const LongTermSubscription = require('../../models/policy/LongTermSubscription');
-const ReservationPolicy = require('../../models/policy/ReservationPolicy');
 const ParkingSlot = require('../../models/building/ParkingSlot');
+const { getRefundPercent } = require('../../utils/refundPolicy');
 const ParkingSession = require('../../models/operations/ParkingSession');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const Payment = require('../../models/finance/Payment');
@@ -247,10 +247,9 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
       }
 
       const packagePrice = subscription.package.price;
-      // % hoàn tiền do MANAGER cấu hình trong ReservationPolicy của tòa nhà
-      // (đồng bộ với luồng hủy reservation) — không hardcode.
-      const policy = await ReservationPolicy.findOne({ building: subscription.building }).session(mongoSession);
-      const refundPercent = Math.min(Math.max(Number(policy?.refundPercent ?? 80), 0), 100);
+      // % hoàn tiền do MANAGER cấu hình — helper chung (default 80, clamp 0–100),
+      // nhất quán với hủy reservation và endpoint public /users/reservations/policy.
+      const refundPercent = await getRefundPercent(subscription.building, mongoSession);
       const refundAmount = Math.round((packagePrice * refundPercent) / 100);
 
       subscription.status = 'cancelled';

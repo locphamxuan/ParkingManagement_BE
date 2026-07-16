@@ -38,6 +38,7 @@ router.get("/wallet/pending-cash", buildingWalletController.listPendingCash);
 router.post("/wallet/pending-cash/:paymentId/confirm", buildingWalletController.confirmCash);
 // Toàn bộ dòng tiền của building theo phương thức.
 router.get("/payments", buildingWalletController.listPayments);
+router.get("/wallet/revenue-breakdown", buildingWalletController.getRevenueBreakdown);
 
 // Giờ mở/đóng cửa của tòa nhà.
 router.put("/operating-hours", buildingController.updateOperatingHours);
