@@ -136,10 +136,12 @@ const listSlotsForFloor = asyncHandler(async (req, res) => {
     let bookable;
     if (usage === 'subscriber') {
       // Ô dãy gói được chọn khi còn trống (giữ chỗ cố định lúc mua gói).
-      bookable = s.usageType === 'subscriber';
-    } else {
+      bookable = s.usageType === 'subscriber' || !s.usageType;
+    } else if (usage === 'visitor') {
       // Ô thuộc dãy GÓI DÀI HẠN (subscriber) KHÔNG cho khách thường đặt chỗ.
       bookable = s.usageType !== 'subscriber';
+    } else {
+      bookable = true;
     }
     return {
       _id: s._id,
