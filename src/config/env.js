@@ -14,6 +14,11 @@ const env = {
   // Google Gemini — AI camera plate/brand recognition (free tier).
   // Optional: the app boots without it; the /scan endpoint returns 503 if unset.
   geminiApiKey: process.env.GEMINI_API_KEY || null,
+  // OCR provider cho camera cổng: "gemini" | "paddle". Bỏ trống → tự chọn
+  // theo cấu hình sẵn có (paddle > gemini). Không cấu hình gì → lỗi 503, không mock.
+  ocrProvider: process.env.OCR_PROVIDER || null,
+  // Base URL của PaddleOCR microservice (ocr-service/), vd http://localhost:8868
+  paddleOcrUrl: process.env.PADDLE_OCR_URL || null,
 };
 
 const required = ['mongodbUri', 'jwtSecret', 'payosClientId', 'payosApiKey', 'payosChecksumKey'];

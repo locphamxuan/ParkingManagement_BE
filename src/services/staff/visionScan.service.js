@@ -2,11 +2,14 @@ const { GoogleGenAI } = require('@google/genai');
 const env = require('../../config/env');
 const AppError = require('../../utils/AppError');
 const { normalizePlate } = require('../../utils/plate.util');
-const logger = require('../../utils/logger');
 
 /**
- * AI camera recognition — a single Google Gemini vision call reads BOTH the
- * Vietnamese license plate and the vehicle make from one captured frame.
+ * AI camera recognition — provider-based:
+ * - "gemini": một call Google Gemini vision đọc biển số + loại xe + hãng xe.
+ * - "paddle": gọi microservice PaddleOCR self-hosted (ocr-service/) — chỉ đọc
+ *   biển số; loại xe/hãng xe do staff xác nhận trên UI.
+ * - Không cấu hình provider nào, hoặc scan lỗi → luôn ném lỗi (KHÔNG có mock
+ *   fallback) để staff thấy alert thật thay vì nhận nhầm dữ liệu giả.
  */
 
 const MODEL = 'gemini-2.5-flash';
@@ -39,14 +42,7 @@ const normalizeVehicleType = (raw) => {
 };
 
 let cachedClient = null;
-const getClient = () => {
-  if (!env.geminiApiKey) {
-    throw new AppError(
-      'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY).',
-      503,
-      'AI_SCAN_NOT_CONFIGURED'
-    );
-  }
+const getGeminiClient = () => {
   if (!cachedClient) {
     cachedClient = new GoogleGenAI({ apiKey: env.geminiApiKey });
   }
@@ -65,44 +61,11 @@ const parseImage = (image) => {
   return { mediaType: 'image/jpeg', data: image };
 };
 
-/**
- * scanVehicleImage(image)
- * @param {string} image base64 image (with or without data-URL prefix)
- * @returns {Promise<{plateNumber:string, plateConfidence:number, brand:string|null, brandConfidence:number}>}
- *          plateNumber is canonicalized to the Vietnamese format ('' if unparseable).
- */
-const scanVehicleImage = async (image) => {
-  // Demo Mock Mode Fallback when Gemini API key is missing
-  if (!env.geminiApiKey) {
-    try {
-      // Demo: ưu tiên biển số của một gói dài hạn đang hoạt động để test luồng gói.
-      const LongTermSubscription = require('../../models/policy/LongTermSubscription');
-      const activeSub = await LongTermSubscription.findOne({ status: 'active' })
-        .sort({ updatedAt: -1 })
-        .lean();
+/* ── Provider: Google Gemini ────────────────────────────────────────────── */
 
-      const targetPlate = activeSub ? activeSub.plateNumber : '59G2-038.80';
-      return {
-        plateNumber: normalizePlate(targetPlate),
-        plateConfidence: 0.99,
-        vehicleType: 'car',
-        brand: 'VinFast',
-        brandConfidence: 0.99,
-      };
-    } catch (err) {
-      logger.error('[AI CAMERA] Mock fallback failed, returning default plate:', err.message);
-      return {
-        plateNumber: '59G2-038.80',
-        plateConfidence: 0.99,
-        vehicleType: 'car',
-        brand: 'Toyota',
-        brandConfidence: 0.99,
-      };
-    }
-  }
-
+const scanWithGemini = async (image) => {
   const { mediaType, data } = parseImage(image);
-  const client = getClient();
+  const client = getGeminiClient();
 
   let response;
   try {
@@ -145,6 +108,99 @@ const scanVehicleImage = async (image) => {
     brand: parsed.brand || null,
     brandConfidence: Number(parsed.brandConfidence) || 0,
   };
+};
+
+/* ── Provider: PaddleOCR microservice ───────────────────────────────────── */
+
+const PADDLE_TIMEOUT_MS = 15000;
+
+const scanWithPaddle = async (image) => {
+  const { mediaType, data } = parseImage(image);
+
+  let response;
+  try {
+    response = await fetch(`${env.paddleOcrUrl.replace(/\/$/, '')}/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: data, mediaType }),
+      signal: AbortSignal.timeout(PADDLE_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw new AppError(
+      `PaddleOCR service không phản hồi: ${err?.message || 'unknown error'}`,
+      502,
+      'AI_SCAN_FAILED'
+    );
+  }
+
+  if (!response.ok) {
+    throw new AppError(`PaddleOCR service lỗi (HTTP ${response.status}).`, 502, 'AI_SCAN_FAILED');
+  }
+
+  let parsed;
+  try {
+    parsed = await response.json();
+  } catch {
+    throw new AppError('PaddleOCR trả về dữ liệu không hợp lệ.', 502, 'AI_SCAN_BAD_OUTPUT');
+  }
+
+  return {
+    plateNumber: normalizePlate(parsed.plateNumber),
+    plateConfidence: Number(parsed.plateConfidence) || 0,
+    // PaddleOCR chỉ đọc text — loại xe/hãng xe do staff chọn trên UI check-in.
+    vehicleType: normalizeVehicleType(parsed.vehicleType),
+    brand: parsed.brand || null,
+    brandConfidence: Number(parsed.brandConfidence) || 0,
+  };
+};
+
+/* ── Provider selection ─────────────────────────────────────────────────── */
+
+// OCR_PROVIDER thắng khi được set; nếu không, tự chọn theo cấu hình sẵn có.
+// KHÔNG có nhánh mock: thiếu cấu hình luôn ném lỗi rõ ràng cho staff thấy.
+const resolveProvider = () => {
+  if (env.ocrProvider === 'paddle') {
+    if (!env.paddleOcrUrl) {
+      throw new AppError(
+        'PaddleOCR chưa được cấu hình (thiếu PADDLE_OCR_URL).',
+        503,
+        'AI_SCAN_NOT_CONFIGURED'
+      );
+    }
+    return 'paddle';
+  }
+  if (env.ocrProvider === 'gemini') {
+    if (!env.geminiApiKey) {
+      throw new AppError(
+        'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY).',
+        503,
+        'AI_SCAN_NOT_CONFIGURED'
+      );
+    }
+    return 'gemini';
+  }
+  if (env.paddleOcrUrl) return 'paddle';
+  if (env.geminiApiKey) return 'gemini';
+  throw new AppError(
+    'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY hoặc PADDLE_OCR_URL). Vui lòng liên hệ quản trị viên.',
+    503,
+    'AI_SCAN_NOT_CONFIGURED'
+  );
+};
+
+/**
+ * scanVehicleImage(image)
+ * @param {string} image base64 image (with or without data-URL prefix)
+ * @returns {Promise<{plateNumber:string, plateConfidence:number, vehicleType:('car'|'motorcycle'|null), brand:string|null, brandConfidence:number}>}
+ *          plateNumber is canonicalized to the Vietnamese format ('' if unparseable).
+ * @throws {AppError} khi chưa cấu hình provider hoặc scan thất bại — KHÔNG bao giờ
+ *         trả về dữ liệu giả (mock), luôn để caller (route/controller) trả lỗi
+ *         thật cho FE hiển thị alert.
+ */
+const scanVehicleImage = async (image) => {
+  const provider = resolveProvider();
+  if (provider === 'paddle') return scanWithPaddle(image);
+  return scanWithGemini(image);
 };
 
 module.exports = { scanVehicleImage };
