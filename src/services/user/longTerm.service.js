@@ -26,41 +26,7 @@ const listPackages = async (buildingId) => {
   return packages;
 };
 
-/**
- * Validate that the requested startDate falls within the allowed advance
- * booking window based on the package's durationDays.
- */
-function validateStartDateConstraint(startDate, durationDays) {
-  const now = new Date();
-
-  if (durationDays <= 7) {
-    // Weekly: startDate must be within 7 days from now
-    const maxDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    if (startDate > maxDate) {
-      throw new AppError('Gói tuần chỉ được đăng ký bắt đầu trong vòng 7 ngày tới', 400);
-    }
-  } else if (durationDays <= 30) {
-    // Monthly: startDate must be within the current month or the next calendar month
-    const endOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59, 999);
-    if (startDate > endOfNextMonth) {
-      throw new AppError('Gói tháng chỉ được đăng ký bắt đầu trong tháng này hoặc tháng sau', 400);
-    }
-  } else {
-    // Yearly: startDate must be within the current calendar year or the next calendar year
-    const endOfNextYear = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
-    if (startDate > endOfNextYear) {
-      throw new AppError('Gói năm chỉ được đăng ký bắt đầu trong năm nay hoặc năm sau', 400);
-    }
-  }
-
-  // startDate should not be before today (allow today and future dates)
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-  if (startDate < todayStart) {
-    throw new AppError('Ngày bắt đầu không được nằm trong quá khứ', 400);
-  }
-}
-
-const subscribe = async (userId, { packageId, plateNumber, startDate, slotId }) => {
+const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
   // Chuẩn hoá biển số về dạng canonical (giống lúc check-in) để gói luôn được
   // nhận diện khi staff quét xe — tránh lệch '59G2-81000' vs '59G2-810.00'.
   const normalizedPlate = normalizePlate(plateNumber);
@@ -82,15 +48,9 @@ const subscribe = async (userId, { packageId, plateNumber, startDate, slotId }) 
   const pkg = await LongTermPackage.findById(packageId);
   if (!pkg || !pkg.isActive) throw new AppError('Package not found or inactive', 404);
 
-  // ── Determine start/end dates ────────────────────────────────────────────
-  const resolvedStart = startDate ? new Date(startDate) : new Date();
-  if (Number.isNaN(resolvedStart.getTime())) {
-    throw new AppError('startDate is not a valid date', 400);
-  }
-
-  // Validate advance booking date constraint
-  validateStartDateConstraint(resolvedStart, pkg.durationDays);
-
+  // ── Start/end dates: gói luôn bắt đầu NGAY tại thời điểm mua (không cho chọn
+  // ngày tương lai) — tránh trạng thái "active" nhưng chưa tới hạn dùng được. ──
+  const resolvedStart = new Date();
   const endDate = new Date(resolvedStart.getTime() + pkg.durationDays * 24 * 60 * 60 * 1000);
 
   // Gói floating: KHÔNG giữ slot cố định. Staff gán slot trống lúc check-in.
@@ -442,7 +402,8 @@ const listSubscriptions = async (userId, query = {}) => {
       .skip((page - 1) * limit)
       .limit(limit)
       .populate('package', 'name code price durationDays maxHoursPerDay')
-      .populate('building', 'name address'),
+      .populate('building', 'name address')
+      .populate('slot', 'code'),
     LongTermSubscription.countDocuments(filter),
   ]);
 
