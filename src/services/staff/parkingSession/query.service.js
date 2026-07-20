@@ -302,7 +302,15 @@ const scanVehicle = async (staffUser, image) => {
     await visionScanService.scanVehicleImage(image);
 
   // Resolve the owner account only when we have a valid plate.
-  let account = { hasAccount: false, registeredVehicleType: null, user: null, activeSession: null };
+  let account = {
+    hasAccount: false,
+    registeredVehicleType: null,
+    user: null,
+    activeSession: null,
+    usageType: 'walk_in',
+    hasActivePackage: false,
+    activePackage: null,
+  };
   if (isValidVietnamPlate(plateNumber)) {
     const lookup = await lookupPlate(staffUser, plateNumber);
     account = {
@@ -310,6 +318,9 @@ const scanVehicle = async (staffUser, image) => {
       registeredVehicleType: lookup.registeredVehicleType,
       user: lookup.user,
       activeSession: lookup.activeSession,
+      usageType: lookup.usageType,
+      hasActivePackage: lookup.hasActivePackage,
+      activePackage: lookup.activePackage,
     };
   }
 
