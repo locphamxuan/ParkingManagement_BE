@@ -60,8 +60,11 @@ const createIncident = async (staffUser, payload = {}) => {
     note:           String(payload.note || payload.description || '').trim(),
     building:       buildingId,
     severity:       payload.severity || 'medium',
-    status:         'open',
+    status:         payload.status || 'open',
     reportedBy:     staffUser._id,
+    resolvedBy:     payload.status === 'resolved' ? staffUser._id : null,
+    resolvedAt:     payload.status === 'resolved' ? new Date() : null,
+    resolutionNote: payload.status === 'resolved' ? String(payload.resolutionNote || payload.note || '').trim() : undefined,
     parkingSession: payload.parkingSessionId || null,
   });
 
