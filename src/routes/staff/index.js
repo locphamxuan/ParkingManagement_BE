@@ -26,6 +26,18 @@ router.use("/incidents", incidentRoutes);
 router.use("/my-shifts", shiftRoutes);
 router.use("/users", usersRoutes);
 
+const reservationPolicyService = require("../../services/manager/reservationPolicy.service");
+const { wrapResponse } = require("../../utils/response");
+
+router.get("/buildings/:id/policy", async (req, res, next) => {
+  try {
+    const policy = await reservationPolicyService.getPublic(req.params.id);
+    return res.json(wrapResponse(policy));
+  } catch (err) {
+    next(err);
+  }
+});
+
 
 
 module.exports = router;

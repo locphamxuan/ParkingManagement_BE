@@ -11,10 +11,24 @@ const validatePolicyPayload = (payload) => {
       throw new AppError("refundPercent must be a number between 0 and 100", 400);
     }
   }
+  if (payload.lostTicketFee !== undefined) {
+    const v = Number(payload.lostTicketFee);
+    if (Number.isNaN(v) || v < 0) {
+      throw new AppError("lostTicketFee must be a valid positive number", 400);
+    }
+  }
+  if (payload.ruleViolationFee !== undefined) {
+    const v = Number(payload.ruleViolationFee);
+    if (Number.isNaN(v) || v < 0) {
+      throw new AppError("ruleViolationFee must be a valid positive number", 400);
+    }
+  }
 };
 
 const DEFAULT_POLICY = {
   refundPercent: 80,
+  lostTicketFee: 50000,
+  ruleViolationFee: 100000,
   isActive: true,
 };
 
@@ -30,6 +44,16 @@ const get = async (user, buildingId) => {
   return policy;
 };
 
+// Cho phép Staff & Public xem chính sách hoàn tiền / phạt tiền của tòa nhà
+const getPublic = async (buildingId) => {
+  if (!buildingId) return DEFAULT_POLICY;
+  let policy = await ReservationPolicy.findOne({ building: buildingId });
+  if (!policy) {
+    return { building: buildingId, ...DEFAULT_POLICY };
+  }
+  return policy;
+};
+
 const upsert = async (user, buildingId, payload) => {
   ensureManagerOwnsBuilding(user, buildingId);
   validatePolicyPayload(payload);
@@ -37,6 +61,8 @@ const upsert = async (user, buildingId, payload) => {
 
   const update = {};
   if (payload.refundPercent !== undefined) update.refundPercent = Number(payload.refundPercent);
+  if (payload.lostTicketFee !== undefined) update.lostTicketFee = Number(payload.lostTicketFee);
+  if (payload.ruleViolationFee !== undefined) update.ruleViolationFee = Number(payload.ruleViolationFee);
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
 
   const updated = await ReservationPolicy.findOneAndUpdate(
@@ -59,4 +85,4 @@ const upsert = async (user, buildingId, payload) => {
   return updated;
 };
 
-module.exports = { get, upsert };
+module.exports = { get, getPublic, upsert };
