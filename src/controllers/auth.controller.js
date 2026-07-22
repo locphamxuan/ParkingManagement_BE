@@ -1,9 +1,25 @@
 const authService = require('../services/auth.service');
 const asyncHandler = require('../utils/asyncHandler');
 const { sendSuccess } = require('../utils/response');
+const { cookieMaxAgeMs } = require('../utils/token');
+const env = require('../config/env');
+
+// The web app authenticates purely via this httpOnly cookie (never touched by
+// JS, so an XSS payload can't read it out of localStorage) — the JSON body
+// still returns `data.token` too, for Mobile, which has no cookie jar and
+// keeps its own token in secure device storage.
+const setAuthCookie = (res, token) => {
+  res.cookie('token', token, {
+    httpOnly: true,
+    secure: env.nodeEnv === 'production',
+    sameSite: env.nodeEnv === 'production' ? 'none' : 'lax',
+    maxAge: cookieMaxAgeMs(),
+  });
+};
 
 const register = asyncHandler(async (req, res) => {
   const data = await authService.register(req.body);
+  setAuthCookie(res, data.token);
   sendSuccess(res, {
     statusCode: 201,
     message: 'Registration successful',
@@ -13,7 +29,17 @@ const register = asyncHandler(async (req, res) => {
 
 const login = asyncHandler(async (req, res) => {
   const data = await authService.login(req.body);
+  setAuthCookie(res, data.token);
   sendSuccess(res, { message: 'Login successful', data });
+});
+
+const logout = asyncHandler(async (_req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: env.nodeEnv === 'production',
+    sameSite: env.nodeEnv === 'production' ? 'none' : 'lax',
+  });
+  sendSuccess(res, { message: 'Logged out' });
 });
 
 const getMe = asyncHandler(async (req, res) => {
@@ -43,6 +69,7 @@ const registerRequest = asyncHandler(async (req, res) => {
 
 const registerVerify = asyncHandler(async (req, res) => {
   const data = await authService.verifyOtpAndRegister(req.body);
+  setAuthCookie(res, data.token);
   sendSuccess(res, {
     statusCode: 201,
     message: 'Registration successful',
@@ -50,4 +77,4 @@ const registerVerify = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { register, login, getMe, forgotPassword, resetPassword, registerRequest, registerVerify };
+module.exports = { register, login, logout, getMe, forgotPassword, resetPassword, registerRequest, registerVerify };

@@ -1,14 +1,19 @@
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const routes = require('./routes');
 const webhookRoutes = require('./routes/payment/webhook.routes');
 const { notFound, errorHandler } = require('./middlewares/error.middleware');
 const { sanitizeInputs } = require('./middlewares/sanitize.middleware');
 const { setupSwagger } = require('./config/swagger');
+const env = require('./config/env');
 
 const app = express();
 
-app.use(cors());
+// credentials:true + an explicit origin (never '*') is required for the browser
+// to accept the httpOnly auth cookie set on login — see auth.controller.js.
+app.use(cors({ origin: env.clientUrl, credentials: true }));
+app.use(cookieParser());
 // Larger limit so base64 camera frames (AI plate/brand scan) fit in the body.
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
