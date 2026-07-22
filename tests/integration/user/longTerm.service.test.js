@@ -82,13 +82,13 @@ describe('cancelSubscription', () => {
     expect(fresh.walletBalance).toBe(940000);
   });
 
-  test('cho phép tự hủy gói bất kỳ lúc nào (không giới hạn 3 ngày)', async () => {
+  test('quá 3 ngày kể từ startDate → 400 CANCELLATION_WINDOW_EXPIRED', async () => {
     const sub = await svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' });
     await LongTermSubscription.findByIdAndUpdate(sub._id, {
       startDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
     });
-    const res = await svc.cancelSubscription(user._id, sub._id, { cancelReason: 'no_longer_needed' });
-    expect(res.subscription.status).toBe('cancelled');
+    await expect(svc.cancelSubscription(user._id, sub._id, { cancelReason: 'no_longer_needed' }))
+      .rejects.toMatchObject({ errorCode: 'CANCELLATION_WINDOW_EXPIRED' });
   });
 });
 
