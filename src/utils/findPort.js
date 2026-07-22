@@ -1,4 +1,4 @@
-const net = require('net');
+const net = require('node:net');
 
 const isPortFree = (port) =>
   new Promise((resolve) => {

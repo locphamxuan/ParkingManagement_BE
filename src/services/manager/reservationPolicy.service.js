@@ -69,7 +69,7 @@ const upsert = async (user, buildingId, payload) => {
     targetTable: "reservation_policies",
     targetId: updated._id,
     building: buildingId,
-    previousValue: current ? current.toObject() : null,
+    previousValue: current?.toObject() ?? null,
     newValue: updated.toObject(),
     severity: "medium",
   });
