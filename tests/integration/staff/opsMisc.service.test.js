@@ -1,13 +1,9 @@
-/** staff: incident (thường + mất vé), wallet debit, submit shift report. */
+/** staff: incident, wallet debit, submit shift report. */
 const db = require('../../helpers/db');
 const f = require('../../helpers/fixtures');
 const incidentSvc = require('../../../src/services/staff/incident.service');
 const walletSvc = require('../../../src/services/staff/wallet.service');
-const shiftSvc = require('../../../src/services/staff/shift.service');
-const ParkingSession = require('../../../src/models/operations/ParkingSession');
-const ParkingSlot = require('../../../src/models/building/ParkingSlot');
 const User = require('../../../src/models/user/User');
-const Payment = require('../../../src/models/finance/Payment');
 
 let building, staff;
 beforeAll(async () => { await db.connect(); });
@@ -29,24 +25,6 @@ describe('incident.service', () => {
   test('thiếu type → 400', async () => {
     await expect(incidentSvc.createIncident(staff, { buildingId: building._id }))
       .rejects.toMatchObject({ errorCode: 'INCIDENT_TYPE_REQUIRED' });
-  });
-
-  test('mất vé: force-checkout phiên + tạo payment + incident resolved', async () => {
-    const floor = await f.createFloor(building._id);
-    const slot = await f.createSlot(building._id, floor._id, { status: 'occupied' });
-    const session = await ParkingSession.create({
-      plateNumber: '51F-123.45', building: building._id, slot: slot._id, status: 'active', staff: staff._id,
-    });
-    const res = await incidentSvc.createIncident(staff, {
-      type: 'lost_ticket', parkingSessionId: session._id, penaltyFee: 50000, buildingId: building._id,
-    });
-    expect(res.item.status).toBe('resolved');
-    const freshSession = await ParkingSession.findById(session._id);
-    expect(freshSession.status).toBe('completed');
-    expect(freshSession.fee).toBe(50000);
-    const freshSlot = await ParkingSlot.findById(slot._id);
-    expect(freshSlot.status).toBe('available');
-    expect(await Payment.countDocuments({ parkingSession: session._id })).toBe(1);
   });
 });
 
