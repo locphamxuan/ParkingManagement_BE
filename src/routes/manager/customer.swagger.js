@@ -36,8 +36,34 @@
  *                               fullName: { type: string, example: Nguyen Van A }
  *                               email: { type: string, example: a@example.com }
  *                               phone: { type: string, nullable: true, example: '0901234567' }
+ *                               isActive: { type: boolean, example: true, description: Account active/locked status. }
+ *                               walletBalance: { type: number, example: 250000 }
+ *                               createdAt: { type: string, format: date-time, description: Account registration date. }
+ *                               licensePlates:
+ *                                 type: array
+ *                                 items:
+ *                                   type: object
+ *                                   properties:
+ *                                     plateNumber: { type: string, example: 59G2-038.80 }
+ *                                     vehicleType: { type: string, example: car }
+ *                               sessionCount: { type: integer, example: 5, description: Number of parking sessions in THIS building. }
+ *                               lastVisitAt: { type: string, format: date-time, nullable: true, description: Most recent entryTime in this building; null if never parked here (subscription-only). }
  *                               hasActivePackage: { type: boolean, example: true }
  *                               hasAnyPackage: { type: boolean, example: true }
+ *                               subscriptions:
+ *                                 type: array
+ *                                 description: Every long-term subscription this user has in this building, newest first.
+ *                                 items:
+ *                                   type: object
+ *                                   properties:
+ *                                     _id: { type: string, format: objectId }
+ *                                     plateNumber: { type: string, example: 59G2-038.80 }
+ *                                     startDate: { type: string, format: date-time }
+ *                                     endDate: { type: string, format: date-time }
+ *                                     status: { type: string, enum: [pending, active, expired, cancelled] }
+ *                                     package: { type: object, nullable: true, properties: { _id: { type: string }, name: { type: string }, price: { type: number } } }
+ *                                     refundPercent: { type: number, nullable: true }
+ *                                     refundAmount: { type: number, nullable: true }
  *                         pagination:
  *                           $ref: '#/components/schemas/PaginationMeta'
  */

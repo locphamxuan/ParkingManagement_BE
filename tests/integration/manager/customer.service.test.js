@@ -34,6 +34,27 @@ describe('customer.service.listCustomers', () => {
     expect(items[0].fullName).toBe('Nguyen Active');
     expect(items[0].hasActivePackage).toBe(true);
     expect(items[0].hasAnyPackage).toBe(true);
+    expect(items[0].subscriptions).toHaveLength(1);
+    expect(items[0].subscriptions[0].plateNumber).toBe('51F-111.11');
+    expect(items[0].subscriptions[0].package.name).toBe(pkg.name);
+    expect(items[0].subscriptions[0].status).toBe('active');
+  });
+
+  test('user có nhiều lượt đăng ký gói (1 hết hạn + 1 active) → subscriptions trả đủ cả 2, mới nhất trước', async () => {
+    const user = await f.createUser({ fullName: 'Bui MultiSub' });
+    const pkg = await f.createPackage(building._id, vt._id);
+    const older = await LongTermSubscription.create({
+      user: user._id, package: pkg._id, building: building._id, plateNumber: '51F-222.11',
+      startDate: new Date('2026-01-01'), endDate: new Date('2026-02-01'), status: 'expired',
+    });
+    const newer = await LongTermSubscription.create({
+      user: user._id, package: pkg._id, building: building._id, plateNumber: '51F-222.11',
+      startDate: new Date('2026-07-01'), endDate: new Date('2026-08-01'), status: 'active',
+    });
+
+    const { items } = await customerSvc.listCustomers(manager, building._id, {});
+    expect(items[0].subscriptions).toHaveLength(2);
+    expect(items[0].subscriptions.map((s) => String(s._id))).toEqual([String(newer._id), String(older._id)]);
   });
 
   test('user chỉ có ParkingSession (không có subscription) → hasActivePackage/hasAnyPackage false', async () => {
@@ -120,6 +141,43 @@ describe('customer.service.listCustomers', () => {
     const notRegistered = await customerSvc.listCustomers(manager, building._id, { hasPackage: 'false' });
     expect(notRegistered.items).toHaveLength(1);
     expect(notRegistered.items[0].fullName).toBe('Do NoPackage');
+  });
+
+  test('trả kèm đầy đủ thông tin user: biển số, số dư ví, trạng thái tài khoản, ngày tham gia, lượt gửi xe + lần cuối tại toà này', async () => {
+    const user = await f.createUser({
+      fullName: 'Hoang FullInfo',
+      phone: '0901234567',
+      walletBalance: 250000,
+      licensePlates: [{ plateNumber: '51F-999.11', vehicleType: 'car' }],
+    });
+    const firstVisit = new Date('2026-06-01T08:00:00Z');
+    const lastVisit = new Date('2026-07-01T08:00:00Z');
+    await ParkingSession.create({ building: building._id, user: user._id, plateNumber: '51F-999.11', entryTime: firstVisit });
+    await ParkingSession.create({ building: building._id, user: user._id, plateNumber: '51F-999.11', entryTime: lastVisit });
+
+    const { items } = await customerSvc.listCustomers(manager, building._id, {});
+    expect(items).toHaveLength(1);
+    const c = items[0];
+    expect(c.phone).toBe('0901234567');
+    expect(c.walletBalance).toBe(250000);
+    expect(c.isActive).toBe(true);
+    expect(c.createdAt).toBeTruthy();
+    expect(c.licensePlates).toEqual([{ plateNumber: '51F-999.11', vehicleType: 'car' }]);
+    expect(c.sessionCount).toBe(2);
+    expect(new Date(c.lastVisitAt).toISOString()).toBe(lastVisit.toISOString());
+  });
+
+  test('user chỉ có subscription (chưa từng gửi xe tại toà) → sessionCount 0, lastVisitAt null', async () => {
+    const user = await f.createUser({ fullName: 'Ly SubOnly' });
+    const pkg = await f.createPackage(building._id, vt._id);
+    await LongTermSubscription.create({
+      user: user._id, package: pkg._id, building: building._id, plateNumber: '51F-000.11',
+      startDate: new Date(), endDate: new Date(Date.now() + 30 * 24 * 3600 * 1000), status: 'active',
+    });
+
+    const { items } = await customerSvc.listCustomers(manager, building._id, {});
+    expect(items[0].sessionCount).toBe(0);
+    expect(items[0].lastVisitAt).toBeNull();
   });
 
   test('manager không thuộc building → 403', async () => {

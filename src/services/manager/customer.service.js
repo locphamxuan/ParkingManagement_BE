@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const User = require("../../models/user/User");
 const ParkingSession = require("../../models/operations/ParkingSession");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
@@ -16,28 +17,51 @@ const listCustomers = async (user, buildingId, query = {}) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
 
-  const [sessionUserIds, subs] = await Promise.all([
-    ParkingSession.distinct("user", { building: buildingId, user: { $ne: null } }),
-    LongTermSubscription.find({ building: buildingId }).select("user status").lean(),
+  const [sessionAgg, subs] = await Promise.all([
+    ParkingSession.aggregate([
+      { $match: { building: new mongoose.Types.ObjectId(String(buildingId)), user: { $ne: null } } },
+      { $group: { _id: "$user", sessionCount: { $sum: 1 }, lastVisitAt: { $max: "$entryTime" } } },
+    ]),
+    LongTermSubscription.find({ building: buildingId })
+      .select("user status plateNumber startDate endDate package refundPercent refundAmount")
+      .populate("package", "name price")
+      .sort("-startDate")
+      .lean(),
   ]);
 
-  const candidateIds = new Set(sessionUserIds.map(String));
+  // userId -> { sessionCount, lastVisitAt } — thống kê lượt gửi xe TẠI TOÀ này.
+  const visitStatsByUser = new Map(sessionAgg.map((s) => [String(s._id), s]));
+
+  const candidateIds = new Set(sessionAgg.map((s) => String(s._id)));
   subs.forEach((s) => candidateIds.add(String(s.user)));
 
   if (candidateIds.size === 0) {
     return { items: [], pagination: { page, limit, total: 0, totalPages: 0 } };
   }
 
-  // userId -> { hasActivePackage, hasAnyPackage }
+  // userId -> { hasActivePackage, hasAnyPackage, subscriptions: [...] } — gộp luôn chi
+  // tiết từng lượt đăng ký gói (Subscribers cũ) vào đúng dòng user tương ứng, để manager
+  // xem/hủy gói ngay tại đây thay vì phải qua tab khác.
   const packageStatusByUser = new Map();
   subs.forEach((s) => {
     const uid = String(s.user);
     const entry = packageStatusByUser.get(uid) || {
       hasActivePackage: false,
       hasAnyPackage: false,
+      subscriptions: [],
     };
     entry.hasAnyPackage = true;
     if (s.status === "active") entry.hasActivePackage = true;
+    entry.subscriptions.push({
+      _id: s._id,
+      plateNumber: s.plateNumber,
+      startDate: s.startDate,
+      endDate: s.endDate,
+      status: s.status,
+      package: s.package ? { _id: s.package._id, name: s.package.name, price: s.package.price } : null,
+      refundPercent: s.refundPercent,
+      refundAmount: s.refundAmount,
+    });
     packageStatusByUser.set(uid, entry);
   });
 
@@ -45,7 +69,7 @@ const listCustomers = async (user, buildingId, query = {}) => {
     _id: { $in: Array.from(candidateIds) },
     role: "user",
   })
-    .select("fullName email phone")
+    .select("fullName email phone licensePlates isActive walletBalance createdAt")
     .sort("fullName")
     .lean();
 
@@ -53,14 +77,26 @@ const listCustomers = async (user, buildingId, query = {}) => {
     const status = packageStatusByUser.get(String(u._id)) || {
       hasActivePackage: false,
       hasAnyPackage: false,
+      subscriptions: [],
     };
+    const visitStats = visitStatsByUser.get(String(u._id)) || { sessionCount: 0, lastVisitAt: null };
     return {
       _id: u._id,
       fullName: u.fullName,
       email: u.email,
       phone: u.phone || null,
+      isActive: u.isActive,
+      walletBalance: u.walletBalance || 0,
+      createdAt: u.createdAt,
+      licensePlates: (u.licensePlates || []).map((p) => ({
+        plateNumber: p.plateNumber,
+        vehicleType: p.vehicleType,
+      })),
+      sessionCount: visitStats.sessionCount,
+      lastVisitAt: visitStats.lastVisitAt,
       hasActivePackage: status.hasActivePackage,
       hasAnyPackage: status.hasAnyPackage,
+      subscriptions: status.subscriptions,
     };
   });
 
