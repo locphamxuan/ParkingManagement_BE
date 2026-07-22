@@ -3,6 +3,7 @@ const BuildingWallet = require('../../models/finance/BuildingWallet');
 const BuildingWalletTransaction = require('../../models/finance/BuildingWalletTransaction');
 const Payment = require('../../models/finance/Payment');
 const AppError = require('../../utils/AppError');
+const { localUtcOffset } = require('../../utils/dateBucket');
 
 // Loại Payment tính là DOANH THU thật (loại 'topup' = manager tự nạp ví, 'refund' =
 // tiền hoàn ra). Khớp định nghĩa doanh thu ở dashboard manager/admin.
@@ -165,7 +166,7 @@ const getRevenueBreakdown = async (buildingId, { from, to } = {}) => {
   const [dayRows, allTime] = await Promise.all([
     Payment.aggregate([
       { $match: { ...baseMatch, createdAt: { $gte: start, $lte: end } } },
-      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, ...byMethodStage } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: localUtcOffset() } }, ...byMethodStage } },
       { $sort: { _id: -1 } },
     ]),
     Payment.aggregate([
