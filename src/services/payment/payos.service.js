@@ -106,19 +106,9 @@ const getPaymentLink = async (orderCode) => {
   return payos.paymentRequests.get(orderCode);
 };
 
-/**
- * Cancel a payment link by orderCode.
- * @param {number} orderCode
- * @param {string} [reason]
- */
-const cancelPaymentLink = async (orderCode, reason) => {
-  return payos.paymentRequests.cancel(orderCode, reason);
-};
-
 module.exports = {
   generateOrderCode,
   createPaymentLink,
   verifyWebhook,
   getPaymentLink,
-  cancelPaymentLink,
 };

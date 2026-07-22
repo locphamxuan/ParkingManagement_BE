@@ -23,24 +23,7 @@ const ensureManagerOwnsBuilding = (user, buildingId) => {
   return true;
 };
 
-const resolveManagerBuildingId = (user, fallback) => {
-  const explicit = fallback || null;
-  if (explicit) {
-    ensureManagerOwnsBuilding(user, explicit);
-    return String(explicit);
-  }
-  if (user.role === ROLES.ADMIN) {
-    throw new AppError("buildingId is required", 400);
-  }
-  const ids = getAssignedBuildingIds(user);
-  if (ids.length === 0) {
-    throw new AppError("No building assigned", 404);
-  }
-  return ids[0];
-};
-
 module.exports = {
   getAssignedBuildingIds,
   ensureManagerOwnsBuilding,
-  resolveManagerBuildingId,
 };

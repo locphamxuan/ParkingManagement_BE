@@ -13,6 +13,7 @@ const {
 } = require('../../../models');
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const buildingWalletService = require('../../manager/buildingWallet.service');
+const { settlePendingPenaltyAtCheckout } = require('../../shared/incidentResolve.service');
 const { normalizePlate } = require('../../../utils/plate.util');
 const { calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
@@ -402,24 +403,28 @@ const checkOut = async (user, sessionId, payload = {}) => {
         postCommitEmail = await _handleLongTermCheckout(
           user, parkingSession, payload, exitPlateImage, exitPortraitImage, mongoSession,
         );
-        return parkingSession;
+      } else {
+        // Regular checkout (khách vãng lai / user thường).
+        const { fee, feeMethod } = await _computeRegularFee(parkingSession, payload);
+
+        if (feeMethod === 'wallet' && fee > 0) {
+          await _processWalletDebit(fee, parkingSession.user, parkingSession, mongoSession);
+        }
+
+        if (fee > 0) {
+          await _createPaymentRecord(parkingSession, fee, feeMethod, user, payload, mongoSession);
+        }
+
+        await _finalizeSession(
+          user, parkingSession, payload, fee, feeMethod,
+          exitPlateImage, exitPortraitImage, mongoSession,
+        );
       }
 
-      // Regular checkout (khách vãng lai / user thường).
-      const { fee, feeMethod } = await _computeRegularFee(parkingSession, payload);
-
-      if (feeMethod === 'wallet' && fee > 0) {
-        await _processWalletDebit(fee, parkingSession.user, parkingSession, mongoSession);
-      }
-
-      if (fee > 0) {
-        await _createPaymentRecord(parkingSession, fee, feeMethod, user, payload, mongoSession);
-      }
-
-      await _finalizeSession(
-        user, parkingSession, payload, fee, feeMethod,
-        exitPlateImage, exitPortraitImage, mongoSession,
-      );
+      // Biển số này có đang bị 1 incident 'penalty_pending' (manager đã duyệt phí phạt)
+      // chờ thu không? Nếu có → tạo Payment riêng cho phí phạt + resolve incident, ngay
+      // trong transaction check-out này (staff là người thực thu tại cổng, không phải manager).
+      await settlePendingPenaltyAtCheckout(user, parkingSession, payload.paymentMethod || 'cash', mongoSession);
 
       return parkingSession;
     });

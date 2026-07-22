@@ -16,10 +16,12 @@ const feedbackController = require("../../controllers/manager/feedback.controlle
 const incidentController = require("../../controllers/manager/incident.controller");
 const dashboardController = require("../../controllers/manager/dashboard.controller");
 const sessionController = require("../../controllers/manager/session.controller");
+const customerController = require("../../controllers/manager/customer.controller");
 const buildingWalletController = require("../../controllers/manager/buildingWallet.controller");
 const buildingController = require("../../controllers/manager/building.controller");
 
 const v = require("../../validators/manager.validator");
+const { validateResolveIncident } = require("../../validators/incident.validator");
 
 const router = express.Router({ mergeParams: true });
 
@@ -128,6 +130,10 @@ router
 router.get("/subscriptions", packageController.listSubscriptions);
 router.delete("/subscriptions/:id", packageController.cancelSubscription);
 
+// Khách hàng (user account) đã dùng bãi trong building này + trạng thái đăng ký gói
+// (không tính walk-in — không có account để "đăng ký gói").
+router.get("/customers", customerController.list);
+
 // Chính sách hoàn tiền khi hủy gói dài hạn (đổi từ /reservation-policy sau khi bỏ đặt chỗ).
 router
   .route("/refund-policy")
@@ -162,6 +168,6 @@ router.patch(
 
 // ── Incidents (sự cố do user báo cáo) ─────────────────────────────────────────
 router.get("/incidents", incidentController.list);
-router.patch("/incidents/:id", incidentController.resolve);
+router.patch("/incidents/:id", validateResolveIncident, incidentController.resolve);
 
 module.exports = router;
