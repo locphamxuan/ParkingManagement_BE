@@ -19,12 +19,6 @@ const reservationPolicySchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
-    // Mức tiền phạt mất vé / mất thẻ do Manager quy định
-    lostTicketFee: {
-      type: Number,
-      default: 50000,
-      min: 0,
-    },
     // Mức tiền phạt vi phạm nội quy quy định bãi đỗ do Manager quy định
     ruleViolationFee: {
       type: Number,
