@@ -25,3 +25,31 @@ test('lọc theo buildingId', async () => {
   const res = await svc.list(user._id, { buildingId: building._id });
   expect(res.pagination.total).toBe(1);
 });
+
+test('trả kèm checkIn/checkOut/duration + populate slot(floor)/gate — FE web lẫn Mobile đều cần các field này ngay ở list, không chỉ ở detail', async () => {
+  const floor = await f.createFloor(building._id);
+  const slot = await f.createSlot(building._id, floor._id);
+  const entryTime = new Date('2026-07-01T08:00:00Z');
+  const exitTime = new Date('2026-07-01T09:30:00Z');
+  await ParkingSession.create({
+    plateNumber: '51F-777.77', building: building._id, user: user._id, slot: slot._id,
+    entryTime, exitTime, status: 'completed',
+  });
+
+  const res = await svc.list(user._id, {});
+  const item = res.items[0];
+  expect(item.checkIn).toEqual(entryTime);
+  expect(item.checkOut).toEqual(exitTime);
+  expect(item.duration).toBe(90); // 1h30 = 90 phút
+  expect(item.slot.code).toBe(slot.code);
+  expect(item.slot.floor.name).toBe(floor.name);
+});
+
+test('phiên đang active (chưa checkout) → checkOut null, duration null', async () => {
+  await ParkingSession.create({
+    plateNumber: '51F-888.88', building: building._id, user: user._id, status: 'active',
+  });
+  const res = await svc.list(user._id, {});
+  expect(res.items[0].checkOut).toBeNull();
+  expect(res.items[0].duration).toBeNull();
+});

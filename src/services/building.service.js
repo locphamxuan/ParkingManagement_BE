@@ -1,6 +1,7 @@
 const AppError = require("../utils/AppError");
 const { ROLES } = require("../constants/roles");
 const buildingRepository = require("../repositories/building.repository");
+const { Floor } = require("../models");
 
 const buildListFilter = (query = {}) => {
   const filter = {};
@@ -85,6 +86,15 @@ const removeBuilding = async (id) => {
   return deleted;
 };
 
+// Số tầng THẬT của toà = đếm Floor đã tạo (qua trang Floor management), KHÔNG
+// dùng field `totalFloors` tự nhập tay (dễ lệch — vd manager nhập 1 nhưng thực
+// tế đã tạo 3 tầng). Trả kèm `floorCount` bên cạnh building doc để FE hiển thị.
+const attachFloorCount = async (building) => {
+  const obj = building.toObject ? building.toObject() : building;
+  obj.floorCount = await Floor.countDocuments({ building: obj._id });
+  return obj;
+};
+
 const getManagerBuilding = async (user, buildingId) => {
   const assignedBuildings = Array.isArray(user.assignedBuildings)
     ? user.assignedBuildings
@@ -98,7 +108,8 @@ const getManagerBuilding = async (user, buildingId) => {
       throw new AppError("Forbidden for this building", 403);
     }
 
-    return getBuildingOrFail(buildingId);
+    const building = await getBuildingOrFail(buildingId);
+    return attachFloorCount(building);
   }
 
   if (assignedBuildings.length === 0) {
@@ -114,7 +125,7 @@ const getManagerBuilding = async (user, buildingId) => {
     limit: 1000,
   });
 
-  return buildings;
+  return Promise.all(buildings.map(attachFloorCount));
 };
 
 const updateManagerBuilding = async (user, buildingId, payload) => {
@@ -141,14 +152,17 @@ const updateManagerBuilding = async (user, buildingId, payload) => {
   }
 
   // Manager chỉ sửa các trường cơ bản. Giá do tab "Giá" (PricePolicy) quản lý;
-  // giờ hoạt động có tab riêng (updateManagerOperatingHours).
-  const ALLOWED_FIELDS = ["name", "totalFloors", "status"];
+  // giờ hoạt động có tab riêng (updateManagerOperatingHours); số tầng do trang
+  // Floor management quản lý (tạo/xoá Floor thật) — KHÔNG cho nhập tay ở đây,
+  // tránh lệch với số tầng thực tế đã tạo (đã xảy ra trước đây).
+  const ALLOWED_FIELDS = ["name", "status"];
   const safePayload = {};
   for (const key of ALLOWED_FIELDS) {
     if (payload[key] !== undefined) safePayload[key] = payload[key];
   }
 
-  return updateBuilding(buildingId, safePayload);
+  const updated = await updateBuilding(buildingId, safePayload);
+  return attachFloorCount(updated);
 };
 
 // Validate "HH:MM" (24h) time strings used for operating hours.

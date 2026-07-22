@@ -175,12 +175,6 @@ const revokeStaffFromBuilding = async ({ buildingId, userId }) => {
   return updated;
 };
 
-const listManagerAssignmentsForBuilding = async (buildingId) =>
-  buildingManagerRepo.findActiveByBuilding(buildingId);
-
-const listAssignmentsForUser = async (userId) =>
-  buildingManagerRepo.findActiveByUser(userId);
-
 const getBuildingMembers = async (buildingId) => {
   const building = await buildingRepository.findById(buildingId);
   if (!building) throw new AppError("Building not found", 404);
@@ -204,8 +198,6 @@ module.exports = {
   revokeManagerFromBuilding,
   assignStaffToBuilding,
   revokeStaffFromBuilding,
-  listManagerAssignmentsForBuilding,
-  listAssignmentsForUser,
   getBuildingMembers,
 };
 

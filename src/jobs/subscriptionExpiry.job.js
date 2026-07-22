@@ -175,7 +175,6 @@ const start = () => {
 
 module.exports = {
   start,
-  runOnce,
   sendExpiryReminders,
   expireActiveSubscriptions,
 };

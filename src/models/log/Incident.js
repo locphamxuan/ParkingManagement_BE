@@ -1,7 +1,10 @@
 const mongoose = require('mongoose');
 
 const INCIDENT_SEVERITY = ['medium', 'high', 'critical'];
-const INCIDENT_STATUS  = ['open', 'investigating', 'escalated', 'resolved', 'closed'];
+// 'penalty_pending': manager đã duyệt số tiền phạt (violatorPlate + penaltyFee) nhưng
+// CHƯA thu — chờ staff checkout xe vi phạm (lúc đó phí phạt tự cộng vào, xem
+// shared/incidentResolve.service.js::settlePendingPenaltyAtCheckout).
+const INCIDENT_STATUS  = ['open', 'investigating', 'escalated', 'penalty_pending', 'resolved', 'closed'];
 
 const incidentSchema = new mongoose.Schema(
   {
@@ -35,8 +38,26 @@ const incidentSchema = new mongoose.Schema(
     },
     // Biển số PHƯƠNG TIỆN VI PHẠM (khi sự cố là "có người đậu vào slot của tôi").
     violatorPlate: { type: String, trim: true, uppercase: true, maxlength: 20, default: '' },
+    // Biển vi phạm có account (subscription/phiên gắn user) trong building hay không —
+    // null = không áp dụng (không có violatorPlate). false → incident tự escalate cho manager.
+    plateAccountFound: { type: Boolean, default: null },
     // Ghi chú xử lý của staff/manager khi giải quyết sự cố.
     resolutionNote: { type: String, trim: true, maxlength: 1000, default: '' },
+    // Số tiền phạt (chỉ manager duyệt được) — staff thu thật lúc checkout xe vi phạm.
+    penaltyFee: { type: Number, default: null, min: 0 },
+    // Manager đã duyệt phí phạt này (khác resolvedBy — người thực thu là staff lúc checkout).
+    penaltyApprovedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    // Phương thức thanh toán THỰC TẾ đã thu (staff/khách chọn lúc checkout).
+    paymentMethod: { type: String, trim: true, default: null },
+    payment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Payment',
+      default: null,
+    },
     severity: {
       type: String,
       enum: INCIDENT_SEVERITY,
@@ -52,7 +73,7 @@ const incidentSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
-    // Tham chiếu phiên đỗ xe nếu sự cố liên quan (mất vé, xe quá hạn…)
+    // Tham chiếu phiên đỗ xe nếu sự cố liên quan (xe quá hạn, tranh chấp phí…)
     parkingSession: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ParkingSession',
