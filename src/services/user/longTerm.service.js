@@ -199,12 +199,7 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
 
       const now = new Date();
       const startDate = new Date(subscription.startDate);
-      const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
-      const cancellationDeadline = new Date(startDate.getTime() + threeDaysMs);
-
-      if (now > cancellationDeadline) {
-        throw new AppError('Gói dài hạn đã vượt quá thời hạn cho phép tự hủy (3 ngày kể từ ngày bắt đầu).', 400, 'CANCELLATION_WINDOW_EXPIRED');
-      }
+      // Đã loại bỏ giới hạn 3 ngày: User có thể tự hủy gói dài hạn bất kỳ lúc nào để nhận tiền hoàn theo chính sách tòa nhà.
 
       const packagePrice = subscription.package.price;
       // % hoàn tiền do MANAGER cấu hình — helper chung (default 80, clamp 0–100),
