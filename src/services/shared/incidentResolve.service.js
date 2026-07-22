@@ -240,7 +240,7 @@ const applyIncidentAction = async (actorUser, incident, payload = {}) => {
     await writeAuditLog({
       actor: actorUser,
       action: 'RESOLVE_INCIDENT',
-      targetTable: 'incidents',
+      targetTable: 'Incident',
       targetId: `${incident._id}`,
       building: incident.building,
       previousValue: before,
