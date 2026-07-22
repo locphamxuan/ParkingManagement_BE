@@ -46,13 +46,19 @@ const validateWalletTransaction = wrap((req) => {
   }
 });
 
-const INCIDENT_PAYMENT_METHODS = ['cash', 'wallet', 'qr'];
-const INCIDENT_SEVERITIES      = ['medium', 'high', 'critical'];
+const INCIDENT_SEVERITIES = ['medium', 'high', 'critical'];
+// Staff chỉ được tạo incident ở 2 trạng thái này — 'escalated' do BE tự set khi user
+// report biển lạ, 'penalty_pending' chỉ do action='penalize_violator' (manager) set;
+// cho phép client set tay 2 status đó lúc TẠO sẽ tạo ra incident "ma" (escalated giả
+// hoặc penalty_pending không có penaltyFee/penaltyApprovedBy).
+const INCIDENT_CREATE_STATUSES = ['open', 'resolved'];
 
 /**
  * Validator mới cho POST /staff/incidents.
  * Chấp nhận cả payload FE mới { type, target, note, buildingId }
  * và payload cũ { incidentType } để backward-compat.
+ * Không nhận penaltyFee/paymentMethod ở đây — staff không được set phí phạt khi
+ * tạo sự cố (chỉ manager mới áp phí phạt được, qua PATCH resolve).
  */
 const validateCreateIncident = wrap((req) => {
   const {
@@ -60,7 +66,8 @@ const validateCreateIncident = wrap((req) => {
     target, note,
     buildingId,
     severity,
-    parkingSessionId, penaltyFee, paymentMethod,
+    parkingSessionId,
+    status,
   } = req.body;
 
   const resolvedType = String(type || incidentType || '').trim();
@@ -86,18 +93,12 @@ const validateCreateIncident = wrap((req) => {
     throw new AppError(`severity must be one of: ${INCIDENT_SEVERITIES.join(', ')}`, 400);
   }
 
-  // Fields cho "lost ticket" flow (optional)
   if (parkingSessionId !== undefined && !isValidObjectId(parkingSessionId)) {
     throw new AppError('parkingSessionId must be a valid ObjectId', 400);
   }
-  if (penaltyFee !== undefined) {
-    const fee = Number(penaltyFee);
-    if (!Number.isFinite(fee) || fee < 0) {
-      throw new AppError('penaltyFee must be a non-negative number', 400);
-    }
-  }
-  if (paymentMethod !== undefined && !INCIDENT_PAYMENT_METHODS.includes(paymentMethod)) {
-    throw new AppError(`paymentMethod must be one of: ${INCIDENT_PAYMENT_METHODS.join(', ')}`, 400);
+
+  if (status !== undefined && !INCIDENT_CREATE_STATUSES.includes(status)) {
+    throw new AppError(`status must be one of: ${INCIDENT_CREATE_STATUSES.join(', ')}`, 400, 'INVALID_STATUS');
   }
 });
 
@@ -105,7 +106,7 @@ const validateCreateIncident = wrap((req) => {
 const validateIncidentReport = validateCreateIncident;
 
 // Fix #8: validate GET /staff/incidents query params
-const INCIDENT_STATUSES_ALL = ['open', 'investigating', 'escalated', 'resolved', 'closed'];
+const INCIDENT_STATUSES_ALL = ['open', 'investigating', 'escalated', 'penalty_pending', 'resolved', 'closed'];
 
 const validateListIncidentsQuery = wrap((req) => {
   const { buildingId, status, severity, page, limit } = req.query;

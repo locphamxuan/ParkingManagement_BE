@@ -44,6 +44,11 @@ const paymentSchema = new mongoose.Schema(
       ref: "LongTermSubscription",
       default: null,
     },
+    incident: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Incident",
+      default: null,
+    },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

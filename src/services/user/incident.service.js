@@ -3,6 +3,7 @@ const { Incident, ParkingSlot, ParkingSession, LongTermSubscription } = require(
 const AppError = require('../../utils/AppError');
 const generateBookingCode = require('../../utils/generateBookingCode');
 const { normalizePlate } = require('../../utils/plate.util');
+const { findPlateAccountInBuilding } = require('../shared/incidentResolve.service');
 
 // Các loại sự cố user được phép báo cáo (khớp FE). 'other' cho phép mô tả tự do.
 const USER_INCIDENT_TYPES = [
@@ -12,7 +13,6 @@ const USER_INCIDENT_TYPES = [
   'facility_issue',     // Tình trạng khu vực: ngập nước, mất đèn, hư nền, biển báo sai
   'wrong_scan',         // Quét nhầm biển số / sai thông tin phương tiện
   'payment_dispute',    // Tranh chấp phí/thanh toán
-  'lost_ticket',        // Mất vé/QR
   'security',           // An ninh: nghi ngờ trộm cắp, người khả nghi
   'other',              // Khác (tự nhập)
 ];
@@ -69,6 +69,17 @@ const createIncident = async (userId, payload = {}) => {
   // Sự cố an ninh / hư hại xe / chiếm chỗ → mức độ cao hơn.
   const highSeverity = ['slot_occupied', 'vehicle_damaged', 'security'].includes(type);
 
+  // Biển số vi phạm (case "có người đậu vào slot của tôi") → tự tra cứu xem đã có
+  // account (subscription/phiên gắn user) trong building chưa. Không tìm thấy →
+  // tự động escalate cho manager xử lý (staff chỉ xem, không đủ thẩm quyền).
+  const violatorPlate = normalizePlate(payload.violatorPlate || '') || '';
+  let plateAccountFound = null;
+  let status = 'open';
+  if (violatorPlate) {
+    plateAccountFound = await findPlateAccountInBuilding(violatorPlate, buildingId);
+    if (!plateAccountFound) status = 'escalated';
+  }
+
   const incident = await Incident.create({
     code: generateBookingCode('INC'),
     type,
@@ -76,9 +87,10 @@ const createIncident = async (userId, payload = {}) => {
     note: String(payload.note || payload.description || '').trim(),
     building: buildingId,
     slot: slotId,
-    violatorPlate: normalizePlate(payload.violatorPlate || '') || '',
+    violatorPlate,
+    plateAccountFound,
     severity: highSeverity ? 'high' : 'medium',
-    status: 'open',
+    status,
     reportedBy: userId,
   });
 

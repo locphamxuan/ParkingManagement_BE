@@ -517,4 +517,30 @@
  *         metadata: { type: object, additionalProperties: true }
  *         createdAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
  *         updatedAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
+ *
+ *     Incident:
+ *       type: object
+ *       properties:
+ *         _id: { $ref: '#/components/schemas/ObjectId' }
+ *         code: { type: string, example: INC-ABC123 }
+ *         type: { type: string, example: slot_occupied }
+ *         target: { type: string, example: 59G2-038.80 }
+ *         note: { type: string, example: Someone parked in my reserved slot }
+ *         building: { $ref: '#/components/schemas/ObjectId' }
+ *         slot: { $ref: '#/components/schemas/ObjectId' }
+ *         violatorPlate: { type: string, example: 59G2-038.80 }
+ *         plateAccountFound: { type: boolean, nullable: true, description: 'null = not applicable (no violatorPlate); false auto-escalates the incident to manager-only.', example: false }
+ *         resolutionNote: { type: string, example: Vehicle towed, slot freed }
+ *         penaltyFee: { type: number, nullable: true, description: 'Approved only by a manager via action=penalize_violator; actually collected later at staff check-out.', example: 100000 }
+ *         penaltyApprovedBy: { $ref: '#/components/schemas/ObjectId' }
+ *         paymentMethod: { type: string, nullable: true, enum: [cash, wallet, qr], description: 'Set once the penalty is actually collected at staff check-out.', example: cash }
+ *         payment: { $ref: '#/components/schemas/ObjectId' }
+ *         severity: { type: string, enum: [medium, high, critical], example: high }
+ *         status: { type: string, enum: [open, investigating, escalated, penalty_pending, resolved, closed], example: open }
+ *         reportedBy: { $ref: '#/components/schemas/ObjectId' }
+ *         parkingSession: { $ref: '#/components/schemas/ObjectId' }
+ *         resolvedBy: { $ref: '#/components/schemas/ObjectId' }
+ *         resolvedAt: { type: string, format: date-time, nullable: true, example: null }
+ *         createdAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
+ *         updatedAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
  */
