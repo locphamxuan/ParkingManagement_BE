@@ -25,7 +25,7 @@ const payos = new PayOS({
 
 const generateOrderCode = () => {
   const ts = String(Math.floor(Date.now() / 1000)).slice(-8); // 8 digits
-  const rand = String(parseInt(randomBytes(3).toString('hex'), 16) % 1_000_000).padStart(6, '0'); // 6 digits (1M values)
+  const rand = String(Number.parseInt(randomBytes(3).toString('hex'), 16) % 1_000_000).padStart(6, '0'); // 6 digits (1M values)
   return Number(`${ts}${rand}`);
 };
 

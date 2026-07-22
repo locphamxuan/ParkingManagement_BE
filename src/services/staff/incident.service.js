@@ -82,8 +82,8 @@ const createIncident = async (staffUser, payload = {}) => {
  */
 const listIncidents = async (staffUser, query = {}) => {
   const { buildingId, status, severity } = query;
-  const page  = Math.max(1, parseInt(query.page,  10) || 1);
-  const limit = Math.min(100, parseInt(query.limit, 10) || 20);
+  const page  = Math.max(1, Number.parseInt(query.page,  10) || 1);
+  const limit = Math.min(100, Number.parseInt(query.limit, 10) || 20);
   const skip  = (page - 1) * limit;
 
   // Fix #4: an toàn khi cast ObjectId

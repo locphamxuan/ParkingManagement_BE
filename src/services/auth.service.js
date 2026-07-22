@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+const crypto = require('node:crypto');
 const User = require('../models/user/User');
 const OtpVerification = require('../models/user/OtpVerification');
 const AppError = require('../utils/AppError');

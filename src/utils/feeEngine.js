@@ -108,7 +108,7 @@ async function computeFee({ buildingId, vehicleTypeId, start, end, preloadedPoli
 
   const regularMinutes = Math.max(0, totalMinutes - peakMinutes);
   // Không có regular policy → dùng rate peak đầu tiên làm nền (giữ hành vi cũ).
-  const regularRate = regularPolicy ? regularPolicy.hourlyRate : (peakPolicies[0]?.hourlyRate ?? 0);
+  const regularRate = regularPolicy?.hourlyRate ?? (peakPolicies[0]?.hourlyRate ?? 0);
 
   let fee = peakFee;
   if (regularMinutes > 0) fee += (regularRate / 60) * regularMinutes;

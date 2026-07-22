@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const crypto = require('crypto');
+const crypto = require('node:crypto');
 const bcrypt = require('bcryptjs');
 const { ROLE_LIST, ROLES } = require('../../constants/roles');
 const { isValidVietnamPlate } = require('../../utils/plate.util');
@@ -15,7 +15,7 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
-      match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please provide a valid email'],
     },
     password: {
       type: String,

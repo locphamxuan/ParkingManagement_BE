@@ -1,6 +1,6 @@
 const AppError = require('../utils/AppError');
 
-const EMAIL_REGEX = /^\S+@\S+\.\S+$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[0-9+\-\s()]{8,20}$/;
 const OTP_REGEX = /^\d{6}$/;
 
