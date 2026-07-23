@@ -1,5 +1,4 @@
 const AppError = require("../utils/AppError");
-const { ROLES } = require("../constants/roles");
 const buildingRepository = require("../repositories/building.repository");
 const { Floor } = require("../models");
 
