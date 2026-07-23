@@ -181,11 +181,7 @@ const updateManagerBuilding = async (user, buildingId, payload) => {
   // giờ hoạt động có tab riêng (updateManagerOperatingHours); số tầng do trang
   // Floor management quản lý (tạo/xoá Floor thật) — KHÔNG cho nhập tay ở đây,
   // tránh lệch với số tầng thực tế đã tạo (đã xảy ra trước đây).
-  const ALLOWED_FIELDS = ["name", "status"];
-  const safePayload = {};
-  for (const key of ALLOWED_FIELDS) {
-    if (payload[key] !== undefined) safePayload[key] = payload[key];
-  }
+  const safePayload = pickFields(payload, ["name", "status"]);
 
   const updated = await updateBuilding(buildingId, safePayload);
   return attachFloorCount(updated);

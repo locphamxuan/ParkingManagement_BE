@@ -8,13 +8,14 @@ const env = require('../config/env');
 // JS, so an XSS payload can't read it out of localStorage) — the JSON body
 // still returns `data.token` too, for Mobile, which has no cookie jar and
 // keeps its own token in secure device storage.
+const authCookieOptions = () => ({
+  httpOnly: true,
+  secure: env.nodeEnv === 'production',
+  sameSite: env.nodeEnv === 'production' ? 'none' : 'lax',
+});
+
 const setAuthCookie = (res, token) => {
-  res.cookie('token', token, {
-    httpOnly: true,
-    secure: env.nodeEnv === 'production',
-    sameSite: env.nodeEnv === 'production' ? 'none' : 'lax',
-    maxAge: cookieMaxAgeMs(),
-  });
+  res.cookie('token', token, { ...authCookieOptions(), maxAge: cookieMaxAgeMs() });
 };
 
 const register = asyncHandler(async (req, res) => {
@@ -34,11 +35,7 @@ const login = asyncHandler(async (req, res) => {
 });
 
 const logout = asyncHandler(async (_req, res) => {
-  res.clearCookie('token', {
-    httpOnly: true,
-    secure: env.nodeEnv === 'production',
-    sameSite: env.nodeEnv === 'production' ? 'none' : 'lax',
-  });
+  res.clearCookie('token', authCookieOptions());
   sendSuccess(res, { message: 'Logged out' });
 });
 
