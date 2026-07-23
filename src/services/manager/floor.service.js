@@ -1,4 +1,4 @@
-﻿const Floor = require("../../models/building/Floor");
+const Floor = require("../../models/building/Floor");
 const ParkingSlot = require("../../models/building/ParkingSlot");
 const Zone = require("../../models/building/Zone");
 const AppError = require("../../utils/AppError");
@@ -121,29 +121,47 @@ const update = async (user, buildingId, id, payload) => {
   return updated;
 };
 
+const { ParkingSession, LongTermSubscription } = require("../../models");
+
 const remove = async (user, buildingId, id) => {
   ensureManagerOwnsBuilding(user, buildingId);
   const current = await Floor.findOne({ _id: id, building: buildingId });
   if (!current) throw new AppError("Floor not found", 404);
 
-  const slotsCount = await ParkingSlot.countDocuments({ floor: id });
-  if (slotsCount > 0) {
-    throw new AppError(
-      "Floor still has parking slots. Remove slots first.",
-      409
-    );
+  const floorSlots = await ParkingSlot.find({ floor: id });
+  const slotIds = floorSlots.map((s) => s._id);
+
+  if (slotIds.length > 0) {
+    const activeSessionsCount = await ParkingSession.countDocuments({
+      slot: { $in: slotIds },
+      status: "active",
+    });
+    if (activeSessionsCount > 0) {
+      throw new AppError(
+        "Floor has active parked vehicles. Release vehicles before deleting the floor.",
+        409,
+        "FLOOR_HAS_ACTIVE_SESSIONS"
+      );
+    }
+
+    const activeSubsCount = await LongTermSubscription.countDocuments({
+      slot: { $in: slotIds },
+      status: "active",
+    });
+    if (activeSubsCount > 0) {
+      throw new AppError(
+        "Floor has active package subscriptions. Cancel or reassign subscriptions first.",
+        409,
+        "FLOOR_HAS_ACTIVE_SUBSCRIPTIONS"
+      );
+    }
   }
 
-  // Zones belong to a floor — block delete while any remain to avoid orphaned zones.
-  const zonesCount = await Zone.countDocuments({ floor: id });
-  if (zonesCount > 0) {
-    throw new AppError(
-      "Floor still has zones. Remove zones first.",
-      409
-    );
-  }
-
+  // Cascade delete slots and zones belonging to this floor
+  await ParkingSlot.deleteMany({ floor: id });
+  await Zone.deleteMany({ floor: id });
   await Floor.deleteOne({ _id: id });
+
   await writeAuditLog({
     actor: user,
     action: "DELETE_FLOOR",
