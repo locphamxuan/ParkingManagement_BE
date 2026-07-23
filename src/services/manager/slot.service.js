@@ -1,6 +1,7 @@
-﻿const ParkingSlot = require("../../models/building/ParkingSlot");
+const ParkingSlot = require("../../models/building/ParkingSlot");
 const Floor = require("../../models/building/Floor");
 const Zone = require("../../models/building/Zone");
+const { ParkingSession } = require("../../models");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
@@ -57,11 +58,39 @@ const list = async (user, buildingId, query = {}) => {
   if (query.status) filter.status = query.status;
   if (query.zone) filter.zone = query.zone;
   if (query.usageType) filter.usageType = query.usageType;
-  return ParkingSlot.find(filter)
+
+  const slots = await ParkingSlot.find(filter)
     .populate("floor", "code name")
     .populate("zone", "code usageType vehicleType")
     .populate("vehicleType", "code name")
     .sort({ floor: 1, code: 1 });
+
+  // Cross-reference active parking sessions to guarantee slot status is 100% accurate & synced
+  const activeSessions = await ParkingSession.find({
+    building: buildingId,
+    status: 'active',
+    slot: { $ne: null }
+  }).select('slot plateNumber entryTime user').populate('user', 'fullName email phone');
+
+  const activeSlotMap = new Map();
+  activeSessions.forEach((s) => {
+    if (s.slot) activeSlotMap.set(s.slot.toString(), s);
+  });
+
+  return slots.map((slot) => {
+    const activeSession = activeSlotMap.get(slot._id.toString());
+    const slotObj = slot.toObject();
+    if (activeSession) {
+      slotObj.status = 'occupied';
+      slotObj.activeSession = {
+        _id: activeSession._id,
+        plateNumber: activeSession.plateNumber,
+        entryTime: activeSession.entryTime,
+        user: activeSession.user,
+      };
+    }
+    return slotObj;
+  });
 };
 
 // Sinh `count` mã slot kế tiếp theo code của zone: {zoneCode}-01, {zoneCode}-02…
@@ -182,7 +211,22 @@ const update = async (user, buildingId, id, payload) => {
   if (!current) throw new AppError("Slot not found", 404);
 
   const update = {};
-  if (payload.status !== undefined) update.status = payload.status;
+  if (payload.status !== undefined) {
+    if (payload.status !== 'occupied') {
+      const activeSession = await ParkingSession.findOne({
+        slot: id,
+        status: 'active'
+      });
+      if (activeSession) {
+        throw new AppError(
+          `Cannot change status of slot "${current.code}" to "${payload.status}" because vehicle "${activeSession.plateNumber}" is actively parked in this slot. Please check out the vehicle first.`,
+          409,
+          'SLOT_OCCUPIED_BY_ACTIVE_SESSION'
+        );
+      }
+    }
+    update.status = payload.status;
+  }
   if (payload.reservable !== undefined) update.reservable = !!payload.reservable;
   if (payload.note !== undefined) update.note = payload.note;
   if (payload.floor !== undefined) {

@@ -61,11 +61,11 @@ describe('floor.service', () => {
       .rejects.toMatchObject({ errorCode: 'FLOOR_CAPACITY_BELOW_ZONES' });
   });
 
-  test('remove floor còn slot → 409', async () => {
+  test('remove floor tự động cascade delete slots và zones khi không có active session', async () => {
     const fl = await f.createFloor(building._id);
     await f.createSlot(building._id, fl._id);
-    await expect(floorSvc.remove(manager, building._id, fl._id))
-      .rejects.toMatchObject({ statusCode: 409 });
+    const res = await floorSvc.remove(manager, building._id, fl._id);
+    expect(res.id.toString()).toBe(fl._id.toString());
   });
 });
 
