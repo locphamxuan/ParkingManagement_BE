@@ -27,7 +27,10 @@
  *       building) — the payment method is whatever staff/customer choose at that check-out,
  *       not chosen here. Cash stays `pending` until confirmed via
  *       `POST .../wallet/pending-cash/{paymentId}/confirm`; other methods settle immediately
- *       and credit the building wallet right away.
+ *       and credit the building wallet right away. `action: 'penalize_violator'` is rejected
+ *       with 409 `INCIDENT_ALREADY_RESOLVED` when the incident is already `resolved`/`closed` —
+ *       report a new incident for a further violation instead of re-approving an old one
+ *       (prevents double-charging the violator's plate).
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
@@ -46,5 +49,5 @@
  *               penaltyFee: { type: number, description: Defaults to the building's ruleViolationFee policy when omitted., example: 100000 }
  *     responses:
  *       200: { description: Incident updated successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { item: { $ref: '#/components/schemas/Incident' } } } } } ] } } } }
- *       409: { description: PENALTY_PENDING_LOCKED — incident already has an approved pending penalty; status cannot be changed manually. }
+ *       409: { description: PENALTY_PENDING_LOCKED — incident already has an approved pending penalty; status cannot be changed manually. INCIDENT_ALREADY_RESOLVED — cannot approve a penalty on an already resolved/closed incident. }
  */

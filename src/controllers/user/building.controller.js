@@ -174,4 +174,4 @@ const listBuildings = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: { items: buildings } });
 });
 
-module.exports = { listBuildings, listVehicleTypes, listFloorsWithAvailability, listSlotsForFloor, resolveBuilding };
+module.exports = { listBuildings, listVehicleTypes, listFloorsWithAvailability, listSlotsForFloor };
