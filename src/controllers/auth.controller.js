@@ -1,9 +1,11 @@
 const authService = require('../services/auth.service');
 const asyncHandler = require('../utils/asyncHandler');
 const { sendSuccess } = require('../utils/response');
+const { setAuthCookie, clearAuthCookie } = require('../utils/authCookie');
 
 const register = asyncHandler(async (req, res) => {
   const data = await authService.register(req.body);
+  setAuthCookie(res, data.token);
   sendSuccess(res, {
     statusCode: 201,
     message: 'Registration successful',
@@ -13,7 +15,13 @@ const register = asyncHandler(async (req, res) => {
 
 const login = asyncHandler(async (req, res) => {
   const data = await authService.login(req.body);
+  setAuthCookie(res, data.token);
   sendSuccess(res, { message: 'Login successful', data });
+});
+
+const logout = asyncHandler(async (_req, res) => {
+  clearAuthCookie(res);
+  sendSuccess(res, { message: 'Logged out successfully' });
 });
 
 const getMe = asyncHandler(async (req, res) => {
@@ -43,6 +51,7 @@ const registerRequest = asyncHandler(async (req, res) => {
 
 const registerVerify = asyncHandler(async (req, res) => {
   const data = await authService.verifyOtpAndRegister(req.body);
+  setAuthCookie(res, data.token);
   sendSuccess(res, {
     statusCode: 201,
     message: 'Registration successful',
@@ -50,4 +59,4 @@ const registerVerify = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { register, login, getMe, forgotPassword, resetPassword, registerRequest, registerVerify };
+module.exports = { register, login, logout, getMe, forgotPassword, resetPassword, registerRequest, registerVerify };

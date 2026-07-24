@@ -116,16 +116,17 @@
  *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: User deleted successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: User deleted successfully }, data: { nullable: true, example: null } } } ] } } } }
- * /api/admin/users/{id}/wallet:
- *   post:
+ * /api/admin/users/{id}/status:
+ *   patch:
  *     tags: [Admin - Users]
- *     summary: Adjust user wallet balance
+ *     summary: Activate or deactivate a user account
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [amount], properties: { amount: { type: number, example: 50000 }, reason: { type: string, example: Admin credit adjustment } } } } } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [isActive], properties: { isActive: { type: boolean, example: false } } } } } }
  *     responses:
- *       200: { description: Wallet adjusted successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Wallet adjustment successful }, data: { type: object, additionalProperties: true } } } ] } } } }
+ *       200: { description: User status updated successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: User status updated }, data: { type: object, properties: { user: { $ref: '#/components/schemas/PublicUser' } } } } } ] } } } }
+ *       409: { description: USER_HAS_ACTIVE_SESSION / USER_HAS_ACTIVE_SUBSCRIPTION — cannot deactivate a user with an active parking session or subscription., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
  * /api/admin/buildings/{buildingId}/assign-staff:
  *   post:
  *     tags: [Admin - Buildings]
@@ -146,14 +147,6 @@
  *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [managerId], properties: { managerId: { type: string, format: objectId } } } } } }
  *     responses:
  *       200: { description: Manager assigned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Manager assigned successfully }, data: { type: object, properties: { building: { $ref: '#/components/schemas/Building' } } } } } ] } } } }
- * /api/admin/notifications:
- *   post:
- *     tags: [Admin - Notifications]
- *     summary: Send a platform-wide notification
- *     security: [{ bearerAuth: [] }]
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [title, body, type], properties: { title: { type: string, example: Platform Maintenance }, body: { type: string, example: System will be down on Saturday. }, type: { type: string, enum: [system, parking, wallet, promotion, shift, feedback, incident, building, reservation, violation, emergency], example: system }, targetUserIds: { type: array, items: { type: string, format: objectId } }, targetRole: { type: string, enum: [customer, manager, staff, admin], example: customer } } } } } }
- *     responses:
- *       200: { description: Notification sent successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Notification sent successfully }, data: { type: object, properties: { notificationsSent: { type: integer, example: 120 } } } } } ] } } } }
  * /api/admin/audit-logs:
  *   get:
  *     tags: [Admin - Audit Logs]
@@ -239,25 +232,6 @@
  *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [userId], properties: { userId: { type: string, format: objectId } } } } } }
  *     responses:
  *       200: { description: Staff revoked successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Staff revoked from building }, data: { type: object, properties: { assignment: { type: object } } } } } ] } } } }
- * /api/admin/buildings/{id}/subscription/grant:
- *   post:
- *     tags: [Admin - Buildings]
- *     summary: Grant a building subscription without wallet charge
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [packageId], properties: { packageId: { type: string, format: objectId } } } } } }
- *     responses:
- *       200: { description: Subscription granted successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Subscription granted successfully }, data: { type: object, properties: { subscription: { type: object } } } } } ] } } } }
- * /api/admin/buildings/{id}/subscription/revoke:
- *   post:
- *     tags: [Admin - Buildings]
- *     summary: Revoke a building subscription immediately
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     responses:
- *       200: { description: Subscription revoked successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Subscription revoked. }, data: { type: object, properties: { subscription: { type: object } } } } } ] } } } }
  * /api/admin/buildings/{id}/price-policies:
  *   get:
  *     tags: [Admin - Buildings]

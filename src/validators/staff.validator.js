@@ -12,21 +12,6 @@ const wrap = (fn) => (req, _res, next) => {
   }
 };
 
-const validateReservationCheckIn = wrap((req) => {
-  if (!req.params.code || !String(req.params.code).trim()) {
-    throw new AppError('code is required', 400);
-  }
-  if (req.body.gate !== undefined && typeof req.body.gate !== 'string') {
-    throw new AppError('gate must be a string', 400);
-  }
-});
-
-const validateReservationExpire = wrap((req) => {
-  if (!isValidObjectId(req.params.id)) {
-    throw new AppError('id must be a valid ObjectId', 400);
-  }
-});
-
 const validateWalletTransaction = wrap((req) => {
   const { sessionId, userId, amount } = req.body;
 
@@ -102,9 +87,6 @@ const validateCreateIncident = wrap((req) => {
   }
 });
 
-/** @deprecated dùng validateCreateIncident thay thế */
-const validateIncidentReport = validateCreateIncident;
-
 // Fix #8: validate GET /staff/incidents query params
 const INCIDENT_STATUSES_ALL = ['open', 'investigating', 'escalated', 'penalty_pending', 'resolved', 'closed'];
 
@@ -120,19 +102,16 @@ const validateListIncidentsQuery = wrap((req) => {
   if (severity !== undefined && !INCIDENT_SEVERITIES.includes(severity)) {
     throw new AppError(`severity must be one of: ${INCIDENT_SEVERITIES.join(', ')}`, 400);
   }
-  if (page !== undefined && (isNaN(Number(page)) || Number(page) < 1)) {
+  if (page !== undefined && (Number.isNaN(Number(page)) || Number(page) < 1)) {
     throw new AppError('page must be a positive integer', 400);
   }
-  if (limit !== undefined && (isNaN(Number(limit)) || Number(limit) < 1 || Number(limit) > 100)) {
+  if (limit !== undefined && (Number.isNaN(Number(limit)) || Number(limit) < 1 || Number(limit) > 100)) {
     throw new AppError('limit must be between 1 and 100', 400);
   }
 });
 
 module.exports = {
-  validateReservationCheckIn,
-  validateReservationExpire,
   validateWalletTransaction,
-  validateIncidentReport,
   validateCreateIncident,
   validateListIncidentsQuery,
 };

@@ -4,37 +4,54 @@ Parking Building Management System (PBMS) — REST API cho 4 vai trò:
 **user** (khách gửi xe), **staff** (nhân viên cổng), **manager** (quản lý tòa nhà),
 **admin** (quản trị nền tảng, đồng thời là operator với quyền xem read-only building).
 
-Stack: **Node.js + Express 4**, **MongoDB + Mongoose 8** (transactions),
-**JWT** (auth), **PayOS** (cổng thanh toán), **nodemailer** (email),
-**Jest + mongodb-memory-server + supertest** (test).
+Stack: **Node.js + Express 4**, **MongoDB Atlas + Mongoose 8** (transactions),
+**JWT** (auth, cookie hoặc Bearer header), **PayOS** (cổng thanh toán, `@payos/node`),
+**Nodemailer** (email OTP/thông báo, Gmail SMTP), **swagger-jsdoc + swagger-ui-express**
+(API docs tại `/api-docs`), **express-rate-limit** (chống brute-force auth/reset),
+**Jest + mongodb-memory-server + supertest** (test, `MongoMemoryReplSet` cho các luồng
+cần transaction).
 
 ---
 
 ## 1. Kiến trúc phân lớp
 
 ```
-routes/  (khai báo endpoint + swagger)          admin/ manager/ staff/ user/ payment/
-   │  gắn middleware: auth → rbac → validator → rateLimiter
+routes/       (khai báo endpoint + swagger JSDoc)   admin/ manager/ staff/ user/ payment/ kiosk.routes.js
+   │  gắn middleware theo thứ tự: authenticate → authorize/authorizeBuildingAccess
+   │  → validator → controller  (sanitizeInputs + rate-limit áp toàn cục ở app.js)
    ▼
-controllers/  (đọc req, gọi service, trả response chuẩn qua utils/response)
+controllers/  (đọc req, gọi đúng 1 service, trả response chuẩn qua utils/response — không chứa nghiệp vụ)
    ▼
-services/     (TOÀN BỘ business logic — controller không chứa nghiệp vụ)
-   │            admin/ manager/ staff/ user/ payment/ shared/ (incidentResolve, dùng chung staff+manager)
-   │            staff/parkingSession/ (checkIn, checkOut, query, helpers)
+services/     (TOÀN BỘ business logic — theo role/domain)
+   │            admin/ manager/ staff/ user/ payment/ kiosk.service.js
+   │            shared/  (incidentResolve — dùng chung staff PATCH & manager PATCH incident)
+   │            staff/parkingSession/  (checkIn, checkOut, query, helpers — tách vì file gốc quá dài)
    ▼
-models/       (Mongoose schema theo domain)
-   building/  Building · Floor · Zone · ParkingSlot · Gate · VehicleType · BuildingManager
+models/       (Mongoose schema theo domain, re-export qua models/index.js)
+   building/   Building · Floor · Zone · ParkingSlot · Gate · VehicleType · BuildingManager
    operations/ ParkingSession · Shift · StaffShift · Feedback
-   policy/    PricePolicy · ReservationPolicy (chỉ còn refundPercent/ruleViolationFee) · LongTermPackage · LongTermSubscription
-   finance/   Payment · WalletTransaction · BuildingWallet · BuildingWalletTransaction
-   log/       AuditLog · Incident · Notification
-   user/      User
-jobs/         subscriptionExpiry (1 giờ) — có jobLock chống chạy trùng
-utils/        feeEngine · refundPolicy · plate.util · staffScope/managerScope · email · …
+   policy/     PricePolicy · ReservationPolicy (chỉ còn refundPercent/ruleViolationFee) · LongTermPackage · LongTermSubscription
+   finance/    Payment · WalletTransaction · BuildingWallet · BuildingWalletTransaction
+   log/        AuditLog · Incident · Notification
+   user/       User · OtpVerification
+
+validators/   input validation theo role (admin/manager/staff/user/auth/adminUsers/incident) — chạy trước controller
+middlewares/  auth (JWT cookie/Bearer) · rbac (authorize/authorizeBuildingAccess/readOnlyForAdmin) ·
+              sanitize (chặn NoSQL injection) · rateLimiter · error (notFound/errorHandler)
+repositories/ building.repository.js — data-access dùng chung (populate manager) tách khỏi service
+constants/    roles · pricing (DEFAULT_HOURLY_RATE fallback)
+config/       env (đọc + validate .env) · db (kết nối Mongoose) · swagger (swagger-jsdoc setup)
+docs/         swagger.paths.js — định nghĩa components/schemas dùng chung (không gắn với 1 route file nào)
+jobs/         subscriptionExpiry (mỗi giờ) — có jobLock chống chạy trùng đa instance
+utils/        feeEngine · refundPolicy · dateBucket (bucket theo giờ local) · plate.util ·
+              staffScope/managerScope (scope theo building + audit log) · email · codeFromName · …
+scripts/      one-off vận hành, chạy tay (wipeData, releasePackageSlots) — không phải cron
 ```
 
-**Quy tắc:** logic tiền bạc luôn nằm trong `mongoose.startSession().withTransaction()`;
-mọi thao tác nhạy cảm ghi `AuditLog` (qua `staffScope.logAudit`).
+**Quy tắc:** logic tiền bạc/thay đổi nhiều document luôn nằm trong
+`mongoose.startSession().withTransaction()` (đòi hỏi MongoDB replica set, kể cả lúc test —
+xem `tests/helpers/db.js::MongoMemoryReplSet`); mọi thao tác nhạy cảm ghi `AuditLog`
+(qua `staffScope.logAudit`).
 
 ## 2. Domain model & bất biến nghiệp vụ
 
@@ -68,7 +85,9 @@ tính năng này như đang sống dù đã xoá 6 ngày trước đó — đã 
   building, `usageType:'subscriber'`, còn `available`, đúng vehicleType) → claim
   slot đó ngay (chuyển `reserved`), lưu vào `Subscription.slot`; check-in sau đó
   tự nhận đúng slot đã giữ. Đây là cơ chế thay thế cho reservation theo giờ đã bỏ.
-- 1 biển số = 1 gói `active|pending` (check + unique partial index chống race).
+- 1 biển số chỉ có tối đa 1 gói `active` cùng lúc (unique partial index DB-level
+  trên `plateNumber` khi `status:'active'` — gói `pending/cancelled/expired` không
+  bị tính nên vẫn mua lại được sau khi hủy/hết hạn).
 - Miễn phí trong `maxHoursPerDay`/ngày (cộng dồn theo ngày — `longTermUsage`);
   phần vượt tính theo PricePolicy thường, có chặn khai thác qua nửa đêm.
 - Hủy trong 3 ngày từ `startDate`, hoàn `refundPercent`% (fallback 80% khi building
@@ -83,10 +102,12 @@ tính năng này như đang sống dù đã xoá 6 ngày trước đó — đã 
 - Ảnh **chân dung bắt buộc mọi check-in** (đối chiếu người lấy xe); khách vãng lai
   thêm ảnh **biển số** (`PLATE_IMAGE_REQUIRED`). Gói định danh bằng quét.
 - Slot staff chọn phải thuộc đúng building (cả luồng gói lẫn walk-in).
-- Checkout: gói dài hạn miễn phí trong `maxHoursPerDay`, phần vượt tính giá thường;
-  vào sớm/ra trễ tính thêm theo giá thường; phần trễ nhân thêm
-  `1 + overstayPenaltyPercent/100` (manager cấu hình).
-- Fee fallback khi building chưa có PricePolicy: `DEFAULT_HOURLY_RATE` theo loại xe.
+- Checkout: gói dài hạn miễn phí trong `maxHoursPerDay`/ngày (cộng dồn — chặn khai
+  thác qua nửa đêm bằng 1 phiên dài); phần vượt tính theo `PricePolicy` thường
+  (peak/regular tách theo phút, `utils/feeEngine`) — không có hệ số phạt overstay
+  riêng, phần vượt tính đúng bằng giá vãng lai bình thường.
+- Fee fallback khi building chưa có PricePolicy: `DEFAULT_HOURLY_RATE` theo loại xe
+  (`constants/pricing.js`).
 
 ### Tiền & doanh thu
 - **`Payment` là nguồn sự thật duy nhất của doanh thu** (model ShiftRevenue đã xóa).
@@ -105,10 +126,23 @@ Dùng `jobLock` (khóa TTL trong Mongo) chống chạy trùng đa instance; emai
 best-effort (lỗi SMTP không rollback nghiệp vụ).
 
 ## 4. AuthN / AuthZ
-- JWT Bearer (`auth.middleware`), RBAC theo role (`rbac.middleware`).
+- JWT chấp nhận **cả 2 dạng**: httpOnly cookie `pbms_token` (set bởi
+  register/register-verify/login, xoá bởi `POST /users/auth/logout` — dùng cho FE
+  web, tránh lưu token ở localStorage) HOẶC header `Authorization: Bearer` (Mobile,
+  không có cookie jar). `auth.middleware` thử cookie trước, fallback header.
+  `app.js` dùng CORS origin allowlist (`CLIENT_URL`, phân tách bởi dấu phẩy nếu
+  nhiều origin) + `credentials:true` — bắt buộc để cookie qua được cross-origin.
+- RBAC theo role (`rbac.middleware`): `authorize(...roles)`, `authorizeBuildingAccess`
+  (admin bypass, staff không kèm buildingId vẫn qua nếu có assignment, còn lại phải
+  khớp toà được gán), `readOnlyForAdmin` (admin chỉ GET cấu hình toà).
 - Scope dữ liệu: staff bị giới hạn `assignedBuildings` (`staffScope.assertBuildingScope`),
   manager theo `managerScope`. Lockout đăng nhập sai nhiều lần + phone unique ở BE.
 - OTP đăng ký + reset password qua email (`utils/email`, templates dùng chung layout).
+- `middlewares/sanitize.middleware.js` (áp toàn cục ở `app.js`, trước mọi route) strip
+  key bắt đầu bằng `$` hoặc chứa dấu `.` khỏi `body/query/params` — chặn NoSQL injection
+  kiểu `?building[$ne]=null` (Express `qs` parse query thành object lồng nhau).
+- `express-rate-limit`: `authLimiter` (20 req/15 phút) trên register/login,
+  `passwordResetLimiter` (5 req/1 giờ) trên forgot/reset-password.
 
 > ⚠️ Lưu ý môi trường dev Windows: Windows Defender từng false-positive
 > (`Trojan:Script/ObfusScript.A!ml`) và **xóa `src/utils/email.js`** làm server
@@ -124,9 +158,76 @@ best-effort (lỗi SMTP không rollback nghiệp vụ).
   logic refund/fee phải cập nhật test tương ứng trong cùng PR.
 
 
-## 6. Nợ kỹ thuật / hướng cải thiện
-1. `docs/swagger.paths.js` + các file `*.swagger.js` (~2.3k dòng) — cân nhắc sinh
-   từ JSDoc hoặc tách theo module để đỡ trôi so với route thật.
+## 6. Chạy dự án local
+
+```bash
+npm install
+cp .env.example .env   # rồi điền giá trị thật (xem bảng biến môi trường bên dưới)
+npm run dev             # nodemon --watch src --ext js,json src/server.js — reload khi sửa src/
+```
+
+Server mặc định lắng nghe `PORT` (default `5000`); `GET /` trả JSON chào; Swagger UI
+tại `http://localhost:<PORT>/api-docs` (spec thô ở `/api-docs.json`).
+
+**Biến môi trường** (`src/config/env.js` throw lỗi ngay lúc start nếu thiếu biến
+BẮT BUỘC — xem `.env.example` để có mô tả đầy đủ từng biến):
+
+| Biến | Bắt buộc | Ghi chú |
+|---|---|---|
+| `MONGODB_URI` | ✅ | MongoDB Atlas connection string |
+| `JWT_SECRET` | ✅ | Ký JWT |
+| `PAYOS_CLIENT_ID` / `PAYOS_API_KEY` / `PAYOS_CHECKSUM_KEY` | ✅ | PayOS (my.payos.vn) |
+| `PORT` | – | default `5000` |
+| `JWT_EXPIRES_IN` | – | default `7d`; cũng set `maxAge` của cookie `pbms_token` |
+| `CLIENT_URL` | – | default `http://localhost:5173`; CORS allowlist, phân tách `,` nếu nhiều origin (FE web + tool khác) |
+| `EMAIL_USER` / `EMAIL_PASS` | – | Nodemailer Gmail SMTP (OTP/email thông báo); dùng App Password |
+| `GEMINI_API_KEY` | – | AI camera nhận diện biển số/hãng xe; thiếu → `/scan` trả 503 |
+| `OCR_PROVIDER` | – | `gemini` \| `paddle`; bỏ trống tự chọn theo biến nào có sẵn |
+| `PADDLE_OCR_URL` | – | URL microservice PaddleOCR tự host (xem `ocr-service/README.md`) |
+
+**Chạy MongoDB in-memory (không cần Atlas)**: `npm run dev:memory`
+(`tools/run-dev-memory-db.js`) — dựng `mongodb-memory-server` local (standalone, không
+phải replica set nên các luồng dùng transaction sẽ lỗi — chỉ tiện để nghịch nhanh các
+endpoint đọc-nhiều hoặc Swagger UI mà không cần Atlas) rồi start server. Dữ liệu mất
+khi tắt process. **Lưu ý**: `tools/` nằm trong `.gitignore` — file này không nằm trong
+repo, mỗi dev tự tạo cục bộ nếu muốn dùng (nội dung script ở trên).
+
+**Test**: `npm test` (= `jest --runInBand`, chạy tuần tự vì nhiều test dùng
+`MongoMemoryReplSet` chung transaction). Không cần `.env` thật — `tests/helpers/setEnv.js`
+tự set biến môi trường giả trước khi nạp `config/env`.
+
+## 7. Build & chạy production
+
+Không có bước build (không TypeScript/bundler) — `npm start` chạy thẳng
+`node src/server.js`. Checklist deploy:
+1. `npm install --omit=dev` (hoặc `npm ci`) trên máy/container đích.
+2. Set đủ biến môi trường bắt buộc ở mục 6 (đặc biệt `NODE_ENV=production` —
+   ảnh hưởng cookie `secure`/`sameSite`, xem `utils/authCookie.js`) qua biến môi
+   trường thật của platform (Render/Railway/VPS…), **không** commit `.env`.
+3. `CLIENT_URL` phải là (các) origin thật của FE production, không phải localhost.
+4. `npm start`.
+5. MongoDB Atlas + PayOS phải là project/kênh thanh toán **production**, không
+   phải sandbox/dev, trước khi nhận thanh toán thật.
+
+> Nhánh này (`chore/full-review-2026-07`) là một đợt rà soát chất lượng trước
+> triển khai — không tự động deploy, quyết định thời điểm đi production do chủ dự
+> án quyết định riêng.
+
+## 8. Thư mục khác
+- `openspec/` — quy trình OpenSpec cho thay đổi hành vi/nghiệp vụ (`propose` →
+  `apply` → `archive`), `openspec/specs/` là nguồn spec đã chốt, `openspec/config.yaml`
+  giữ bối cảnh dự án khớp CLAUDE.md.
+- `ocr-service/` — microservice PaddleOCR tự host tuỳ chọn (thay thế Gemini cho
+  nhận diện biển số), xem README riêng trong thư mục.
+- `tools/` — **gitignore toàn bộ**, script hỗ trợ dev cá nhân (vd `run-dev-memory-db.js`
+  cho `npm run dev:memory`, xem mục 6) không nằm trong repo.
+- `src/scripts/` — script vận hành one-off chạy tay (`wipeData.js`,
+  `releasePackageSlots.js`), không phải cron job.
+
+## 9. Nợ kỹ thuật / hướng cải thiện
+1. `docs/swagger.paths.js` + các file `*.swagger.js` (rải theo từng role, tổng
+   ~2k dòng, đã rà lại 100% route ↔ swagger 2026-07-24) — cân nhắc sinh từ JSDoc
+   tự động hoặc tách nhỏ hơn nữa để đỡ trôi so với route thật theo thời gian.
 2. **Báo cáo cuối ca + doanh thu ca staff chưa merge**: đang nằm trong `git
    stash@{0}` trên nhánh riêng `feat/zone-validation-and-revenue-reporting`
    (WIP) — code thực tế (`submitShiftReport`, `listShiftReportSubmissions`,
@@ -137,5 +238,13 @@ best-effort (lỗi SMTP không rollback nghiệp vụ).
    khi hủy gói — Mobile hiện dùng default cứng 80 khi hỏi API cũ (đã xoá) thất
    bại; nếu cần chính xác hơn thì phải thêm route user mới hoặc mở rộng
    `GET /users/long-term/subscriptions` trả kèm policy.
+5. `CLAUDE.md` mô tả một số việc ("Audit toàn diện 2026-07-22": sanitize
+   middleware chống NoSQL injection, gap test coverage cho webhook/kiosk/admin
+   building CRUD, UTC-vs-local revenue bucketing) như đã xong trên `dev`, nhưng
+   commit thực tế nằm trên nhánh `chore/full-audit-2026-07` — **chưa từng được
+   merge vào `dev`** trước đợt rà soát này. Đã cherry-pick 4 commit liên quan
+   (không đụng tới commit đổi sang cookie auth, vì đó là thay đổi hành vi cần
+   xem xét riêng) vào nhánh `chore/full-review-2026-07`; nhánh audit cũ vẫn còn
+   tồn tại, cân nhắc xoá sau khi xác nhận không còn gì cần lấy thêm từ đó.
 
 

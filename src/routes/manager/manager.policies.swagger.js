@@ -92,6 +92,31 @@
  *       - { in: query, name: status, schema: { type: string, enum: [pending, active, expired, cancelled] } }
  *     responses:
  *       200: { description: Subscriptions returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { type: object } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
+ * /api/manager/buildings/{buildingId}/subscriptions/{id}:
+ *   delete:
+ *     tags: [Manager - Packages]
+ *     summary: Cancel an active long-term subscription and refund the customer's wallet
+ *     description: >
+ *       Only subscriptions with status 'active' can be cancelled (400 otherwise; already
+ *       'cancelled' also 400). Refund amount is `packagePrice * refundPercent / 100`
+ *       (building's refund-policy, default 80%, same helper used by the user's own
+ *       self-cancel flow) credited to the customer's wallet — building wallet is debited
+ *       to fund it.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId }, description: LongTermSubscription id. }
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reason: { type: string, example: Customer requested early cancellation }
+ *     responses:
+ *       200: { description: Subscription cancelled and refund credited., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Subscription cancelled }, data: { type: object, properties: { subscription: { type: object, additionalProperties: true }, refundAmount: { type: number, example: 400000 }, refundPercent: { type: number, example: 80 } } } } } ] } } } }
+ *       404: { description: Subscription not found in this building. }
  */
 /**
  * @swagger

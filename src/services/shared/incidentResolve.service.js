@@ -173,6 +173,17 @@ const applyIncidentAction = async (actorUser, incident, payload = {}) => {
         if (!isManager) {
           throw new AppError('Only a manager can apply a penalty fee', 403, 'MANAGER_ONLY_ACTION');
         }
+        // Chặn duyệt phạt lại trên incident đã 'resolved'/'closed' — tránh double-charge:
+        // incident này đã xử lý xong (có thể đã thu tiền), duyệt lại sẽ mở một khoản phạt
+        // 'penalty_pending' MỚI cho biển số này, thu thêm lần nữa ở lượt check-out kế tiếp.
+        // Vi phạm mới cho cùng biển số phải là 1 incident mới, không phải mở lại cái cũ.
+        if (incident.status === 'resolved' || incident.status === 'closed') {
+          throw new AppError(
+            'This incident is already resolved/closed — report a new incident to penalize a further violation',
+            409,
+            'INCIDENT_ALREADY_RESOLVED',
+          );
+        }
         const plate = normalizePlate(payload.violatorPlate || incident.violatorPlate);
         if (!plate) {
           throw new AppError('violatorPlate is required to penalize the offending vehicle', 400, 'VIOLATOR_PLATE_REQUIRED');
@@ -240,7 +251,7 @@ const applyIncidentAction = async (actorUser, incident, payload = {}) => {
     await writeAuditLog({
       actor: actorUser,
       action: 'RESOLVE_INCIDENT',
-      targetTable: 'incidents',
+      targetTable: 'Incident',
       targetId: `${incident._id}`,
       building: incident.building,
       previousValue: before,

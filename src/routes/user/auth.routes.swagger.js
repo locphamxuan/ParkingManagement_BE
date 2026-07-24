@@ -4,7 +4,10 @@
  *   post:
  *     tags: [Auth]
  *     summary: Register a new user account
- *     description: Creates a new user with the `user` role and immediately returns a JWT token plus the public user profile.
+ *     description: >
+ *       Creates a new user with the `user` role and immediately returns a JWT token plus
+ *       the public user profile. Also sets the httpOnly `pbms_token` auth cookie (see
+ *       POST /auth/login for details).
  *     requestBody:
  *       required: true
  *       content:
@@ -145,7 +148,10 @@
  *   post:
  *     tags: [Auth]
  *     summary: Verify the registration OTP and create the account
- *     description: Validates the 6-digit OTP sent by `/register-request`, creates the user, removes the OTP record, and returns a JWT token.
+ *     description: >
+ *       Validates the 6-digit OTP sent by `/register-request`, creates the user, removes
+ *       the OTP record, and returns a JWT token. Also sets the httpOnly `pbms_token` auth
+ *       cookie (see POST /auth/login for details).
  *     requestBody:
  *       required: true
  *       content:
@@ -217,7 +223,12 @@
  *   post:
  *     tags: [Auth]
  *     summary: Log in with email and password
- *     description: Authenticates a user, updates `lastLoginAt`, and returns a JWT token plus the public user profile.
+ *     description: >
+ *       Authenticates a user, updates `lastLoginAt`, and returns a JWT token plus the
+ *       public user profile. Also sets an httpOnly `pbms_token` cookie (used by the FE
+ *       web app instead of storing the token in localStorage). `authenticate` accepts
+ *       EITHER this cookie OR an `Authorization: Bearer` header, so Mobile clients
+ *       (which keep the token in secure device storage, no cookie jar) are unaffected.
  *     requestBody:
  *       required: true
  *       content:
@@ -289,6 +300,22 @@
  *             example:
  *               success: false
  *               message: Account is deactivated
+ *
+ * /api/user/auth/logout:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Log out and clear the httpOnly auth cookie
+ *     description: >
+ *       Clears the `pbms_token` cookie set by login/register. Stateless otherwise (no
+ *       server-side token blacklist) — Bearer-header clients simply discard their token
+ *       client-side and don't need to call this.
+ *     responses:
+ *       200:
+ *         description: Logged out successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
  *
  * /api/user/auth/me:
  *   get:

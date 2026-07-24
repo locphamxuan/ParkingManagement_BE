@@ -7,6 +7,7 @@ const LongTermSubscription = require("../../models/policy/LongTermSubscription")
 const Feedback = require("../../models/operations/Feedback");
 const mongoose = require("mongoose");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
+const { localUtcOffset } = require("../../utils/dateBucket");
 
 const startOfDay = (date) => {
   const d = new Date(date);
@@ -94,7 +95,7 @@ const getOverview = async (user, buildingId) => {
       {
         $group: {
           _id: {
-            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+            $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: localUtcOffset() },
           },
           totalRevenue: { $sum: "$amount" },
           sessionCount: { $sum: 1 },

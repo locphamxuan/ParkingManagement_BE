@@ -150,6 +150,19 @@ describe('rule 1 — chỉ manager DUYỆT phí phạt', () => {
     expect(noted.item.status).toBe('penalty_pending');
     expect(noted.item.resolutionNote).toBe('đang chờ xe ra cổng');
   });
+
+  test('incident đã resolved/closed → không duyệt phạt lại được (tránh double-charge biển số)', async () => {
+    const incident = await staffIncidentSvc.createIncident(staff, {
+      type: 'slot_occupied', buildingId: building._id,
+    });
+    await managerIncidentSvc.resolve(manager, building._id, incident.item._id, { status: 'resolved' });
+
+    await expect(
+      managerIncidentSvc.resolve(manager, building._id, incident.item._id, {
+        action: 'penalize_violator', violatorPlate: '51F-888.88', penaltyFee: 30000,
+      }),
+    ).rejects.toMatchObject({ errorCode: 'INCIDENT_ALREADY_RESOLVED' });
+  });
 });
 
 describe('rule 3 — staff check-out xe vi phạm mới thực thu; cash pending / phương thức khác hoàn tất ngay', () => {

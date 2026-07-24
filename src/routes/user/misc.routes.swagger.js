@@ -3,8 +3,11 @@
  * /api/user/parking-history:
  *   get:
  *     tags: [User - Parking History]
- *     summary: List direct parking history for the authenticated user
- *     description: Returns non-reservation parking sessions for the authenticated user.
+ *     summary: List parking history for the authenticated user
+ *     description: >
+ *       Both list and detail populate slot (with floor)/entryGate/exitGate and add
+ *       computed checkIn/checkOut (aliases of entryTime/exitTime) and duration
+ *       (minutes, null while still active) — not just on the detail endpoint.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
@@ -12,6 +15,16 @@
  *       - { in: query, name: buildingId, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Parking history returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ParkingSession' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
+ * /api/user/parking-history/{id}:
+ *   get:
+ *     tags: [User - Parking History]
+ *     summary: Get one parking session's detail from the authenticated user's history
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     responses:
+ *       200: { description: Session returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { session: { $ref: '#/components/schemas/ParkingSession' } } } } } ] } } } }
+ *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
  * /api/user/wallet:
  *   get:
  *     tags: [User - Wallet]
@@ -58,6 +71,16 @@
  *       - { in: query, name: buildingId, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Long-term packages returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { packages: { type: array, items: { $ref: '#/components/schemas/LongTermPackage' } } } } } } ] } } } }
+ * /api/user/long-term/packages/{id}:
+ *   get:
+ *     tags: [User - Long-term]
+ *     summary: Get one long-term package's detail
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     responses:
+ *       200: { description: Package returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { package: { $ref: '#/components/schemas/LongTermPackage' } } } } } ] } } } }
+ *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
  * /api/user/long-term/subscriptions:
  *   get:
  *     tags: [User - Long-term]
@@ -82,6 +105,16 @@
  */
 /**
  * @swagger
+ * /api/user/long-term/subscriptions/{id}:
+ *   get:
+ *     tags: [User - Long-term]
+ *     summary: Get one of the authenticated user's long-term subscriptions
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     responses:
+ *       200: { description: Subscription returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { subscription: { type: object, additionalProperties: true } } } } } ] } } } }
+ *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
  * /api/user/long-term/subscriptions/{id}/cancel:
  *   post:
  *     tags: [User - Long-term]
@@ -169,6 +202,20 @@
  *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [parkingSessionId, rating, comment], properties: { buildingId: { type: string, format: objectId }, parkingSessionId: { type: string, format: objectId }, rating: { type: integer, minimum: 1, maximum: 5, example: 5 }, comment: { type: string, maxLength: 1000, example: Fast check-out and clean parking area. }, portraitImageUrl: { type: string, nullable: true }, plateImageUrl: { type: string, nullable: true } } } } } }
  *     responses:
  *       201: { description: Feedback submitted successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Feedback submitted }, data: { type: object, properties: { feedback: { $ref: '#/components/schemas/Feedback' } } } } } ] } } } }
+ *   get:
+ *     tags: [User - Feedback]
+ *     summary: Browse all feedback (public, no authentication required)
+ *     description: >
+ *       Mounted before the auth middleware in user/index.js — unlike the other
+ *       /feedbacks routes (which authenticate per-route internally), this one is
+ *       genuinely public, e.g. for showing building reviews to prospective users.
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+ *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+ *       - { in: query, name: building, schema: { type: string, format: objectId } }
+ *       - { in: query, name: rating, schema: { type: integer, minimum: 1, maximum: 5 } }
+ *     responses:
+ *       200: { description: Feedback returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Feedback' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
  * /api/user/feedbacks/me:
  *   get:
  *     tags: [User - Feedback]
@@ -181,13 +228,48 @@
  *       - { in: query, name: rating, schema: { type: integer, minimum: 1, maximum: 5 } }
  *     responses:
  *       200: { description: Feedback returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Feedback' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
- * /api/kiosk/reservation-checkin:
+ * /api/user/feedbacks/{id}:
+ *   delete:
+ *     tags: [User - Feedback]
+ *     summary: Delete a feedback the authenticated user submitted
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     responses:
+ *       200: { description: Feedback deleted successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Feedback deleted }, data: { nullable: true, example: null } } } ] } } } }
+ *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+ * /api/kiosk/package-checkin:
  *   post:
  *     tags: [Kiosk]
- *     summary: Self-service reservation check-in by QR code or plate number
- *     description: Public kiosk endpoint used by gate devices to admit a reserved vehicle without staff authentication.
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { qrCode: { type: string, example: PLT-7a9f2c11b8d4e003 }, plateNumber: { type: string, example: 59G2-038.80 }, gate: { type: string, format: objectId }, plateImage: { type: string, example: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ }, portraitImage: { type: string, example: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ } } } } } }
+ *     summary: Self check-in for a long-term subscription vehicle by vehicle QR code
+ *     description: >
+ *       Public, unauthenticated gate-kiosk endpoint — the only state-changing route in the
+ *       system that requires no auth. A long-term package driver scans their registered
+ *       vehicle QR token (not a bare plate number, to prevent anyone reading a plate off a
+ *       windshield) to self-admit without a staff member. Resolves the QR to its owner's
+ *       plate, finds an active `LongTermSubscription` for that plate (optionally scoped to
+ *       `building`), rejects if the plate already has an active session (409
+ *       `DUPLICATE_PLATE`), then assigns the subscription's fixed slot if available or any
+ *       free `subscriber`-usage slot in the building (409 `NO_SLOT_AVAILABLE` if none). Fee
+ *       is always 0 at check-in (`paymentMethod: 'long_term'`); overage is billed at
+ *       check-out like any other long-term session.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [qrCode]
+ *             properties:
+ *               qrCode: { type: string, example: PLT-7a9f2c11b8d4e003, description: "Vehicle QR token registered on the user's license plate (User.licensePlates[].qrCode)." }
+ *               building: { type: string, format: objectId, description: Optional — scopes the subscription lookup to one building. }
+ *               gate: { type: string, format: objectId }
+ *               plateImage: { type: string, example: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ' }
+ *               portraitImage: { type: string, example: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ' }
  *     responses:
- *       200: { description: Reservation checked in successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Reservation vehicle checked in successfully }, data: { type: object, additionalProperties: true } } } ] } } } }
+ *       200: { description: Checked in successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { subscription: { type: object, additionalProperties: true }, parkingSession: { $ref: '#/components/schemas/ParkingSession' } } } } } ] } } } }
+ *       400: { description: KIOSK_QR_REQUIRED / KIOSK_INVALID_PLATE_FORMAT — missing or malformed qrCode. }
+ *       404: { description: KIOSK_QR_NOT_FOUND (unregistered QR token) or SUBSCRIPTION_NOT_FOUND (no active package for this plate). }
+ *       409: { description: DUPLICATE_PLATE (vehicle already has an active session) or NO_SLOT_AVAILABLE. }
  */
 

@@ -26,18 +26,6 @@ const assertBuildingScope = (user, buildingId) => {
   return allowed;
 };
 
-/**
- * Returns the first assigned building ID for the given staff user.
- * Throws 403 if the user has no assigned buildings.
- */
-const ensureStaffHasBuilding = (user) => {
-  const ids = assignedBuildingIds(user);
-  if (ids.length === 0) {
-    throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
-  }
-  return ids[0];
-};
-
 const logAudit = async (session, payload) =>
   AuditLog.create(
     [{
@@ -55,4 +43,4 @@ const logAudit = async (session, payload) =>
     { session },
   );
 
-module.exports = { toIdString, assignedBuildingIds, assertBuildingScope, ensureStaffHasBuilding, logAudit };
+module.exports = { toIdString, assignedBuildingIds, assertBuildingScope, logAudit };

@@ -9,11 +9,12 @@ const list = ({
   Building.find(filter)
     .sort(sort)
     .skip((page - 1) * limit)
-    .limit(limit);
+    .limit(limit)
+    .populate("manager", "fullName email");
 
 const count = (filter = {}) => Building.countDocuments(filter);
 
-const findById = (id) => Building.findById(id);
+const findById = (id) => Building.findById(id).populate("manager", "fullName email");
 
 const create = (payload) => Building.create(payload);
 

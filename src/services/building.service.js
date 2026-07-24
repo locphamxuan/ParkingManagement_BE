@@ -1,5 +1,4 @@
 const AppError = require("../utils/AppError");
-const { ROLES } = require("../constants/roles");
 const buildingRepository = require("../repositories/building.repository");
 const { Floor } = require("../models");
 
@@ -60,10 +59,36 @@ const listBuildings = async (query = {}) => {
   };
 };
 
-const createBuilding = async (payload) => buildingRepository.create(payload);
+// Whitelist fields so clients can never mass-assign system-managed fields
+// (manager, isActive, timestamps, ...) through the create/update payload.
+const CREATABLE_FIELDS = [
+  "name",
+  "code",
+  "address",
+  "description",
+  "totalFloors",
+  "operatingHours",
+  "pricing",
+  "contactPhone",
+  "images",
+  "location",
+];
+const UPDATABLE_FIELDS = [...CREATABLE_FIELDS, "status"];
+
+const pickFields = (payload = {}, fields) =>
+  fields.reduce((acc, field) => {
+    if (payload[field] !== undefined) acc[field] = payload[field];
+    return acc;
+  }, {});
+
+const createBuilding = async (payload) =>
+  buildingRepository.create(pickFields(payload, CREATABLE_FIELDS));
 
 const updateBuilding = async (id, payload) => {
-  const updated = await buildingRepository.updateById(id, payload);
+  const updated = await buildingRepository.updateById(
+    id,
+    pickFields(payload, UPDATABLE_FIELDS),
+  );
   if (!updated) {
     throw new AppError("Building not found", 404);
   }
@@ -90,7 +115,7 @@ const removeBuilding = async (id) => {
 // dùng field `totalFloors` tự nhập tay (dễ lệch — vd manager nhập 1 nhưng thực
 // tế đã tạo 3 tầng). Trả kèm `floorCount` bên cạnh building doc để FE hiển thị.
 const attachFloorCount = async (building) => {
-  const obj = building.toObject ? building.toObject() : building;
+  const obj = building.toObject?.() ?? building;
   obj.floorCount = await Floor.countDocuments({ building: obj._id });
   return obj;
 };

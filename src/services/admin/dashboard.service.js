@@ -4,6 +4,7 @@ const ParkingSession = require("../../models/operations/ParkingSession");
 const ParkingSlot = require("../../models/building/ParkingSlot");
 const Payment = require("../../models/finance/Payment");
 const { ROLES } = require("../../constants/roles");
+const { localUtcOffset } = require("../../utils/dateBucket");
 
 const getDateRange = (period) => {
   const now = new Date();
@@ -61,7 +62,7 @@ const getOverview = async (period = "today") => {
       { $match: { status: "success", type: { $in: ["session", "reservation", "subscription"] }, createdAt: { $gte: sevenDaysAgo, $lt: tomorrow } } },
       {
         $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: localUtcOffset() } },
           revenue: { $sum: "$amount" },
           sessions: { $sum: 1 },
         },

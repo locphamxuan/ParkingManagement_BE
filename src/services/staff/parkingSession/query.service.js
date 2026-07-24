@@ -1,5 +1,5 @@
 const AppError = require('../../../utils/AppError');
-const { ParkingSession, ParkingSlot, LongTermSubscription, Payment, User, Notification, PricePolicy } = require('../../../models');
+const { ParkingSession, ParkingSlot, LongTermSubscription, User, Notification, PricePolicy } = require('../../../models');
 const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../../utils/plate.util');
 const visionScanService = require('../visionScan.service');

@@ -1,14 +1,15 @@
 const mongoose = require('mongoose');
 const logger = require("../utils/logger");
 const env = require('./env');
-const dns = require('dns');
+const dns = require('node:dns');
 
-// Prefer public DNS for the Node process to avoid local resolver SRV refusal
+// Prefer public DNS for the Node process to avoid local resolver SRV refusal.
+// 8.8.8.8 / 1.1.1.1 are well-known public resolvers (Google / Cloudflare), not secrets.
 try {
   dns.setServers(['8.8.8.8', '1.1.1.1']);
   logger.info('[MongoDB] dns.setServers ->', dns.getServers());
 } catch (e) {
-  logger.warn('[MongoDB] dns.setServers failed:', e && e.message);
+  logger.warn('[MongoDB] dns.setServers failed:', e?.message);
 }
 
 const connectDB = async () => {

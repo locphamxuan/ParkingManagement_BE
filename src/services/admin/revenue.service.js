@@ -7,7 +7,7 @@ const getReport = async ({ from, to, buildingId } = {}) => {
 
   const dateFrom = new Date(from);
   const dateTo = new Date(to);
-  if (isNaN(dateFrom) || isNaN(dateTo))
+  if (Number.isNaN(dateFrom.getTime()) || Number.isNaN(dateTo.getTime()))
     throw new AppError("Invalid date format", 400);
   if (dateFrom > dateTo)
     throw new AppError("from must be before or equal to to", 400);

@@ -21,11 +21,11 @@ const generateCode = (name) =>
     .trim()
     .toUpperCase()
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/Đ/g, "D")
-    .replace(/[^A-Z0-9]/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_|_$/g, "")
+    .replaceAll(/[̀-ͯ]/g, "")
+    .replaceAll(/Đ/g, "D")
+    .replaceAll(/[^A-Z0-9]/g, "_")
+    .replaceAll(/_+/g, "_")
+    .replaceAll(/^_|_$/g, "")
     .substring(0, 20);
 
 const create = async (user, buildingId, payload) => {
