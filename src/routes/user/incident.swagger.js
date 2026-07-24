@@ -5,10 +5,15 @@
  *     tags: [User - Incidents]
  *     summary: Report an incident (violator plate check auto-runs when applicable)
  *     description: >
- *       When `type` is `slot_occupied` and `violatorPlate` is given, the system checks
- *       whether the plate has a registered account (active subscription or a session
- *       linked to a user) in that building. If NOT found, the incident is
- *       auto-escalated (`status: escalated`) and can only be handled by a manager.
+ *       `type` is either one of the fixed self-issue categories (vehicle_damaged,
+ *       facility_issue, wrong_scan, payment_dispute, security, other) OR the `code`
+ *       of one of the building's configured violation types (see
+ *       GET /api/user/buildings/{buildingId}/violation-types) — e.g. `wrong_spot`,
+ *       `slot_occupied`. When reporting a violation type and `violatorPlate` is given,
+ *       the system checks whether the plate has a registered account (active
+ *       subscription or a session linked to a user) in that building. If NOT found,
+ *       the incident is auto-escalated (`status: escalated`) and can only be handled
+ *       by a manager.
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -18,7 +23,7 @@
  *             type: object
  *             required: [type]
  *             properties:
- *               type: { type: string, enum: [slot_occupied, slot_blocked, vehicle_damaged, facility_issue, wrong_scan, payment_dispute, security, other], example: slot_occupied }
+ *               type: { type: string, description: "One of vehicle_damaged, facility_issue, wrong_scan, payment_dispute, security, other, or a building violation-type code (e.g. wrong_spot, slot_occupied).", example: slot_occupied }
  *               target: { type: string, example: 59G2-038.80 }
  *               note: { type: string, example: Someone parked in my reserved slot }
  *               buildingId: { type: string, format: objectId }

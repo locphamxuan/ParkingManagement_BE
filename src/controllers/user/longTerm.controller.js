@@ -32,9 +32,17 @@ const cancelSubscription = asyncHandler(async (req, res) => {
   sendSuccess(res, { message: 'Subscription cancelled successfully', data: { subscription, refundAmount, refundPercent } });
 });
 
+const getRefundPreview = asyncHandler(async (req, res) => {
+  const preview = await service.getRefundPreview(req.user._id, req.params.id);
+  sendSuccess(res, { data: preview });
+});
+
 const renewSubscription = asyncHandler(async (req, res) => {
   const subscription = await service.renewSubscription(req.user._id, req.params.id);
   sendSuccess(res, { message: 'Subscription renewed successfully', data: { subscription } });
 });
 
-module.exports = { listPackages, getPackage, subscribe, listSubscriptions, getSubscription, cancelSubscription, renewSubscription };
+module.exports = {
+  listPackages, getPackage, subscribe, listSubscriptions, getSubscription,
+  cancelSubscription, renewSubscription, getRefundPreview,
+};

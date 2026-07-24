@@ -1,12 +1,11 @@
 const mongoose = require('mongoose');
 const {
-  Incident, ParkingSession, Payment, Notification, User, WalletTransaction, LongTermSubscription,
+  Incident, ParkingSession, Payment, Notification, User, WalletTransaction, LongTermSubscription, ViolationType,
 } = require('../../models');
 const AppError = require('../../utils/AppError');
 const { normalizePlate, plateMatchRegex } = require('../../utils/plate.util');
 const { writeAuditLog } = require('../../utils/audit');
 const buildingWalletService = require('../manager/buildingWallet.service');
-const reservationPolicyService = require('../manager/reservationPolicy.service');
 const { ROLES } = require('../../constants/roles');
 
 const { INCIDENT_STATUS } = Incident;
@@ -188,13 +187,33 @@ const applyIncidentAction = async (actorUser, incident, payload = {}) => {
         if (!plate) {
           throw new AppError('violatorPlate is required to penalize the offending vehicle', 400, 'VIOLATOR_PLATE_REQUIRED');
         }
-        let penaltyFee = payload.penaltyFee;
-        if (penaltyFee === undefined || penaltyFee === null) {
-          // Chưa nhập số tiền → dùng mức phạt chuẩn manager đã cấu hình cho tòa (ReservationPolicy.ruleViolationFee).
-          const policy = await reservationPolicyService.getPublic(incident.building);
-          penaltyFee = policy.ruleViolationFee;
+
+        // Phí phạt lấy từ bảng giá manager tự cấu hình theo TỪNG loại vi phạm
+        // (ViolationType, khớp incident.type) — manager KHÔNG được tự nhập số tùy ý
+        // cho các loại đã phân loại (tránh set phí quá cao/tuỳ tiện). Chỉ incident
+        // type='other' (hoặc loại không còn/không có trong bảng giá — vd đã bị xoá,
+        // hoặc incident cũ từ trước khi có tính năng này) mới cho phép manager tự
+        // nhập penaltyFee thủ công.
+        let penaltyFee;
+        const violationType = incident.type === 'other'
+          ? null
+          : await ViolationType.findOne({ building: incident.building, code: incident.type });
+
+        if (violationType) {
+          penaltyFee = violationType.fee;
+        } else {
+          if (payload.penaltyFee === undefined || payload.penaltyFee === null) {
+            throw new AppError(
+              incident.type === 'other'
+                ? "penaltyFee is required for 'other' incidents — there is no preset violation fee"
+                : 'No configured violation-type fee found for this incident type — enter a penaltyFee manually',
+              400,
+              'PENALTY_FEE_REQUIRED',
+            );
+          }
+          penaltyFee = Number(payload.penaltyFee);
         }
-        penaltyFee = Number(penaltyFee);
+
         if (!Number.isFinite(penaltyFee) || penaltyFee < 0) {
           throw new AppError('penaltyFee must be a non-negative number', 400, 'INVALID_PENALTY_FEE');
         }

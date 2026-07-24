@@ -2,7 +2,7 @@ const User = require("./user/User");
 const OtpVerification = require("./user/OtpVerification");
 
 const { Building, BuildingManager, Floor, Gate, ParkingSlot, VehicleType, Zone } = require("./building");
-const { PricePolicy, ReservationPolicy, LongTermPackage, LongTermSubscription } = require("./policy");
+const { PricePolicy, ReservationPolicy, LongTermPackage, LongTermSubscription, ViolationType } = require("./policy");
 const { ParkingSession, Shift, StaffShift } = require("./operations");
 const { Payment, WalletTransaction, BuildingWallet, BuildingWalletTransaction } = require("./finance");
 const { AuditLog, Incident, Notification } = require('./log');
@@ -20,6 +20,7 @@ module.exports = {
   LongTermPackage,
   LongTermSubscription,
   ReservationPolicy,
+  ViolationType,
   Shift,
   StaffShift,
   AuditLog,

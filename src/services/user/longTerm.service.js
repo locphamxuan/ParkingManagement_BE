@@ -428,4 +428,24 @@ const getSubscription = async (userId, id) => {
   return subscription;
 };
 
-module.exports = { listPackages, getPackage, subscribe, listSubscriptions, getSubscription, cancelSubscription, renewSubscription };
+// Cho user xem trước % / số tiền hoàn lại TRƯỚC khi bấm xác nhận hủy — dùng cùng
+// getRefundPercent với cancelSubscription nên số hiển thị luôn khớp số thực nhận.
+const getRefundPreview = async (userId, id) => {
+  const subscription = await LongTermSubscription.findOne({ _id: id, user: userId })
+    .populate('package', 'price');
+  if (!subscription) throw new AppError('Subscription not found', 404, 'SUBSCRIPTION_NOT_FOUND');
+  if (subscription.status !== 'active') {
+    throw new AppError('Chỉ có thể xem trước hoàn tiền cho gói đang hoạt động', 400);
+  }
+
+  const packagePrice = subscription.package?.price ?? 0;
+  const refundPercent = await getRefundPercent(subscription.building);
+  const refundAmount = Math.round((packagePrice * refundPercent) / 100);
+
+  return { refundPercent, refundAmount, packagePrice };
+};
+
+module.exports = {
+  listPackages, getPackage, subscribe, listSubscriptions, getSubscription,
+  cancelSubscription, renewSubscription, getRefundPreview,
+};

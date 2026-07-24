@@ -138,6 +138,52 @@
  *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { refundPercent: { type: number, example: 80 }, isActive: { type: boolean, example: true } } } } } }
  *     responses:
  *       200: { description: Refund policy saved successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Refund policy saved }, data: { type: object, properties: { item: { $ref: '#/components/schemas/ReservationPolicy' } } } } } ] } } } }
+ * /api/manager/buildings/{buildingId}/violation-types:
+ *   get:
+ *     tags: [Manager - Refund Policy]
+ *     summary: List the building's configurable violation penalty fees
+ *     description: >
+ *       Seeds a default set of common violation types (each with a starting fee) the
+ *       first time this is called for a building — manager can freely edit/delete/add
+ *       from there. These fees are what `POST .../incidents/{id}` with
+ *       `action=penalize_violator` charges for a classified incident type; there is
+ *       no free-form fee entry for classified types anymore.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
+ *       - { in: query, name: includeInactive, schema: { type: string, enum: ['true', 'false'] } }
+ *     responses:
+ *       200: { description: Violation types returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { type: object, properties: { _id: { type: string }, code: { type: string, example: wrong_spot }, label: { type: string, example: Wrong spot / wrong vehicle type }, fee: { type: number, example: 50000 }, isActive: { type: boolean } } } } } } } } ] } } } }
+ *   post:
+ *     tags: [Manager - Refund Policy]
+ *     summary: Create a new violation type + fee
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [label, fee], properties: { label: { type: string, example: Parked across two slots }, fee: { type: number, example: 75000 } } } } } }
+ *     responses:
+ *       201: { description: Violation type created successfully. }
+ *       409: { description: A violation type with this name already exists for this building. }
+ * /api/manager/buildings/{buildingId}/violation-types/{id}:
+ *   put:
+ *     tags: [Manager - Refund Policy]
+ *     summary: Update a violation type's label/fee/active state
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { label: { type: string }, fee: { type: number }, isActive: { type: boolean } } } } } }
+ *     responses:
+ *       200: { description: Violation type updated successfully. }
+ *   delete:
+ *     tags: [Manager - Refund Policy]
+ *     summary: Delete a violation type
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     responses:
+ *       200: { description: Violation type deleted successfully. }
  * /api/manager/buildings/{buildingId}/shifts:
  *   get:
  *     tags: [Manager - Shifts]
