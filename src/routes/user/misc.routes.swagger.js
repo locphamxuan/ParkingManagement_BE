@@ -115,6 +115,17 @@
  *     responses:
  *       200: { description: Subscription returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { subscription: { type: object, additionalProperties: true } } } } } ] } } } }
  *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+ * /api/user/long-term/subscriptions/{id}/refund-preview:
+ *   get:
+ *     tags: [User - Long-term]
+ *     summary: Preview the refund percent/amount the user would receive if they cancel this subscription now
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     responses:
+ *       200: { description: Refund preview returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { refundPercent: { type: number, example: 80 }, refundAmount: { type: number, example: 400000 }, packagePrice: { type: number, example: 500000 } } } } } ] } } } }
+ *       400: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+ *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
  * /api/user/long-term/subscriptions/{id}/cancel:
  *   post:
  *     tags: [User - Long-term]
