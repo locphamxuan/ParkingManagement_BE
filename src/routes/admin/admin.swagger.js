@@ -116,6 +116,17 @@
  *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: User deleted successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: User deleted successfully }, data: { nullable: true, example: null } } } ] } } } }
+ * /api/admin/users/{id}/status:
+ *   patch:
+ *     tags: [Admin - Users]
+ *     summary: Activate or deactivate a user account
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [isActive], properties: { isActive: { type: boolean, example: false } } } } } }
+ *     responses:
+ *       200: { description: User status updated successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: User status updated }, data: { type: object, properties: { user: { $ref: '#/components/schemas/PublicUser' } } } } } ] } } } }
+ *       409: { description: USER_HAS_ACTIVE_SESSION / USER_HAS_ACTIVE_SUBSCRIPTION — cannot deactivate a user with an active parking session or subscription., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
  * /api/admin/buildings/{buildingId}/assign-staff:
  *   post:
  *     tags: [Admin - Buildings]
