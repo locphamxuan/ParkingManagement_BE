@@ -15,6 +15,7 @@ const ParkingSlot = require('../../../src/models/building/ParkingSlot');
 const User = require('../../../src/models/user/User');
 const Payment = require('../../../src/models/finance/Payment');
 const LongTermSubscription = require('../../../src/models/policy/LongTermSubscription');
+const ViolationType = require('../../../src/models/policy/ViolationType');
 
 let building, staff, manager, reporter;
 
@@ -30,6 +31,9 @@ beforeEach(async () => {
   // checkOut() đòi staff có ca hôm nay.
   const shift = await f.createShift(building._id);
   await f.createStaffShift(building._id, staff._id, shift._id);
+  // User-facing incident.service chỉ chấp nhận type='slot_occupied' nếu có ViolationType
+  // khớp code này cho building — seed sẵn (mô phỏng manager đã cấu hình bảng giá).
+  await ViolationType.create({ building: building._id, code: 'slot_occupied', label: 'Occupying a reserved slot', fee: 100000 });
 });
 
 const activeSession = async (plateNumber, over = {}) => {
@@ -104,8 +108,9 @@ describe('rule 1 — chỉ manager DUYỆT phí phạt', () => {
   });
 
   test('manager duyệt phí phạt KHÔNG cần xe đang active trong bãi (chỉ ghi nhận, chưa thu)', async () => {
+    // type='other' → không có mức phạt định sẵn, manager tự nhập tay.
     const incident = await staffIncidentSvc.createIncident(staff, {
-      type: 'slot_occupied', buildingId: building._id,
+      type: 'other', buildingId: building._id,
     });
     const resolved = await managerIncidentSvc.resolve(manager, building._id, incident.item._id, {
       action: 'penalize_violator', violatorPlate: '51F-999.11', penaltyFee: 60000,
@@ -117,14 +122,45 @@ describe('rule 1 — chỉ manager DUYỆT phí phạt', () => {
     expect(await Payment.countDocuments({})).toBe(0);
   });
 
-  test('không nhập penaltyFee → dùng ruleViolationFee mặc định từ policy toà', async () => {
+  test('không có ViolationType khớp type và không nhập penaltyFee → 400 PENALTY_FEE_REQUIRED (không còn default ruleViolationFee)', async () => {
+    // Type tuỳ ý KHÔNG khớp bất kỳ ViolationType nào đã seed (chỉ staff.createIncident mới
+    // tạo được incident với type tự do — user-facing service validate type khớp bảng giá).
+    const incident = await staffIncidentSvc.createIncident(staff, {
+      type: 'unclassified_violation', buildingId: building._id,
+    });
+    await expect(
+      managerIncidentSvc.resolve(manager, building._id, incident.item._id, {
+        action: 'penalize_violator', violatorPlate: '51F-444.44',
+      }),
+    ).rejects.toMatchObject({ errorCode: 'PENALTY_FEE_REQUIRED' });
+  });
+
+  test("type='other' luôn cần manager tự nhập penaltyFee (không có mức phạt định sẵn)", async () => {
+    const incident = await staffIncidentSvc.createIncident(staff, {
+      type: 'other', buildingId: building._id,
+    });
+    await expect(
+      managerIncidentSvc.resolve(manager, building._id, incident.item._id, {
+        action: 'penalize_violator', violatorPlate: '51F-555.55',
+      }),
+    ).rejects.toMatchObject({ errorCode: 'PENALTY_FEE_REQUIRED' });
+
+    const resolved = await managerIncidentSvc.resolve(manager, building._id, incident.item._id, {
+      action: 'penalize_violator', violatorPlate: '51F-555.55', penaltyFee: 75000,
+    });
+    expect(resolved.item.penaltyFee).toBe(75000);
+  });
+
+  test('type khớp 1 ViolationType đã cấu hình → phí bị ÉP theo bảng giá, penaltyFee manager gửi lên bị bỏ qua', async () => {
+    // 'slot_occupied' đã seed sẵn ở beforeEach với fee=100000.
     const incident = await staffIncidentSvc.createIncident(staff, {
       type: 'slot_occupied', buildingId: building._id,
     });
+    // Manager cố gửi 999999 — phải bị bỏ qua, luôn áp đúng 100000 từ bảng giá.
     const resolved = await managerIncidentSvc.resolve(manager, building._id, incident.item._id, {
-      action: 'penalize_violator', violatorPlate: '51F-444.44',
+      action: 'penalize_violator', violatorPlate: '51F-666.77', penaltyFee: 999999,
     });
-    expect(resolved.item.penaltyFee).toBe(100000); // DEFAULT_POLICY.ruleViolationFee
+    expect(resolved.item.penaltyFee).toBe(100000);
   });
 
   test('incident đang penalty_pending → không ai đổi status thủ công được (staff lẫn manager), tránh mất dấu phí chưa thu', async () => {
@@ -168,10 +204,11 @@ describe('rule 1 — chỉ manager DUYỆT phí phạt', () => {
 describe('rule 3 — staff check-out xe vi phạm mới thực thu; cash pending / phương thức khác hoàn tất ngay', () => {
   test('manager duyệt cash → staff check-out xe vi phạm → Payment RIÊNG pending, ví toà chưa cộng; confirm xong mới cộng', async () => {
     const { session } = await activeSession('51F-222.22');
+    // type='slot_occupied' đã seed sẵn ViolationType fee=100000 (beforeEach) — phí bị ép theo đó.
     const incident = await staffIncidentSvc.createIncident(staff, { type: 'slot_occupied', buildingId: building._id });
 
     await managerIncidentSvc.resolve(manager, building._id, incident.item._id, {
-      action: 'penalize_violator', violatorPlate: '51F-222.22', penaltyFee: 50000,
+      action: 'penalize_violator', violatorPlate: '51F-222.22',
     });
 
     const before = await buildingWalletSvc.getOrCreate(building._id);
@@ -179,7 +216,7 @@ describe('rule 3 — staff check-out xe vi phạm mới thực thu; cash pending
     // Staff check-out xe vi phạm tại cổng như bình thường (cash).
     await checkOut(staff, session._id, { paymentMethod: 'cash' });
 
-    const penaltyPayment = await Payment.findOne({ parkingSession: session._id, amount: 50000 });
+    const penaltyPayment = await Payment.findOne({ parkingSession: session._id, amount: 100000 });
     expect(penaltyPayment).toBeTruthy();
     expect(penaltyPayment.status).toBe('pending');
     expect(`${penaltyPayment.incident}`).toBe(`${incident.item._id}`);
@@ -193,7 +230,7 @@ describe('rule 3 — staff check-out xe vi phạm mới thực thu; cash pending
 
     await buildingWalletSvc.confirmCash(building._id, penaltyPayment._id, manager._id);
     const afterConfirm = await buildingWalletSvc.getOrCreate(building._id);
-    expect(afterConfirm.balance).toBe(before.balance + 50000);
+    expect(afterConfirm.balance).toBe(before.balance + 100000);
 
     const Incident = require('../../../src/models/log/Incident');
     const freshIncident = await Incident.findById(incident.item._id);
@@ -203,12 +240,13 @@ describe('rule 3 — staff check-out xe vi phạm mới thực thu; cash pending
   });
 
   test('manager duyệt, staff check-out xe vi phạm bằng ví → trừ ví người vi phạm + cộng ví toà ngay lập tức', async () => {
-    const violator = await f.createUser({ walletBalance: 100000 });
+    // Đủ dư cho cả phí gửi xe LẪN phí phạt bị ép 100000 (ViolationType seed ở beforeEach).
+    const violator = await f.createUser({ walletBalance: 500000 });
     const { session, slot } = await activeSession('51F-333.33', { user: violator._id });
     const incident = await staffIncidentSvc.createIncident(staff, { type: 'slot_occupied', buildingId: building._id });
 
     await managerIncidentSvc.resolve(manager, building._id, incident.item._id, {
-      action: 'penalize_violator', violatorPlate: '51F-333.33', penaltyFee: 30000,
+      action: 'penalize_violator', violatorPlate: '51F-333.33',
     });
 
     const before = await buildingWalletSvc.getOrCreate(building._id);
@@ -216,10 +254,10 @@ describe('rule 3 — staff check-out xe vi phạm mới thực thu; cash pending
 
     const freshViolator = await User.findById(violator._id);
     // Trừ cả phí gửi xe (wallet) LẪN phí phạt (wallet) — chỉ assert phần chênh lệch >= phí phạt.
-    expect(freshViolator.walletBalance).toBeLessThanOrEqual(100000 - 30000);
+    expect(freshViolator.walletBalance).toBeLessThanOrEqual(500000 - 100000);
 
     const after = await buildingWalletSvc.getOrCreate(building._id);
-    expect(after.balance).toBeGreaterThanOrEqual(before.balance + 30000);
+    expect(after.balance).toBeGreaterThanOrEqual(before.balance + 100000);
 
     const freshSlot = await ParkingSlot.findById(slot._id);
     expect(freshSlot.status).toBe('available');
@@ -239,5 +277,47 @@ describe('rule 3 — staff check-out xe vi phạm mới thực thu; cash pending
     const stillPending = await Incident.findById(incident.item._id);
     expect(stillPending.status).toBe('penalty_pending');
     expect(await Payment.countDocuments({ parkingSession: violatorSession._id })).toBe(0);
+  });
+});
+
+describe('user incident.service — type động theo bảng giá vi phạm của manager (không hard code)', () => {
+  test('type là loại vi phạm chưa được manager cấu hình → 400 INVALID_INCIDENT_TYPE', async () => {
+    await expect(
+      userIncidentSvc.createIncident(reporter._id, {
+        type: 'never_configured_type', buildingId: building._id,
+      }),
+    ).rejects.toMatchObject({ errorCode: 'INVALID_INCIDENT_TYPE' });
+  });
+
+  test('type khớp 1 ViolationType active của building → tạo thành công', async () => {
+    // 'slot_occupied' đã được seed sẵn ở beforeEach.
+    const res = await userIncidentSvc.createIncident(reporter._id, {
+      type: 'slot_occupied', buildingId: building._id, note: 'ai đó đậu vào chỗ tôi',
+    });
+    expect(res.item.type).toBe('slot_occupied');
+    expect(res.item.status).toBe('open');
+  });
+
+  test('ViolationType bị deactivate (isActive=false) → không còn là type hợp lệ', async () => {
+    await ViolationType.findOneAndUpdate({ building: building._id, code: 'slot_occupied' }, { isActive: false });
+    await expect(
+      userIncidentSvc.createIncident(reporter._id, {
+        type: 'slot_occupied', buildingId: building._id,
+      }),
+    ).rejects.toMatchObject({ errorCode: 'INVALID_INCIDENT_TYPE' });
+  });
+
+  test("loại sự cố tự thân cố định (vd 'vehicle_damaged') vẫn hợp lệ dù không có trong bảng giá", async () => {
+    const res = await userIncidentSvc.createIncident(reporter._id, {
+      type: 'vehicle_damaged', buildingId: building._id, note: 'xe bị trầy khi đậu',
+    });
+    expect(res.item.type).toBe('vehicle_damaged');
+  });
+
+  test("type='other' luôn hợp lệ", async () => {
+    const res = await userIncidentSvc.createIncident(reporter._id, {
+      type: 'other', buildingId: building._id, note: 'trường hợp khác',
+    });
+    expect(res.item.type).toBe('other');
   });
 });

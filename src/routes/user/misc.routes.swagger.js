@@ -205,6 +205,18 @@
  *       - { in: path, name: floorId, required: true, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Slots returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { floor: { type: object, properties: { _id: { $ref: '#/components/schemas/ObjectId' }, name: { type: string, example: Floor 1 }, code: { type: string, example: F1 } } }, slots: { type: array, items: { allOf: [ { $ref: '#/components/schemas/ParkingSlot' }, { type: object, properties: { selectable: { type: boolean, example: true }, owner: { type: object, nullable: true, properties: { plateNumber: { type: string, example: 59G2-038.80 }, accountName: { type: string, example: John Doe } } } } } ] } } } } } } ] } } } }
+ * /api/user/buildings/{buildingId}/violation-types:
+ *   get:
+ *     tags: [User - Buildings]
+ *     summary: List violation types available for reporting an incident at this building
+ *     description: >
+ *       Label/code only — the penalty fee is intentionally NOT included (that is
+ *       manager/staff-internal information, not shown to the reporting user).
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: buildingId, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: Violation types returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { type: object, properties: { _id: { type: string }, code: { type: string, example: wrong_spot }, label: { type: string, example: Wrong spot / wrong vehicle type } } } } } } } } ] } } } }
  * /api/user/feedbacks:
  *   post:
  *     tags: [User - Feedback]

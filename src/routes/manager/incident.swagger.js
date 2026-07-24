@@ -19,8 +19,12 @@
  *     summary: Resolve an incident, optionally approving a penalty fee for the violator
  *     description: >
  *       Only a manager/admin may pass `action: 'penalize_violator'`. This only APPROVES the
- *       fee amount (defaults to the building's `ReservationPolicy.ruleViolationFee` when
- *       omitted) — it does NOT charge anything or force a check-out. The incident moves to
+ *       fee — for any incident `type` matching a configured `ViolationType.code` for this
+ *       building, the fee is forced to that ViolationType's `fee` (any `penaltyFee` in the
+ *       request body is ignored, so a manager cannot set an arbitrary amount for a classified
+ *       violation). Only `type: 'other'` (or a legacy incident whose type has no matching
+ *       ViolationType) requires/allows an explicit `penaltyFee` in the body. This call does NOT
+ *       charge anything or force a check-out. The incident moves to
  *       `penalty_pending`. The fee is actually collected later, automatically, when a staff
  *       member checks out the violator's vehicle through the normal
  *       `POST /staff/parking-sessions/{id}/check-out` flow (matched by plate number in this
@@ -46,7 +50,7 @@
  *               resolutionNote: { type: string }
  *               violatorPlate: { type: string, example: 59G2-038.80 }
  *               action: { type: string, enum: [penalize_violator] }
- *               penaltyFee: { type: number, description: Defaults to the building's ruleViolationFee policy when omitted., example: 100000 }
+ *               penaltyFee: { type: number, description: "Required for type='other' (or a legacy incident with no matching ViolationType); ignored otherwise — the fee is forced to the matching ViolationType.fee.", example: 100000 }
  *     responses:
  *       200: { description: Incident updated successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { item: { $ref: '#/components/schemas/Incident' } } } } } ] } } } }
  *       409: { description: PENALTY_PENDING_LOCKED — incident already has an approved pending penalty; status cannot be changed manually. INCIDENT_ALREADY_RESOLVED — cannot approve a penalty on an already resolved/closed incident. }

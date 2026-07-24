@@ -5,6 +5,7 @@ const VehicleType = require('../../models/building/VehicleType');
 const Building = require('../../models/building/Building');
 const Floor = require('../../models/building/Floor');
 const ParkingSlot = require('../../models/building/ParkingSlot');
+const ViolationType = require('../../models/policy/ViolationType');
 const AppError = require('../../utils/AppError');
 
 /**
@@ -174,4 +175,23 @@ const listBuildings = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: { items: buildings } });
 });
 
-module.exports = { listBuildings, listVehicleTypes, listFloorsWithAvailability, listSlotsForFloor };
+/**
+ * GET /api/users/buildings/:buildingId/violation-types
+ * Danh sách loại vi phạm (label) để user chọn khi báo cáo sự cố có biển số vi
+ * phạm — CHỈ trả code/label, KHÔNG trả fee (phí phạt là nội bộ manager/staff,
+ * user không cần và không nên thấy trước số tiền).
+ */
+const listViolationTypes = asyncHandler(async (req, res) => {
+  const building = await resolveBuilding(req.params.buildingId);
+  if (!building) throw new AppError('Building not found', 404);
+
+  const items = await ViolationType.find({ building: building._id, isActive: true })
+    .select('_id code label')
+    .sort('label');
+
+  sendSuccess(res, { data: { items } });
+});
+
+module.exports = {
+  listBuildings, listVehicleTypes, listFloorsWithAvailability, listSlotsForFloor, listViolationTypes,
+};

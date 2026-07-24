@@ -33,5 +33,6 @@ router.get('/buildings', buildingController.listBuildings);
 router.get('/buildings/:buildingId/vehicle-types', buildingController.listVehicleTypes);
 router.get('/buildings/:buildingId/floors', buildingController.listFloorsWithAvailability);
 router.get('/buildings/:buildingId/floors/:floorId/slots', buildingController.listSlotsForFloor);
+router.get('/buildings/:buildingId/violation-types', buildingController.listViolationTypes);
 
 module.exports = router;

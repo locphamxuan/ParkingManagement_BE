@@ -4,6 +4,7 @@ const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
 
 // Chính sách hoàn tiền gói dài hạn — chỉ còn refundPercent sau khi bỏ reservation.
+// Phí phạt vi phạm đã tách sang violationType.service.js (1 mức/loại vi phạm).
 const validatePolicyPayload = (payload) => {
   if (payload.refundPercent !== undefined) {
     const v = Number(payload.refundPercent);
@@ -11,17 +12,10 @@ const validatePolicyPayload = (payload) => {
       throw new AppError("refundPercent must be a number between 0 and 100", 400);
     }
   }
-  if (payload.ruleViolationFee !== undefined) {
-    const v = Number(payload.ruleViolationFee);
-    if (Number.isNaN(v) || v < 0) {
-      throw new AppError("ruleViolationFee must be a valid positive number", 400);
-    }
-  }
 };
 
 const DEFAULT_POLICY = {
   refundPercent: 80,
-  ruleViolationFee: 100000,
   isActive: true,
 };
 
@@ -54,7 +48,6 @@ const upsert = async (user, buildingId, payload) => {
 
   const update = {};
   if (payload.refundPercent !== undefined) update.refundPercent = Number(payload.refundPercent);
-  if (payload.ruleViolationFee !== undefined) update.ruleViolationFee = Number(payload.ruleViolationFee);
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
 
   const updated = await ReservationPolicy.findOneAndUpdate(

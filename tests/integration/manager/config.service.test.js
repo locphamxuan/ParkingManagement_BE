@@ -5,6 +5,7 @@ const vtSvc = require('../../../src/services/manager/vehicleType.service');
 const floorSvc = require('../../../src/services/manager/floor.service');
 const gateSvc = require('../../../src/services/manager/gate.service');
 const rpSvc = require('../../../src/services/manager/reservationPolicy.service');
+const vtypeSvc = require('../../../src/services/manager/violationType.service');
 const Gate = require('../../../src/models/building/Gate');
 
 let building, manager;
@@ -105,5 +106,55 @@ describe('reservationPolicy.service (refund policy)', () => {
   test('% ngoài [0,100] → 400', async () => {
     await expect(rpSvc.upsert(manager, building._id, { refundPercent: 150 }))
       .rejects.toMatchObject({ statusCode: 400 });
+  });
+});
+
+describe('violationType.service (bảng giá phạt vi phạm)', () => {
+  test('list lần đầu tự seed bộ mặc định (manager sửa/xoá tự do sau đó)', async () => {
+    const items = await vtypeSvc.list(manager, building._id);
+    expect(items.length).toBe(vtypeSvc.DEFAULT_VIOLATION_TYPES.length);
+    expect(items.map((i) => i.code).sort()).toEqual(
+      vtypeSvc.DEFAULT_VIOLATION_TYPES.map((d) => d.code).sort(),
+    );
+  });
+
+  test('create sinh code từ label (slug hoá, bỏ dấu), trùng tên → 409', async () => {
+    const item = await vtypeSvc.create(manager, building._id, { label: 'Đậu lấn 2 ô', fee: 80000 });
+    expect(item.code).toBe('au_lan_2_o');
+    expect(item.fee).toBe(80000);
+    await expect(vtypeSvc.create(manager, building._id, { label: 'Đậu lấn 2 ô', fee: 90000 }))
+      .rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  test('fee âm hoặc thiếu label → 400', async () => {
+    await expect(vtypeSvc.create(manager, building._id, { label: 'X', fee: -1 }))
+      .rejects.toMatchObject({ statusCode: 400 });
+    await expect(vtypeSvc.create(manager, building._id, { label: '', fee: 1000 }))
+      .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  test('update sửa fee; xoá được', async () => {
+    const item = await vtypeSvc.create(manager, building._id, { label: 'Test type', fee: 10000 });
+    const updated = await vtypeSvc.update(manager, building._id, item._id, { fee: 25000 });
+    expect(updated.fee).toBe(25000);
+
+    await vtypeSvc.remove(manager, building._id, item._id);
+    const items = await vtypeSvc.list(manager, building._id, { includeInactive: true });
+    expect(items.find((i) => String(i._id) === String(item._id))).toBeUndefined();
+  });
+
+  test('includeInactive=false (mặc định) ẩn type đã isActive=false', async () => {
+    const item = await vtypeSvc.create(manager, building._id, { label: 'Tạm ẩn', fee: 5000 });
+    await vtypeSvc.update(manager, building._id, item._id, { isActive: false });
+    const active = await vtypeSvc.list(manager, building._id);
+    expect(active.find((i) => String(i._id) === String(item._id))).toBeUndefined();
+    const all = await vtypeSvc.list(manager, building._id, { includeInactive: true });
+    expect(all.find((i) => String(i._id) === String(item._id))).toBeTruthy();
+  });
+
+  test('không phải manager của tòa → 403', async () => {
+    const other = await f.managerFor(building._id);
+    other.assignedBuildings = [];
+    await expect(vtypeSvc.list(other, building._id)).rejects.toMatchObject({ statusCode: 403 });
   });
 });

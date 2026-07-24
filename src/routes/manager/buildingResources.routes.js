@@ -11,6 +11,7 @@ const zoneController = require("../../controllers/manager/zone.controller");
 const pricingController = require("../../controllers/manager/pricing.controller");
 const packageController = require("../../controllers/manager/package.controller");
 const reservationPolicyController = require("../../controllers/manager/reservationPolicy.controller");
+const violationTypeController = require("../../controllers/manager/violationType.controller");
 const shiftController = require("../../controllers/manager/shift.controller");
 const feedbackController = require("../../controllers/manager/feedback.controller");
 const incidentController = require("../../controllers/manager/incident.controller");
@@ -139,6 +140,17 @@ router
   .route("/refund-policy")
   .get(reservationPolicyController.get)
   .put(v.validateReservationPolicy, reservationPolicyController.upsert);
+
+// Bảng giá phạt vi phạm — mỗi loại vi phạm 1 mức phí manager tự cấu hình (không
+// hard code), dùng khi duyệt phạt (Incident action=penalize_violator).
+router
+  .route("/violation-types")
+  .get(violationTypeController.list)
+  .post(violationTypeController.create);
+router
+  .route("/violation-types/:id")
+  .put(violationTypeController.update)
+  .delete(violationTypeController.remove);
 
 router
   .route("/shifts")

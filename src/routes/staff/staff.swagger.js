@@ -97,17 +97,17 @@
  * /api/staff/buildings/{id}/policy:
  *   get:
  *     tags: [Staff - Dashboard]
- *     summary: Get the building's refund/violation policy (read-only, internal use for penalty amounts)
+ *     summary: Get the building's refund policy (read-only)
  *     description: >
- *       Used internally by staff tooling to show the standard violation penalty
- *       (ruleViolationFee) — the same default a manager's action=penalize_violator
- *       falls back to when no explicit penaltyFee is given. Not the same endpoint as
- *       the manager's GET/PUT refund-policy (that one requires manager/admin role).
+ *       Used internally by staff tooling to show the building's cancellation refund
+ *       percentage. Not the same endpoint as the manager's GET/PUT refund-policy (that
+ *       one requires manager/admin role). Violation penalty fees are no longer part of
+ *       this policy — see GET /api/manager/buildings/{buildingId}/violation-types.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string, format: objectId }, description: buildingId }
  *     responses:
- *       200: { description: Policy returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { refundPercent: { type: number, example: 80 }, ruleViolationFee: { type: number, example: 100000 } } } } } ] } } } }
+ *       200: { description: Policy returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { refundPercent: { type: number, example: 80 } } } } } ] } } } }
  * /api/staff/my-shifts:
  *   get:
  *     tags: [Staff - Shifts]

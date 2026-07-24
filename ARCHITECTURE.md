@@ -30,7 +30,7 @@ services/     (TOÀN BỘ business logic — theo role/domain)
 models/       (Mongoose schema theo domain, re-export qua models/index.js)
    building/   Building · Floor · Zone · ParkingSlot · Gate · VehicleType · BuildingManager
    operations/ ParkingSession · Shift · StaffShift · Feedback
-   policy/     PricePolicy · ReservationPolicy (chỉ còn refundPercent/ruleViolationFee) · LongTermPackage · LongTermSubscription
+   policy/     PricePolicy · ReservationPolicy (chỉ còn refundPercent) · ViolationType (bảng giá phạt/loại vi phạm, per building) · LongTermPackage · LongTermSubscription
    finance/    Payment · WalletTransaction · BuildingWallet · BuildingWalletTransaction
    log/        AuditLog · Incident · Notification
    user/       User · OtpVerification
@@ -70,7 +70,8 @@ Tính năng đặt chỗ trước theo khung giờ (deposit, cutoff, no-show exp
 khỏi codebase ở commit `0fe4bad` (2026-07-16) — không còn model `Reservation`,
 route, service, job, validator, hay test nào liên quan. Thay thế bằng long-term
 package có thể giữ slot cố định (xem mục dưới). `ReservationPolicy` model **vẫn
-còn** nhưng chỉ giữ `refundPercent`/`ruleViolationFee` — không còn field đặt chỗ.
+còn** nhưng chỉ giữ `refundPercent` — mức phạt vi phạm đã tách sang model riêng
+`ViolationType` (xem mục "Sự cố & phạt vi phạm" bên dưới).
 Đợt audit 2026-07-22 (Phase 2) phát hiện tài liệu + FE/Mobile vẫn còn gọi/mô tả
 tính năng này như đang sống dù đã xoá 6 ngày trước đó — đã dọn sạch FE (xoá
 `ReservationsPage`/`StaffReservationsPage`/`userApi.reservations.*`) và Mobile
@@ -95,6 +96,44 @@ tính năng này như đang sống dù đã xoá 6 ngày trước đó — đã 
   gia hạn cộng dồn từ `endDate`, cho phép trễ ≤ 7 ngày. Hủy nhả slot cố định
   (nếu có) về `available`.
 
+
+### Sự cố & phạt vi phạm (Incident + ViolationType) — thêm 2026-07-24
+- User báo cáo sự cố (`POST /users/incidents`) với `type` là 1 trong 2 nhóm:
+  nhóm cố định "tự thân" (`vehicle_damaged`, `facility_issue`, `wrong_scan`,
+  `payment_dispute`, `security`, `other` — không liên quan tới phạt), HOẶC `code`
+  của 1 `ViolationType` **do manager tự cấu hình cho building đó** (bảng giá phạt
+  vi phạm, không hard code trong code — vd `wrong_spot`, `slot_occupied`). `type`
+  không khớp cả 2 nhóm → 400 `INVALID_INCIDENT_TYPE`.
+- `ViolationType` (`services/manager/violationType.service.js`,
+  `GET/POST/PUT/DELETE /manager/buildings/:id/violation-types`): mỗi violation
+  type là 1 cặp `{ code, label, fee }` per building — manager thêm/sửa/xoá tự do.
+  Lần đầu gọi `list()` cho 1 building chưa có type nào → tự seed 6 loại phổ biến
+  (`DEFAULT_VIOLATION_TYPES`) làm điểm khởi đầu, KHÔNG phải giá trị cố định vĩnh
+  viễn. Endpoint đọc phía user (`GET /users/buildings/:id/violation-types`) chỉ
+  trả `code`/`label` — **không trả `fee`** (phí là thông tin nội bộ manager/staff).
+- Kèm `violatorPlate` (biển xe vi phạm) → `findPlateAccountInBuilding` tự tra xem
+  biển đó có subscription active hoặc parking session gắn user trong building
+  không. KHÔNG tìm thấy (biển lạ/khách vãng lai không tài khoản) → incident tự
+  chuyển `escalated`, **chỉ manager/admin xử lý được** (staff chỉ xem — thiếu
+  thẩm quyền, tránh staff tự ý phạt biển không rõ chủ).
+- Duyệt phạt (`action:'penalize_violator'`, chỉ manager/admin,
+  `incidentResolve.service.js`): mức phí **bị ép theo `ViolationType.fee`** khớp
+  `incident.type` cho building đó — **manager không được ghi đè** bằng
+  `penaltyFee` tuỳ ý gửi lên (chặn set phí quá cao/tuỳ tiện). Chỉ khi
+  `type==='other'` (hoặc incident cũ không còn khớp type nào trong bảng giá —
+  vd đã bị xoá) mới bắt buộc/cho phép manager nhập `penaltyFee` thủ công (400
+  `PENALTY_FEE_REQUIRED` nếu thiếu). Duyệt phạt chỉ **ghi nhận** (`status`
+  chuyển `penalty_pending`) — CHƯA thu tiền, chưa cần xe đang đỗ trong bãi.
+- Thu tiền thật xảy ra tự động lúc xe đó **check-out** (bất kể qua camera scan
+  hay nhập tay — cùng 1 code path `staff/parkingSession/checkOut.service.js`,
+  không có luồng riêng): `settlePendingPenaltyAtCheckout` khớp biển số + building
+  đang có incident `penalty_pending` → tạo `Payment` RIÊNG (tách khỏi phí gửi
+  xe) theo phương thức staff/khách chọn lúc đó (cash → `pending` chờ manager
+  "Thu nhận"; wallet → trừ ví ngay, yêu cầu phiên có `user` liên kết — khách
+  vãng lai không tài khoản dùng wallet sẽ bị chặn `NO_WALLET_ACCOUNT`, phải
+  chuyển cash) → incident chuyển `resolved`. `penalty_pending` không cho đổi
+  status thủ công (tránh mất dấu khoản phạt chưa thu) và không cho duyệt phạt
+  lại trên incident đã `resolved/closed` (tránh double-charge biển số).
 
 ### Check-in / Check-out (staff)
 - Staff phải có **ca hôm nay** (`StaffShift`) tại building; checkout chấp nhận ca
