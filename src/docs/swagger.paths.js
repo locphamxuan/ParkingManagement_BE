@@ -446,28 +446,8 @@
  *         paymentMethod: { type: string, enum: [cash, wallet, qr, card, payos, long_term], nullable: true, example: wallet }
  *         status: { type: string, enum: [active, completed, cancelled], example: active }
  *         note: { type: string, example: Customer paid by wallet }
- *         reservation: { $ref: '#/components/schemas/ObjectId' }
  *         createdAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
  *         updatedAt: { type: string, format: date-time, example: '2026-06-12T10:00:00.000Z' }
- *
- *     Reservation:
- *       type: object
- *       properties:
- *         _id: { $ref: '#/components/schemas/ObjectId' }
- *         code: { type: string, example: RSV-ABC123 }
- *         user: { $ref: '#/components/schemas/ObjectId' }
- *         building: { $ref: '#/components/schemas/ObjectId' }
- *         slot: { $ref: '#/components/schemas/ObjectId' }
- *         vehicleType: { $ref: '#/components/schemas/ObjectId' }
- *         plateNumber: { type: string, example: 59G2-038.80 }
- *         startTime: { type: string, format: date-time, example: '2026-06-15T08:00:00.000Z' }
- *         endTime: { type: string, format: date-time, nullable: true, example: '2026-06-15T12:00:00.000Z' }
- *         checkedInAt: { type: string, format: date-time, nullable: true, example: null }
- *         fee: { type: number, example: 6000 }
- *         estimatedFee: { type: number, example: 40000 }
- *         status: { type: string, enum: [pending, confirmed, checked_in, completed, cancelled, expired], example: confirmed }
- *         createdAt: { type: string, format: date-time, example: '2026-06-10T10:30:00.000Z' }
- *         updatedAt: { type: string, format: date-time, example: '2026-06-10T10:30:00.000Z' }
  *
  *     Feedback:
  *       type: object
@@ -482,7 +462,6 @@
  *         staffReply: { type: string, nullable: true, example: Thank you for your feedback }
  *         repliedBy: { $ref: '#/components/schemas/ObjectId' }
  *         repliedAt: { type: string, format: date-time, nullable: true, example: null }
- *         reservation: { $ref: '#/components/schemas/ObjectId' }
  *         portraitImageUrl: { type: string, nullable: true, example: null }
  *         plateImageUrl: { type: string, nullable: true, example: null }
  *         createdAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
@@ -515,6 +494,26 @@
  *         status: { type: string, enum: [success, failed], example: success }
  *         reason: { type: string, example: payos_topup }
  *         metadata: { type: object, additionalProperties: true }
+ *         createdAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
+ *         updatedAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
+ *
+ *     Payment:
+ *       type: object
+ *       properties:
+ *         _id: { $ref: '#/components/schemas/ObjectId' }
+ *         building: { $ref: '#/components/schemas/ObjectId' }
+ *         type: { type: string, enum: [session, reservation, subscription, refund, topup, cancellation_fee], description: 'reservation/cancellation_fee are historical values from the removed hourly-reservation feature — still present on old records.', example: session }
+ *         method: { type: string, enum: [cash, wallet, qr, card, payos], example: cash }
+ *         amount: { type: number, example: 45000 }
+ *         status: { type: string, enum: [pending, success, failed, refunded], description: 'Cash payments start pending until a manager confirms collection via wallet/pending-cash/{paymentId}/confirm; other methods settle as success immediately.', example: success }
+ *         parkingSession: { $ref: '#/components/schemas/ObjectId' }
+ *         subscription: { $ref: '#/components/schemas/ObjectId' }
+ *         incident: { $ref: '#/components/schemas/ObjectId', description: Set when this Payment is an incident penalty fee collected at checkout (kept separate from the parking fee itself). }
+ *         user: { $ref: '#/components/schemas/ObjectId' }
+ *         staff: { $ref: '#/components/schemas/ObjectId' }
+ *         note: { type: string, example: '' }
+ *         payosOrderCode: { type: number, nullable: true, example: 123456789 }
+ *         payosPaymentLinkId: { type: string, nullable: true }
  *         createdAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
  *         updatedAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
  *

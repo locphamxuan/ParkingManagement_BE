@@ -94,6 +94,20 @@
  *                         building: { $ref: '#/components/schemas/Building' }
  *       403: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
  *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+ * /api/staff/buildings/{id}/policy:
+ *   get:
+ *     tags: [Staff - Dashboard]
+ *     summary: Get the building's refund/violation policy (read-only, internal use for penalty amounts)
+ *     description: >
+ *       Used internally by staff tooling to show the standard violation penalty
+ *       (ruleViolationFee) — the same default a manager's action=penalize_violator
+ *       falls back to when no explicit penaltyFee is given. Not the same endpoint as
+ *       the manager's GET/PUT refund-policy (that one requires manager/admin role).
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId }, description: buildingId }
+ *     responses:
+ *       200: { description: Policy returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { refundPercent: { type: number, example: 80 }, ruleViolationFee: { type: number, example: 100000 } } } } } ] } } } }
  * /api/staff/my-shifts:
  *   get:
  *     tags: [Staff - Shifts]
@@ -228,6 +242,50 @@
  *       - { in: query, name: plate, schema: { type: string } }
  *     responses:
  *       200: { description: Active sessions returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ParkingSession' } } } } } } ] } } } }
+ * /api/staff/parking-sessions/free-slots:
+ *   get:
+ *     tags: [Staff - Parking Sessions]
+ *     summary: List available slots filtered by the usageType fallback chain, with a suggested slot
+ *     description: >
+ *       Filters 'available' slots by the one-directional usageType fallback chain
+ *       (walk_in never encroaches on registered/subscriber/reserved slots; those
+ *       classes may fall back to a walk_in slot when their own pool is empty).
+ *       vehicleType is used only for ranking the suggestion, not for filtering.
+ *       totalSlots/totalAvailable count the WHOLE building without the usageType
+ *       filter, so the FE can distinguish "no dedicated slots in this building" from
+ *       "dedicated slots exist but are all held for another usage class" from "full".
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: building, schema: { type: string, format: objectId } }
+ *       - { in: query, name: vehicleType, schema: { type: string, format: objectId }, description: Used for ranking only — does not filter results. }
+ *       - { in: query, name: usageType, schema: { type: string, enum: [walk_in, registered, subscriber, reserved] } }
+ *     responses:
+ *       200:
+ *         description: Free slots returned successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/ApiResponseWrapper'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         items: { type: array, items: { $ref: '#/components/schemas/ParkingSlot' } }
+ *                         suggestedSlotId: { $ref: '#/components/schemas/ObjectId' }
+ *                         totalSlots: { type: integer, example: 120, description: Whole-building slot count, not filtered by usageType. }
+ *                         totalAvailable: { type: integer, example: 34, description: Whole-building available-slot count, not filtered by usageType. }
+ * /api/staff/parking-sessions/my-checkins:
+ *   get:
+ *     tags: [Staff - Parking Sessions]
+ *     summary: List today's check-ins performed by the authenticated staff member
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: building, schema: { type: string, format: objectId } }
+ *       - { in: query, name: buildingId, schema: { type: string, format: objectId } }
+ *     responses:
+ *       200: { description: Check-ins returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ParkingSession' } } } } } } ] } } } }
  * /api/staff/parking-sessions/search:
  *   get:
  *     tags: [Staff - Parking Sessions]
@@ -301,37 +359,6 @@
  *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Session returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { $ref: '#/components/schemas/ParkingSession' } } } ] } } } }
- * /api/staff/reservations:
- *   get:
- *     tags: [Staff - Reservations]
- *     summary: List reservations for the staff building
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: query, name: status, schema: { type: string, enum: [pending, confirmed, checked_in, completed, cancelled, expired] } }
- *       - { in: query, name: date, schema: { type: string, format: date } }
- *       - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
- *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
- *     responses:
- *       200: { description: Reservations returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Reservation' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
- * /api/staff/reservations/{code}/check-in:
- *   post:
- *     tags: [Staff - Reservations]
- *     summary: Check in a reservation by booking code
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: path, name: code, required: true, schema: { type: string }, example: RSV-ABC123 }
- *     requestBody: { required: false, content: { application/json: { schema: { type: object, properties: { gate: { type: string, format: objectId } } } } } }
- *     responses:
- *       200: { description: Reservation checked in successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Reservation vehicle checked in successfully }, data: { type: object, additionalProperties: true } } } ] } } } }
- * /api/staff/reservations/{id}/expire:
- *   patch:
- *     tags: [Staff - Reservations]
- *     summary: Expire an overdue reservation
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     responses:
- *       200: { description: Reservation expired successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Overdue reservation expired and slot released successfully }, data: { type: object, additionalProperties: true } } } ] } } } }
  * /api/staff/wallet-transactions:
  *   post:
  *     tags: [Staff - Wallet Transactions]
