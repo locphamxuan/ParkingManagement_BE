@@ -71,12 +71,11 @@ describe('Walk-in (khách vãng lai)', () => {
     ).rejects.toMatchObject({ errorCode: 'PORTRAIT_REQUIRED' });
   });
 
-  test('vãng lai có chân dung nhưng thiếu ảnh biển → PLATE_IMAGE_REQUIRED', async () => {
+  test('vãng lai có chân dung nhưng không có ảnh biển → vẫn cho phép check-in', async () => {
     const { building, staff } = await seedBase();
     await ParkingSlot.create({ building: building._id, floor: (await Floor.findOne())._id, code: 'A1' });
-    await expect(
-      svc.checkIn(staff, { building: building._id, plateNumber: '59G2-10000', vehicleType: 'car', portraitImage: 'FACE_IN' }),
-    ).rejects.toMatchObject({ errorCode: 'PLATE_IMAGE_REQUIRED' });
+    const session = await svc.checkIn(staff, { building: building._id, plateNumber: '59G2-10000', vehicleType: 'car', portraitImage: 'FACE_IN' });
+    expect(session.item.plateNumber).toBe('59G2-100.00');
   });
 
   test('đủ ảnh → tạo session; checkout lưu ảnh ra + tính phí theo policy', async () => {

@@ -199,12 +199,6 @@ const checkIn = async (user, payload) => {
         .select('_id')
         .session(session);
 
-      // Không phải gói (đã return ở trên) → khách vãng lai hoặc user thường check-in
-      // trực tiếp: BẮT BUỘC thêm ảnh biển số (ảnh chân dung đã bắt buộc ở trên).
-      if (!plateImage) {
-        throw new AppError('A license plate photo is required to check in', 400, 'PLATE_IMAGE_REQUIRED');
-      }
-
       // Đối tượng của lượt check-in (để khớp dãy/slot): có tài khoản → 'registered',
       // còn lại → 'walk_in'.
       const usageType = resolveCustomerUsageType({ longTerm: null, registeredOwner });
