@@ -19,6 +19,11 @@ const env = {
   ocrProvider: process.env.OCR_PROVIDER || null,
   // Base URL của PaddleOCR microservice (ocr-service/), vd http://localhost:8868
   paddleOcrUrl: process.env.PADDLE_OCR_URL || null,
+  // eSMS.vn — gửi OTP SMS cho luồng quên mật khẩu qua điện thoại (Mobile).
+  // Optional: app vẫn khởi động không có key; chỉ throw lúc thực sự gửi SMS (utils/sms.js).
+  esmsApiKey: process.env.ESMS_API_KEY || null,
+  esmsSecretKey: process.env.ESMS_SECRET_KEY || null,
+  esmsBrandname: process.env.ESMS_BRANDNAME || null,
 };
 
 const required = ['mongodbUri', 'jwtSecret', 'payosClientId', 'payosApiKey', 'payosChecksumKey'];

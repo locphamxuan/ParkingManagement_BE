@@ -92,4 +92,38 @@ const validateRegisterVerify = (req, _res, next) => {
   next();
 };
 
-module.exports = { validateRegister, validateLogin, validateForgotPassword, validateResetPassword, validateRegisterRequest, validateRegisterVerify };
+const validateForgotPasswordSms = (req, _res, next) => {
+  const { phone } = req.body;
+  if (!phone?.trim() || !PHONE_REGEX.test(phone.trim())) {
+    return next(new AppError('Valid phone number is required', 400));
+  }
+  req.body.phone = phone.trim();
+  next();
+};
+
+const validateResetPasswordSms = (req, _res, next) => {
+  const { phone, otp, newPassword } = req.body;
+  if (!phone?.trim() || !PHONE_REGEX.test(phone.trim())) {
+    return next(new AppError('Valid phone number is required', 400));
+  }
+  if (!otp?.trim() || !OTP_REGEX.test(otp.trim())) {
+    return next(new AppError('OTP must be a 6-digit number', 400));
+  }
+  if (!newPassword || newPassword.length < 6) {
+    return next(new AppError('Password must be at least 6 characters', 400));
+  }
+  req.body.phone = phone.trim();
+  req.body.otp = otp.trim();
+  next();
+};
+
+module.exports = {
+  validateRegister,
+  validateLogin,
+  validateForgotPassword,
+  validateResetPassword,
+  validateRegisterRequest,
+  validateRegisterVerify,
+  validateForgotPasswordSms,
+  validateResetPasswordSms,
+};

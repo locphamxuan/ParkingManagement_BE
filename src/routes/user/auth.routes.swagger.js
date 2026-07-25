@@ -475,4 +475,106 @@
  *                 value:
  *                   success: false
  *                   message: Reset token is invalid or has expired
+ *
+ * /api/user/auth/forgot-password-sms:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Request a password reset OTP via SMS
+ *     description: >
+ *       Always returns HTTP 200 to prevent phone enumeration. If the phone exists and is
+ *       active, a 6-digit OTP is generated (5-minute expiry) and sent via SMS through
+ *       eSMS.vn. Rate limited to 3 requests / 15 minutes per IP.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone]
+ *             properties:
+ *               phone:
+ *                 type: string
+ *                 example: '+84901234567'
+ *     responses:
+ *       200:
+ *         description: OTP request response returned successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *             example:
+ *               success: true
+ *               message: If that phone number is registered, an OTP has been sent.
+ *       400:
+ *         description: Invalid phone number.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: Valid phone number is required
+ *       429:
+ *         description: Too many OTP requests from this IP.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: SMS provider is not configured or delivery failed.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *
+ * /api/user/auth/reset-password-sms:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Verify SMS OTP and reset password
+ *     description: >
+ *       Validates the 6-digit OTP sent by `/forgot-password-sms` for the given phone,
+ *       updates the password, and returns a new JWT token. OTP is locked after 5 failed
+ *       attempts and must be requested again.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone, otp, newPassword]
+ *             properties:
+ *               phone:
+ *                 type: string
+ *                 example: '+84901234567'
+ *               otp:
+ *                 type: string
+ *                 example: '123456'
+ *               newPassword:
+ *                 type: string
+ *                 example: NewPassword123!
+ *     responses:
+ *       200:
+ *         description: Password was reset successfully and a new JWT token was issued.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthSuccessResponse'
+ *             example:
+ *               success: true
+ *               message: Password has been reset successfully
+ *       400:
+ *         description: Invalid phone/OTP format, or OTP is invalid/expired.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               invalidOtpFormat:
+ *                 value:
+ *                   success: false
+ *                   message: OTP must be a 6-digit number
+ *               invalidOrExpiredOtp:
+ *                 value:
+ *                   success: false
+ *                   message: OTP is invalid or has expired. Please request a new one.
  */

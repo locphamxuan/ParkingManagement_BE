@@ -1,10 +1,19 @@
 const crypto = require('node:crypto');
 const User = require('../models/user/User');
 const OtpVerification = require('../models/user/OtpVerification');
+const PhoneOtp = require('../models/user/PhoneOtp');
 const AppError = require('../utils/AppError');
 const { signToken } = require('../utils/token');
 const { ROLES } = require('../constants/roles');
 const { sendResetPasswordEmail, sendOtpEmail } = require('../utils/email');
+const { sendOtpSms } = require('../utils/sms');
+
+const OTP_TTL_MS = 5 * 60 * 1000; // 5 phút
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000; // không gửi lại SMS trong 60s
+const MAX_OTP_ATTEMPTS = 5;
+
+const generateNumericOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+const hashOtp = (otp) => crypto.createHash('sha256').update(otp).digest('hex');
 
 const toPublicUser = (user) => user.toJSON();
 
@@ -178,5 +187,84 @@ const verifyOtpAndRegister = async ({ email, otp }) => {
   return buildAuthResponse(fresh);
 };
 
-module.exports = { register, login, getProfile, forgotPassword, resetPassword, requestRegistration, verifyOtpAndRegister };
+const requestPasswordResetSms = async (phone) => {
+  const normalizedPhone = String(phone).trim();
+  const user = await User.findOne({ phone: normalizedPhone });
+  // Luôn resolve bình thường để không lộ số điện thoại có tồn tại tài khoản hay không.
+  if (!user || !user.isActive) return;
+
+  const recentOtp = await PhoneOtp.findOne({
+    phone: normalizedPhone,
+    purpose: 'password_reset',
+    consumedAt: null,
+    expiresAt: { $gt: new Date(Date.now() + OTP_TTL_MS - OTP_RESEND_COOLDOWN_MS) },
+  });
+  // OTP gần nhất còn "trẻ" (mới tạo trong vòng 60s) → không gửi SMS lại, tránh spam.
+  if (recentOtp) return;
+
+  const otp = generateNumericOtp();
+
+  await PhoneOtp.create({
+    phone: normalizedPhone,
+    otpHash: hashOtp(otp),
+    purpose: 'password_reset',
+    expiresAt: new Date(Date.now() + OTP_TTL_MS),
+  });
+
+  await sendOtpSms({ phone: normalizedPhone, otp });
+};
+
+const resetPasswordSms = async ({ phone, otp, newPassword }) => {
+  if (!newPassword || newPassword.length < 6) {
+    throw new AppError('Password must be at least 6 characters', 400);
+  }
+
+  const normalizedPhone = String(phone).trim();
+
+  const otpRecord = await PhoneOtp.findOne({
+    phone: normalizedPhone,
+    purpose: 'password_reset',
+    consumedAt: null,
+    expiresAt: { $gt: new Date() },
+  }).sort({ expiresAt: -1 });
+
+  if (!otpRecord) {
+    throw new AppError('OTP is invalid or has expired. Please request a new one.', 400);
+  }
+
+  if (otpRecord.otpHash !== hashOtp(otp)) {
+    otpRecord.attempts += 1;
+    if (otpRecord.attempts >= MAX_OTP_ATTEMPTS) {
+      // Khoá luôn record này (coi như hết hạn) để chặn brute-force tiếp — user phải request OTP mới.
+      otpRecord.expiresAt = new Date();
+    }
+    await otpRecord.save();
+    throw new AppError('OTP is invalid or has expired. Please request a new one.', 400);
+  }
+
+  const user = await User.findOne({ phone: normalizedPhone });
+  if (!user || !user.isActive) {
+    throw new AppError('OTP is invalid or has expired. Please request a new one.', 400);
+  }
+
+  user.password = newPassword;
+  await user.save({ validateModifiedOnly: true });
+
+  otpRecord.consumedAt = new Date();
+  await otpRecord.save();
+
+  return buildAuthResponse(user);
+};
+
+module.exports = {
+  register,
+  login,
+  getProfile,
+  forgotPassword,
+  resetPassword,
+  requestRegistration,
+  verifyOtpAndRegister,
+  requestPasswordResetSms,
+  resetPasswordSms,
+};
 
