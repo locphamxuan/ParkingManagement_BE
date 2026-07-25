@@ -4,6 +4,8 @@ const buildingRepository = require('../../../repositories/building.repository');
 const {
   ParkingSession,
   ParkingSlot,
+  VehicleType,
+  Zone,
   User,
 } = require('../../../models');
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
@@ -17,6 +19,7 @@ const {
 } = require('../../shared/slotLifecycle.service');
 const {
   resolveVehicleTypeId,
+  vehicleKindFromType,
   asObjectId,
   findDuplicateActiveSession,
   resolveLongTermSubscription,
@@ -38,6 +41,20 @@ const isSlotUsageCompatible = (slot, usageType) => {
   return true;
 };
 
+const resolveSelectedZone = async ({ zoneId, buildingId, vehicleType, usageType, mongoSession, forceCheckIn }) => {
+  if (!zoneId) return null;
+
+  const zone = await Zone.findOne({ _id: zoneId, building: buildingId }).session(mongoSession);
+  if (!zone) throw new AppError('Invalid zone', 400, 'INVALID_ZONE');
+  if (vehicleType && zone.vehicleType && String(zone.vehicleType) !== String(vehicleType)) {
+    throw new AppError('The selected zone is not configured for this vehicle type', 409, 'ZONE_VEHICLE_TYPE_MISMATCH');
+  }
+  if (!isSlotUsageCompatible(zone, usageType) && !forceCheckIn) {
+    throw new AppError('The selected zone is not allowed for this customer type', 409, 'ZONE_USAGE_MISMATCH');
+  }
+  return zone;
+};
+
 const checkIn = async (user, payload) => {
   const session = await mongoose.startSession();
   try {
@@ -47,6 +64,11 @@ const checkIn = async (user, payload) => {
       // FE sends 'car'/'motorcycle'; resolve to the building's VehicleType _id so
       // pricing (by vehicle type) and reporting work. Falls back to null if unset.
       const vehicleType = await resolveVehicleTypeId(buildingId, payload?.vehicleType, session);
+      const vehicleTypeRecord = vehicleType
+        ? await VehicleType.findById(vehicleType).session(session)
+        : null;
+      const isMotorcycle = vehicleKindFromType(vehicleTypeRecord) === 'motorcycle';
+      const requestedZoneId = asObjectId(payload?.zone || payload?.zoneId);
       const gate = asObjectId(payload?.gate);
       const forceCheckIn = Boolean(payload?.forceCheckIn);
       const vehicleBrand = payload?.vehicleBrand
@@ -115,9 +137,20 @@ const checkIn = async (user, payload) => {
           ltSlot = await occupyFixedSlotForCheckIn(longTerm, buildingId, session);
           ltSlotId = ltSlot._id;
         } else {
+          const selectedZone = await resolveSelectedZone({
+            zoneId: requestedZoneId,
+            buildingId,
+            vehicleType,
+            usageType: 'subscriber',
+            mongoSession: session,
+            forceCheckIn,
+          });
           // Gói floating: gán 1 slot trống thuộc dãy "subscriber" + đúng loại xe.
           // Staff chọn → validate tương thích; không chọn → tự gợi ý slot phù hợp.
-          ltSlotId = asObjectId(payload?.slot || payload?.slotId);
+          ltSlotId = isMotorcycle ? null : asObjectId(payload?.slot || payload?.slotId);
+          if (selectedZone && !isMotorcycle && !ltSlotId) {
+            throw new AppError('Please select a parking slot in the selected zone', 400, 'SLOT_REQUIRED');
+          }
           if (ltSlotId) {
             ltSlot = await ParkingSlot.findById(ltSlotId).session(session);
             if (!ltSlot || (ltSlot.building && String(ltSlot.building) !== String(buildingId))) {
@@ -126,6 +159,9 @@ const checkIn = async (user, payload) => {
             if (ltSlot.status !== 'available') {
               throw new AppError('The slot is occupied or unavailable', 409, 'SLOT_NOT_AVAILABLE');
             }
+            if (selectedZone && String(ltSlot.zone) !== String(selectedZone._id)) {
+              throw new AppError('The selected slot does not belong to the selected zone', 409, 'SLOT_ZONE_MISMATCH');
+            }
             if (!isSlotUsageCompatible(ltSlot, 'subscriber')) {
               if (!forceCheckIn) {
                 throw new AppError('The slot is not in a zone for long-term packages', 409, 'SLOT_USAGE_MISMATCH');
@@ -133,9 +169,15 @@ const checkIn = async (user, payload) => {
               ltSlotUsageBypassed = true;
             }
           } else {
-            const [suggested] = await findCompatibleSlots(buildingId, vehicleType, 'subscriber', session);
+            const [suggested] = await findCompatibleSlots(
+              buildingId, vehicleType, 'subscriber', session, selectedZone?._id || null,
+            );
             if (!suggested) {
-              throw new AppError('No suitable slot available for the package vehicle', 409, 'SLOT_REQUIRED_FOR_LONG_TERM');
+              throw new AppError(
+                selectedZone ? 'No suitable slot is available in the selected zone' : 'No suitable slot available for the package vehicle',
+                409,
+                'SLOT_REQUIRED_FOR_LONG_TERM',
+              );
             }
             ltSlot = suggested;
             ltSlotId = suggested._id;
@@ -204,9 +246,23 @@ const checkIn = async (user, payload) => {
       const usageType = resolveCustomerUsageType({ longTerm: null, registeredOwner });
 
       // Tự gợi ý slot tương thích nếu staff chưa chọn.
-      let selectedSlotId = asObjectId(payload?.slot);
+      const selectedZone = await resolveSelectedZone({
+        zoneId: requestedZoneId,
+        buildingId,
+        vehicleType,
+        usageType,
+        mongoSession: session,
+        forceCheckIn,
+      });
+      // Motorcycles select a zone only; the system allocates a free bay there.
+      let selectedSlotId = isMotorcycle ? null : asObjectId(payload?.slot || payload?.slotId);
+      if (selectedZone && !isMotorcycle && !selectedSlotId) {
+        throw new AppError('Please select a parking slot in the selected zone', 400, 'SLOT_REQUIRED');
+      }
       if (!selectedSlotId) {
-        const [suggested] = await findCompatibleSlots(buildingId, vehicleType, usageType, session);
+        const [suggested] = await findCompatibleSlots(
+          buildingId, vehicleType, usageType, session, selectedZone?._id || null,
+        );
         if (suggested) {
           selectedSlotId = suggested._id;
         } else {
@@ -238,6 +294,9 @@ const checkIn = async (user, payload) => {
         }
         if (slot?.status !== 'available') {
           throw new AppError('The slot is occupied or unavailable', 409, 'SLOT_NOT_AVAILABLE');
+        }
+        if (selectedZone && String(slot.zone) !== String(selectedZone._id)) {
+          throw new AppError('The selected slot does not belong to the selected zone', 409, 'SLOT_ZONE_MISMATCH');
         }
         // Chỉ chặn theo ĐỐI TƯỢNG. Loại xe do dãy/slot quyết định nên không chặn —
         // staff tự do chọn dãy loại xe nào sau khi camera nhận diện.
