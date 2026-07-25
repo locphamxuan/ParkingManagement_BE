@@ -61,8 +61,15 @@ const listPayments = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
+// Doanh thu tiền phạt vi phạm
+const getPenaltyRevenue = asyncHandler(async (req, res) => {
+  const data = await service.getPenaltyRevenue(req.params.buildingId);
+  sendSuccess(res, { data });
+});
+
 module.exports = {
   getWallet, listTransactions, getDailyRevenue, getRevenueBreakdown,
   initiateTopup, verifyTopup,
   listPendingCash, confirmCash, listPayments,
+  getPenaltyRevenue,
 };
