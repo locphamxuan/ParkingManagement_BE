@@ -95,4 +95,13 @@ const myCheckIns = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: { items } });
 });
 
-module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment, myCheckIns };
+/**
+  * GET /api/staff/parking-sessions/my-checkouts
+  * Lịch sử xe ra hôm nay của nhân viên cổng RA — có phí thu, phương thức thanh toán, thời gian ra.
+  */
+const myCheckouts = asyncHandler(async (req, res) => {
+  const items = await parkingSessionService.listMyCheckouts(req.user, req.query);
+  sendSuccess(res, { data: { items } });
+});
+
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment, myCheckIns, myCheckouts };

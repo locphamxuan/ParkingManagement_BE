@@ -321,6 +321,42 @@ const listPayments = async (buildingId, query = {}) => {
   return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
+/**
+ * Thống kê doanh thu tiền phạt vi phạm (Incident Penalty Revenue).
+ * Nguồn: Payments thành công có gắn incident ID.
+ */
+const getPenaltyRevenue = async (buildingId) => {
+  const bId = new mongoose.Types.ObjectId(String(buildingId));
+
+  const startToday = new Date();
+  startToday.setHours(0, 0, 0, 0);
+
+  const [allTimeAgg, todayAgg, recentItems] = await Promise.all([
+    Payment.aggregate([
+      { $match: { building: bId, status: 'success', incident: { $ne: null } } },
+      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
+    ]),
+    Payment.aggregate([
+      { $match: { building: bId, status: 'success', incident: { $ne: null }, createdAt: { $gte: startToday } } },
+      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
+    ]),
+    Payment.find({ building: buildingId, status: 'success', incident: { $ne: null } })
+      .sort('-createdAt')
+      .limit(10)
+      .populate('incident', 'code type target penaltyFee')
+      .populate('user', 'fullName email')
+      .populate('staff', 'fullName email'),
+  ]);
+
+  return {
+    allTimePenaltyRevenue: allTimeAgg[0]?.total ?? 0,
+    allTimePenaltyCount: allTimeAgg[0]?.count ?? 0,
+    todayPenaltyRevenue: todayAgg[0]?.total ?? 0,
+    todayPenaltyCount: todayAgg[0]?.count ?? 0,
+    recentPayments: recentItems,
+  };
+};
+
 module.exports = {
   getOrCreate,
   credit,
@@ -331,4 +367,5 @@ module.exports = {
   listPendingCash,
   confirmCash,
   listPayments,
+  getPenaltyRevenue,
 };

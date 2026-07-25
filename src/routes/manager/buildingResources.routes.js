@@ -42,6 +42,7 @@ router.post("/wallet/pending-cash/:paymentId/confirm", buildingWalletController.
 // Toàn bộ dòng tiền của building theo phương thức.
 router.get("/payments", buildingWalletController.listPayments);
 router.get("/wallet/revenue-breakdown", buildingWalletController.getRevenueBreakdown);
+router.get("/wallet/penalty-revenue", buildingWalletController.getPenaltyRevenue);
 
 // Giờ mở/đóng cửa của tòa nhà.
 router.put("/operating-hours", buildingController.updateOperatingHours);
@@ -53,6 +54,7 @@ router.get("/dashboard", dashboardController.getOverview);
 
 // Danh sách phiên xe đang đỗ trong tòa nhà (manager giám sát realtime).
 router.get("/sessions/active", sessionController.listParked);
+router.get("/sessions/history", sessionController.listHistory);
 router.get("/sessions/:id", sessionController.getDetail);
 
 router

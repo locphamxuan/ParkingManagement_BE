@@ -18,4 +18,12 @@ const getDetail = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: session });
 });
 
-module.exports = { listParked, getDetail };
+const listHistory = asyncHandler(async (req, res) => {
+  const data = await sessionQueryService.listHistory(
+    req.params.buildingId,
+    req.query,
+  );
+  sendSuccess(res, { data });
+});
+
+module.exports = { listParked, getDetail, listHistory };

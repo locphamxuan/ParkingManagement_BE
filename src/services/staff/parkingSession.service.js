@@ -24,6 +24,8 @@ module.exports = {
   scanVehicle: query.scanVehicle,
   rejectEntry: query.rejectEntry,
   listMyCheckIns: query.listMyCheckIns,
+  listMyCheckouts: query.listMyCheckouts,
+  listHistory: query.listHistory,
   initiatePayment: payment.initiatePayment,
   settleSessionPayment: payment.settleSessionPayment,
   verifySessionPayment: payment.verifySessionPayment,

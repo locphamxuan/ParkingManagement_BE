@@ -16,6 +16,8 @@ router.get("/free-slots", authorizeBuildingAccess, parkingSessionController.list
 
 // Lịch sử xe vào hôm nay của nhân viên cổng vào — có location (cổng vào, tầng, ô đỗ)
 router.get("/my-checkins", authorizeBuildingAccess, parkingSessionController.myCheckIns);
+// Lịch sử xe ra hôm nay của nhân viên cổng ra — có phí thu, phương thức thanh toán
+router.get("/my-checkouts", authorizeBuildingAccess, parkingSessionController.myCheckouts);
 
 // AI camera (Camera 1) — recognize plate + brand from an image, resolve account
 router.post("/scan", authorizeBuildingAccess, parkingSessionController.scan);

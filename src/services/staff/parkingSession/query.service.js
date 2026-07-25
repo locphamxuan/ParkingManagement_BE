@@ -414,4 +414,70 @@ const listMyCheckIns = async (staffUser, query = {}) => {
   return sessions;
 };
 
-module.exports = { listActive, listActiveByFilter, getById, getByIdInBuilding, search, lookupPlate, listFreeSlots, scanVehicle, rejectEntry, listMyCheckIns };
+/* ─────────────────────────────────────────────
+   listMyCheckouts — Lịch sử xe RA (completed) hôm nay của nhân viên cổng RA.
+───────────────────────────────────────────── */
+const listMyCheckouts = async (staffUser, query = {}) => {
+  const allowedBuildings = assertBuildingScope(staffUser, query.building || query.buildingId);
+  const buildingFilter = (query.building || query.buildingId)
+    ? { building: query.building || query.buildingId }
+    : { building: { $in: allowedBuildings } };
+
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+
+  const sessions = await ParkingSession.find({
+    ...buildingFilter,
+    status: 'completed',
+    exitTime: { $gte: start },
+  })
+    .sort('-exitTime')
+    .limit(100)
+    .select('-plateImage -portraitImage -exitPlateImage -exitPortraitImage')
+    .populate('entryGate', 'code name')
+    .populate('exitGate', 'code name')
+    .populate('vehicleType', 'name code')
+    .populate('user', 'fullName email')
+    .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
+    .lean();
+
+  return sessions;
+};
+
+/* ─────────────────────────────────────────────
+   listHistory — Lịch sử tất cả xe vào/ra dành cho Manager (phân trang + lọc).
+───────────────────────────────────────────── */
+const listHistory = async (buildingId, query = {}) => {
+  const page = Math.max(Number(query.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+
+  const filter = { building: buildingId };
+  if (query.status) filter.status = query.status;
+  if (query.plate) filter.plateNumber = plateMatchRegex(query.plate);
+  if (query.from || query.to) {
+    filter.createdAt = {};
+    if (query.from) filter.createdAt.$gte = new Date(query.from);
+    if (query.to) filter.createdAt.$lte = new Date(query.to);
+  }
+
+  const [items, total] = await Promise.all([
+    ParkingSession.find(filter)
+      .sort('-createdAt')
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .select('-plateImage -portraitImage -exitPlateImage -exitPortraitImage')
+      .populate('entryGate', 'code name')
+      .populate('exitGate', 'code name')
+      .populate('vehicleType', 'name code')
+      .populate('user', 'fullName email')
+      .populate('staff', 'fullName email')
+      .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
+      .lean(),
+    ParkingSession.countDocuments(filter),
+  ]);
+
+  return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+};
+
+module.exports = { listActive, listActiveByFilter, getById, getByIdInBuilding, search, lookupPlate, listFreeSlots, scanVehicle, rejectEntry, listMyCheckIns, listMyCheckouts, listHistory };
+
