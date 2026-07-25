@@ -155,12 +155,13 @@ const usageRanker = (usageType) => {
  * Loại xe khớp chặt; đối tượng khớp theo chuỗi fallback ở trên. Sắp xếp để slot
  * ĐÚNG đối tượng đứng trước (gợi ý best-fit), rồi tới các slot fallback.
  */
-const findCompatibleSlots = async (buildingId, vehicleTypeId, usageType, session = null) => {
+const findCompatibleSlots = async (buildingId, vehicleTypeId, usageType, session = null, zoneId = null) => {
   const filter = slotCompatibilityFilter(buildingId, {
     usageType,
     vehicleTypeId,
     restrictVehicleType: true,
   });
+  if (zoneId) filter.zone = zoneId;
   const q = ParkingSlot.find(filter);
   if (session) q.session(session);
   const slots = await q;
