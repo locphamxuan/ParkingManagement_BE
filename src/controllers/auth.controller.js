@@ -59,4 +59,28 @@ const registerVerify = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { register, login, logout, getMe, forgotPassword, resetPassword, registerRequest, registerVerify };
+const forgotPasswordSms = asyncHandler(async (req, res) => {
+  await authService.requestPasswordResetSms(req.body.phone);
+  // Always return 200 regardless of whether phone exists (prevent enumeration)
+  sendSuccess(res, {
+    message: 'If that phone number is registered, an OTP has been sent.',
+  });
+});
+
+const resetPasswordSms = asyncHandler(async (req, res) => {
+  const data = await authService.resetPasswordSms(req.body);
+  sendSuccess(res, { message: 'Password has been reset successfully', data });
+});
+
+module.exports = {
+  register,
+  login,
+  logout,
+  getMe,
+  forgotPassword,
+  resetPassword,
+  registerRequest,
+  registerVerify,
+  forgotPasswordSms,
+  resetPasswordSms,
+};

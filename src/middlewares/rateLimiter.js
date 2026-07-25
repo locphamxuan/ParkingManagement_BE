@@ -19,6 +19,15 @@ const passwordResetLimiter = rateLimit({
   message: { success: false, message: 'Quá nhiều yêu cầu đặt lại mật khẩu, vui lòng thử lại sau 1 giờ.' },
 });
 
+// Forgot password qua SMS: SMS tốn phí thật (eSMS.vn) → giới hạn chặt hơn cả email.
+const smsOtpRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 phút
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Quá nhiều yêu cầu gửi OTP, vui lòng thử lại sau 15 phút.' },
+});
+
 // PayOS webhook: PayOS có thể gửi nhiều event/phút (retry), nhưng cần chặn flood từ bên ngoài.
 const webhookLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 phút
@@ -28,4 +37,4 @@ const webhookLimiter = rateLimit({
   message: { success: false, message: 'Quá nhiều webhook request.' },
 });
 
-module.exports = { authLimiter, passwordResetLimiter, webhookLimiter };
+module.exports = { authLimiter, passwordResetLimiter, smsOtpRequestLimiter, webhookLimiter };
