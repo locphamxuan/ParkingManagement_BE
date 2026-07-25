@@ -37,6 +37,7 @@ const logAudit = async (session, payload) =>
       building: payload.building || null,
       previousValue: payload.before || null,
       newValue: payload.after || null,
+      metadata: payload.metadata || null,
       severity: payload.severity || 'low',
       description: payload.description || '',
     }],

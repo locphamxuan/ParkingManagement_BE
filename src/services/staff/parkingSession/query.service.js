@@ -3,7 +3,8 @@ const { ParkingSession, ParkingSlot, LongTermSubscription, User, Notification, P
 const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../../utils/plate.util');
 const visionScanService = require('../visionScan.service');
-const { asObjectId, calculateFee, calculateLongTermOverageFee, activeSubscriptionMatch, resolveVehicleTypeId, acceptableUsageTypes } = require('./helpers');
+const { assertStaffHasActiveShift } = require('../../shared/entryAuthorization.service');
+const { asObjectId, calculateFee, calculateLongTermOverageFee, activeSubscriptionMatch, resolveVehicleTypeId, slotCompatibilityFilter, usageRanker } = require('./helpers');
 
 // Lõi truy vấn dùng chung staff/manager — caller phải tự xác thực quyền building trước.
 const listActiveByFilter = async (buildingFilter) => {
@@ -122,7 +123,7 @@ const search = async (user, plate, query = {}) => {
     ...buildingFilter,
     plateNumber: { $regex: `${plate}`.trim(), $options: 'i' },
   })
-    .sort({ checkIn: -1 })
+    .sort({ entryTime: -1, _id: -1 })
     .populate('entryGate', 'code name')
     .populate('vehicleType', 'name code');
 };
@@ -133,36 +134,36 @@ const search = async (user, plate, query = {}) => {
    Used by staff at entry gate to decide payment options.
 ───────────────────────────────────────────── */
 
-const lookupPlate = async (staffUser, plateNumber) => {
+const lookupPlate = async (staffUser, plateNumber, buildingId) => {
   const plate = normalizePlate(plateNumber);
   if (!plate) throw new AppError('plateNumber is required', 400);
+  if (!buildingId) throw new AppError('building is required', 400, 'BUILDING_REQUIRED');
 
-  // Must be scoped to at least one building
-  const allowedBuildings = assignedBuildingIds(staffUser);
-  if (!allowedBuildings.length) {
-    throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
-  }
+  assertBuildingScope(staffUser, buildingId);
 
   // Separator-insensitive match so a plate stored in any equivalent format
   // (e.g. 59G2-03880 / 59G2-038.80) still resolves to its owner.
   const plateRx = plateMatchRegex(plate) || plate;
 
-  const [user, activeSession, activeSub] = await Promise.all([
-    User.findOne({ 'licensePlates.plateNumber': plateRx })
-      .select('fullName email phone walletBalance licensePlates'),
-    ParkingSession.findOne({ plateNumber: plateRx, status: 'active' })
+  const user = await User.findOne({ 'licensePlates.plateNumber': plateRx })
+    .select('fullName licensePlates');
+  const [activeSession, activeSub] = await Promise.all([
+    ParkingSession.findOne({ plateNumber: plateRx, status: 'active', building: buildingId })
       .select('_id building entryTime'),
     // Gói dài hạn còn hiệu lực cho biển số này (để staff biết phải gán chỗ trống).
     // Dùng CHUNG định nghĩa với check-in (activeSubscriptionMatch): active + trong [startDate, endDate]
     // → badge "có gói" ở màn scan luôn khớp với hành vi check-in thật.
-    LongTermSubscription.findOne({
-      plateNumber: plateRx,
-      ...activeSubscriptionMatch(),
-      building: { $in: allowedBuildings },
-    })
-      .populate('package', 'name maxHoursPerDay')
-      .populate({ path: 'slot', select: 'code floor status', populate: { path: 'floor', select: 'name code' } })
-      .sort('-updatedAt'),
+    user
+      ? LongTermSubscription.findOne({
+          plateNumber: plateRx,
+          user: user._id,
+          ...activeSubscriptionMatch(),
+          building: buildingId,
+        })
+        .populate('package', 'name maxHoursPerDay')
+        .populate({ path: 'slot', select: 'code floor status', populate: { path: 'floor', select: 'name code' } })
+        .sort('-updatedAt')
+      : Promise.resolve(null),
   ]);
 
   // The vehicle type registered for THIS plate (normalized to car|motorcycle),
@@ -193,9 +194,6 @@ const lookupPlate = async (staffUser, plateNumber) => {
       ? {
           id: user._id,
           fullName: user.fullName,
-          email: user.email,
-          phone: user.phone || null,
-          walletBalance: user.walletBalance,
         }
       : null,
     activeSession: activeSession
@@ -238,10 +236,13 @@ const listFreeSlots = async (staffUser, buildingId, opts = {}) => {
     throw new AppError('Forbidden building scope', 403, 'FORBIDDEN_BUILDING_SCOPE');
   }
 
-  const filter = { building: buildingId, status: 'available' };
-  // Đối tượng khớp theo chuỗi fallback (giống check-in) để FE hiện đúng pool slot.
-  const chain = opts.usageType ? acceptableUsageTypes(opts.usageType) : [];
-  if (chain.length) filter.usageType = { $in: chain };
+  // Cùng filter đối tượng với auto-selection lúc check-in (chuỗi fallback + slot
+  // vạn năng), khác duy nhất ở chỗ KHÔNG lọc theo loại xe — xem
+  // `slotCompatibilityFilter` để biết vì sao khác biệt này là chủ đích.
+  const filter = slotCompatibilityFilter(buildingId, {
+    usageType: opts.usageType,
+    restrictVehicleType: false,
+  });
 
   // Loại xe camera nhận diện → chỉ để XẾP HẠNG (không lọc).
   const detectedVtId = opts.vehicleType
@@ -264,10 +265,7 @@ const listFreeSlots = async (staffUser, buildingId, opts = {}) => {
   ]);
 
   // Xếp: đúng loại xe camera nhận diện trước → đúng đối tượng (best-fit) → theo code.
-  const usageRank = (u) => {
-    const i = chain.indexOf(u);
-    return i === -1 ? chain.length : i;
-  };
+  const usageRank = usageRanker(opts.usageType);
   const vtRank = (vt) =>
     detectedVtId && vt && String(vt._id || vt) === String(detectedVtId) ? 0 : 1;
   slots.sort(
@@ -292,11 +290,9 @@ const listFreeSlots = async (staffUser, buildingId, opts = {}) => {
    is unreadable, the FE falls back to the QR camera (Camera 2).
 ───────────────────────────────────────────── */
 
-const scanVehicle = async (staffUser, image) => {
-  const allowedBuildings = assignedBuildingIds(staffUser);
-  if (!allowedBuildings.length) {
-    throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
-  }
+const scanVehicle = async (staffUser, image, buildingId) => {
+  if (!buildingId) throw new AppError('building is required', 400, 'BUILDING_REQUIRED');
+  assertBuildingScope(staffUser, buildingId);
 
   const { plateNumber, plateConfidence, vehicleType, brand, brandConfidence } =
     await visionScanService.scanVehicleImage(image);
@@ -312,7 +308,7 @@ const scanVehicle = async (staffUser, image) => {
     activePackage: null,
   };
   if (isValidVietnamPlate(plateNumber)) {
-    const lookup = await lookupPlate(staffUser, plateNumber);
+    const lookup = await lookupPlate(staffUser, plateNumber, buildingId);
     account = {
       hasAccount: lookup.hasAccount,
       registeredVehicleType: lookup.registeredVehicleType,
@@ -351,13 +347,25 @@ const rejectEntry = async (staffUser, { plateNumber, stage, reason, building } =
   const plate = normalizePlate(plateNumber);
   if (!plate) throw new AppError('plateNumber is required', 400);
   if (!reason || !`${reason}`.trim()) throw new AppError('reason is required', 400, 'REJECT_REASON_REQUIRED');
-
-  const allowedBuildings = assignedBuildingIds(staffUser);
-  if (!allowedBuildings.length) {
-    throw new AppError('No assigned buildings for this staff user', 403, 'FORBIDDEN_BUILDING_SCOPE');
-  }
+  if (!building) throw new AppError('building is required', 400, 'BUILDING_REQUIRED');
+  assertBuildingScope(staffUser, building);
+  const activeStaffShift = await assertStaffHasActiveShift(staffUser._id, building);
 
   const isCheckout = stage === 'check-out';
+  if (isCheckout) {
+    const activeSession = await ParkingSession.exists({
+      plateNumber: plateMatchRegex(plate) || plate,
+      status: 'active',
+      building,
+    });
+    if (!activeSession) {
+      throw new AppError(
+        'No active parking session exists for this plate in the selected building',
+        409,
+        'ACTIVE_SESSION_NOT_FOUND',
+      );
+    }
+  }
   const owner = await User.findOne({ 'licensePlates.plateNumber': plateMatchRegex(plate) || plate }).select('_id');
 
   let notified = false;
@@ -379,7 +387,17 @@ const rejectEntry = async (staffUser, { plateNumber, stage, reason, building } =
     entityType: 'ParkingSession',
     entityId: plate,
     building: asObjectId(building) || null,
-    metadata: { plateNumber: plate, reason: `${reason}`.trim(), notified },
+    metadata: {
+      plateNumber: plate,
+      reason: `${reason}`.trim(),
+      notified,
+      staffShiftId: `${activeStaffShift._id}`,
+      assignedGateId: activeStaffShift.gate?._id
+        ? `${activeStaffShift.gate._id}`
+        : activeStaffShift.gate
+          ? `${activeStaffShift.gate}`
+          : null,
+    },
   });
 
   return { plateNumber: plate, stage: isCheckout ? 'check-out' : 'check-in', notified };

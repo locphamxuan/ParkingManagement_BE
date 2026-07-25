@@ -3,13 +3,11 @@ const logger = require("../../../utils/logger");
 const AppError = require('../../../utils/AppError');
 const {
   ParkingSession,
-  ParkingSlot,
   LongTermSubscription,
   Payment,
   WalletTransaction,
   User,
   Notification,
-  StaffShift,
 } = require('../../../models');
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const buildingWalletService = require('../../manager/buildingWallet.service');
@@ -20,6 +18,8 @@ const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { sendNotificationEmail } = require('../../../utils/email');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
 const { vehicleKindFromType } = require('./helpers');
+const { assertStaffHasActiveShift } = require('../../shared/entryAuthorization.service');
+const { finalizeSlotAfterCheckout } = require('../../shared/slotLifecycle.service');
 
 // ── Helpers (module-private) ─────────────────────────────────────────────────
 
@@ -38,19 +38,12 @@ async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
 
   assertBuildingScope(user, parkingSession.building);
 
-  // Cho phép check-out nếu có ca HÔM NAY hoặc HÔM QUA (xe vào tối qua, ra sáng nay).
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
-  const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-  const todayShifts = await StaffShift.find({
-    staff: user._id,
-    building: parkingSession.building,
-    workDate: { $gte: yesterdayStart, $lte: todayEnd },
-    status: { $in: ['active', 'scheduled'] },
-  }).session(mongoSession);
-  if (!todayShifts.length) {
-    throw new AppError('You have not been assigned a shift today', 403, 'NO_SHIFT_ASSIGNED');
-  }
+  const activeStaffShift = await assertStaffHasActiveShift(
+    user._id,
+    parkingSession.building,
+    new Date(),
+    mongoSession,
+  );
 
   if (parkingSession.status !== 'active') {
     throw new AppError('Session not active', 400);
@@ -65,6 +58,7 @@ async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
     parkingSession,
     exitPlateImage: payload.exitPlateImage || null,
     exitPortraitImage: payload.exitPortraitImage || null,
+    activeStaffShift,
   };
 }
 
@@ -73,7 +67,15 @@ async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
 // (cộng dồn theo ngày) bị tính phí theo PricePolicy thường và gửi thông báo.
 // Gói floating: nhả slot về 'available' khi xe rời.
 // Returns postCommitEmail object or null.
-async function _handleLongTermCheckout(user, parkingSession, payload, exitPlateImage, exitPortraitImage, mongoSession) {
+async function _handleLongTermCheckout(
+  user,
+  parkingSession,
+  payload,
+  exitPlateImage,
+  exitPortraitImage,
+  activeStaffShift,
+  mongoSession,
+) {
   const now = new Date();
   let postCommitEmail = null;
 
@@ -203,23 +205,7 @@ async function _handleLongTermCheckout(user, parkingSession, payload, exitPlateI
   ].filter(Boolean).join(' | ');
   await parkingSession.save({ session: mongoSession });
 
-  // Nhả slot khi xe rời. Slot CỐ ĐỊNH của gói → trả về 'reserved' (giữ riêng cả kỳ);
-  // slot floating → 'available' (giống session thường).
-  if (parkingSession.slot) {
-    const ltSlotId = parkingSession.slot._id || parkingSession.slot;
-    const ltSlot = await ParkingSlot.findById(ltSlotId).session(mongoSession);
-    if (ltSlot && ltSlot.status !== 'maintenance') {
-      let isFixedSlot = false;
-      if (subMatch) {
-        const sub = await LongTermSubscription.findById(subMatch[1]).select('slot status').session(mongoSession);
-        if (sub && sub.slot && String(sub.slot) === String(ltSlotId) && sub.status === 'active') {
-          isFixedSlot = true;
-        }
-      }
-      ltSlot.status = isFixedSlot ? 'reserved' : 'available';
-      await ltSlot.save({ session: mongoSession });
-    }
-  }
+  await finalizeSlotAfterCheckout(parkingSession, mongoSession, now);
 
   await logAudit(mongoSession, {
     actor: user._id,
@@ -234,6 +220,12 @@ async function _handleLongTermCheckout(user, parkingSession, payload, exitPlateI
       overageHours,
       overageFee,
       maxHoursPerDay,
+      staffShiftId: `${activeStaffShift._id}`,
+      assignedGateId: activeStaffShift.gate?._id
+        ? `${activeStaffShift.gate._id}`
+        : activeStaffShift.gate
+          ? `${activeStaffShift.gate}`
+          : null,
     },
   });
 
@@ -345,7 +337,17 @@ async function _createPaymentRecord(parkingSession, fee, feeMethod, staff, paylo
 }
 
 // Cập nhật trạng thái session, nhả slot, ghi audit.
-async function _finalizeSession(user, parkingSession, payload, fee, feeMethod, exitPlateImage, exitPortraitImage, mongoSession) {
+async function _finalizeSession(
+  user,
+  parkingSession,
+  payload,
+  fee,
+  feeMethod,
+  exitPlateImage,
+  exitPortraitImage,
+  activeStaffShift,
+  mongoSession,
+) {
   parkingSession.exitTime = new Date();
   parkingSession.status = 'completed';
   parkingSession.fee = fee;
@@ -357,13 +359,7 @@ async function _finalizeSession(user, parkingSession, payload, fee, feeMethod, e
     .join(' | ');
   await parkingSession.save({ session: mongoSession });
 
-  if (parkingSession.slot) {
-    const slot = await ParkingSlot.findById(parkingSession.slot).session(mongoSession);
-    if (slot && slot.status !== 'maintenance') {
-      slot.status = 'available';
-      await slot.save({ session: mongoSession });
-    }
-  }
+  await finalizeSlotAfterCheckout(parkingSession, mongoSession, parkingSession.exitTime);
 
   await logAudit(mongoSession, {
     actor: user._id,
@@ -384,6 +380,12 @@ async function _finalizeSession(user, parkingSession, payload, fee, feeMethod, e
       adjustmentReason: payload.adjustmentReason || null,
       forceCheckoutReason: payload.forceCheckoutReason || null,
       bypassMismatch: Boolean(payload.bypassMismatch),
+      staffShiftId: `${activeStaffShift._id}`,
+      assignedGateId: activeStaffShift.gate?._id
+        ? `${activeStaffShift.gate._id}`
+        : activeStaffShift.gate
+          ? `${activeStaffShift.gate}`
+          : null,
     },
   });
 }
@@ -395,13 +397,19 @@ const checkOut = async (user, sessionId, payload = {}) => {
   let postCommitEmail = null;
   try {
     const result = await mongoSession.withTransaction(async () => {
-      const { parkingSession, exitPlateImage, exitPortraitImage } =
+      const { parkingSession, exitPlateImage, exitPortraitImage, activeStaffShift } =
         await _verifyAndLoadSession(user, sessionId, payload, mongoSession);
 
       // Long-term subscription → separate flow with overage billing.
       if (parkingSession.paymentMethod === 'long_term') {
         postCommitEmail = await _handleLongTermCheckout(
-          user, parkingSession, payload, exitPlateImage, exitPortraitImage, mongoSession,
+          user,
+          parkingSession,
+          payload,
+          exitPlateImage,
+          exitPortraitImage,
+          activeStaffShift,
+          mongoSession,
         );
       } else {
         // Regular checkout (khách vãng lai / user thường).
@@ -417,7 +425,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
 
         await _finalizeSession(
           user, parkingSession, payload, fee, feeMethod,
-          exitPlateImage, exitPortraitImage, mongoSession,
+          exitPlateImage, exitPortraitImage, activeStaffShift, mongoSession,
         );
       }
 
