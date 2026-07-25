@@ -7,6 +7,7 @@ const {
 } = require('../../../models');
 const { calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
+const { expireStaleSubscriptions } = require('../../shared/slotLifecycle.service');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
 
 // Resolve a 'car'|'motorcycle' kind (or an ObjectId) to the building's VehicleType _id.
@@ -67,22 +68,22 @@ const activeSubscriptionMatch = (now = new Date()) => {
   };
 };
 
-const resolveLongTermSubscription = async (plateNumber, allowedBuildings) => {
+const resolveLongTermSubscription = async (plateNumber, allowedBuildings, mongoSession = null) => {
   const now = new Date();
-  const subscription = await LongTermSubscription.findOne({
+  const query = LongTermSubscription.findOne({
     plateNumber,
     ...activeSubscriptionMatch(now),
     building: { $in: allowedBuildings },
   })
     .populate('slot')
     .sort({ updatedAt: -1 });
+  if (mongoSession) query.session(mongoSession);
+  const subscription = await query;
 
   if (!subscription) {
-    // Self-heal: nếu có gói 'active' nhưng đã quá endDate (job chưa chạy) → đánh dấu
-    // 'expired' để dữ liệu nhất quán cho lần sau. Không ảnh hưởng kết quả lần này.
-    await LongTermSubscription.updateMany(
-      { plateNumber, status: 'active', endDate: { $lt: now }, building: { $in: allowedBuildings } },
-      { $set: { status: 'expired' } },
+    await expireStaleSubscriptions(
+      { plateNumber, buildingIds: allowedBuildings, now },
+      mongoSession,
     );
     return null;
   }
@@ -118,24 +119,52 @@ const acceptableUsageTypes = (usageType) =>
   USAGE_FALLBACK_CHAIN[usageType] || (usageType ? [usageType] : []);
 
 /**
+ * Filter slot trống tương thích — DÙNG CHUNG cho auto-selection lúc check-in và
+ * danh sách staff chọn tay, để hai đường không trôi lệch về chuỗi fallback hay
+ * cách đối xử với slot "vạn năng" (usageType/vehicleType = null).
+ *
+ * `restrictVehicleType` là khác biệt CHỦ ĐÍCH giữa hai đường:
+ *  - auto-selection: true  → chỉ gán slot đúng loại xe (hoặc slot vạn năng);
+ *  - danh sách chọn tay: false → loại xe chỉ dùng để XẾP HẠNG, staff vẫn thấy và
+ *    chọn được slot loại xe khác (manager có thể cấu hình loại xe riêng).
+ */
+const slotCompatibilityFilter = (
+  buildingId,
+  { usageType, vehicleTypeId = null, restrictVehicleType = false } = {},
+) => {
+  const filter = { building: buildingId, status: 'available' };
+  const chain = acceptableUsageTypes(usageType);
+  if (chain.length) filter.usageType = { $in: [...chain, null] };
+  if (restrictVehicleType && vehicleTypeId) {
+    filter.vehicleType = { $in: [vehicleTypeId, null] };
+  }
+  return filter;
+};
+
+/** Rank đối tượng theo chuỗi fallback; ngoài chuỗi (gồm slot vạn năng null) xếp cuối. */
+const usageRanker = (usageType) => {
+  const chain = acceptableUsageTypes(usageType);
+  return (slotUsageType) => {
+    const index = chain.indexOf(slotUsageType);
+    return index === -1 ? chain.length : index;
+  };
+};
+
+/**
  * Tìm các slot TRỐNG tương thích với (loại xe + đối tượng) của lượt check-in.
  * Loại xe khớp chặt; đối tượng khớp theo chuỗi fallback ở trên. Sắp xếp để slot
  * ĐÚNG đối tượng đứng trước (gợi ý best-fit), rồi tới các slot fallback.
  */
 const findCompatibleSlots = async (buildingId, vehicleTypeId, usageType, session = null) => {
-  const filter = { building: buildingId, status: 'available' };
-  // Slot có vehicleType/usageType = null là slot "vạn năng" (không gắn zone) —
-  // nhận mọi loại xe/đối tượng, nhất quán với isSlotUsageCompatible khi chọn tay.
-  if (vehicleTypeId) filter.vehicleType = { $in: [vehicleTypeId, null] };
-  const chain = acceptableUsageTypes(usageType);
-  if (chain.length) filter.usageType = { $in: [...chain, null] };
+  const filter = slotCompatibilityFilter(buildingId, {
+    usageType,
+    vehicleTypeId,
+    restrictVehicleType: true,
+  });
   const q = ParkingSlot.find(filter);
   if (session) q.session(session);
   const slots = await q;
-  const rank = (u) => {
-    const i = chain.indexOf(u);
-    return i === -1 ? chain.length : i;
-  };
+  const rank = usageRanker(usageType);
   // Thứ tự gợi ý: đúng đối tượng trước (slot vạn năng xếp cuối) → đúng loại xe
   // trước slot vạn năng → ưu tiên slot không dành cho đặt trước (reservable=false)
   // để giữ slot reservable cho user tự đặt.
@@ -218,6 +247,8 @@ module.exports = {
   resolveLongTermSubscription,
   resolveCustomerUsageType,
   acceptableUsageTypes,
+  slotCompatibilityFilter,
+  usageRanker,
   findCompatibleSlots,
   findCapacityForBuilding,
   calculateFee,

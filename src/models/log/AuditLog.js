@@ -34,6 +34,7 @@ const auditLogSchema = new mongoose.Schema(
     },
     previousValue: { type: mongoose.Schema.Types.Mixed, default: null },
     newValue: { type: mongoose.Schema.Types.Mixed, default: null },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: null },
     severity: {
       type: String,
       enum: AUDIT_SEVERITY,

@@ -23,7 +23,10 @@ const list = async (userId, query = {}) => {
 
   const [sessions, total] = await Promise.all([
     ParkingSession.find(filter)
-      .sort('-entryTime')
+      // Tie-break theo _id để phân trang ổn định: nhiều phiên có thể trùng
+      // entryTime, khi đó sort chỉ theo entryTime không đảm bảo thứ tự giữa các
+      // trang → item bị lặp hoặc mất.
+      .sort({ entryTime: -1, _id: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .populate('building', 'name address')

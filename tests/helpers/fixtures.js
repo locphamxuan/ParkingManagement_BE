@@ -131,8 +131,8 @@ const createShift = (buildingId, over = {}) => {
     building: buildingId,
     name: over.name || `Shift ${n}`,
     code: over.code || `SH${n}`,
-    startTime: over.startTime || '06:00',
-    endTime: over.endTime || '14:00',
+    startTime: over.startTime || '00:00',
+    endTime: over.endTime || '23:59',
     isActive: over.isActive ?? true,
   });
 };

@@ -27,7 +27,13 @@ const seed = async ({ balance = 1000000 } = {}) => {
     building: building._id, vehicleType: vt._id, name: 'Tháng', code: 'M1',
     durationDays: 30, price: PRICE,
   });
-  const user = await User.create({ email: 'u@test.com', password: '123456', fullName: 'U', walletBalance: balance });
+  const user = await User.create({
+    email: 'u@test.com',
+    password: '123456',
+    fullName: 'U',
+    walletBalance: balance,
+    licensePlates: [{ plateNumber: '59G2-810.00', vehicleType: 'car' }],
+  });
   return { building, vt, floor, slot, subSlot, pkg, user };
 };
 

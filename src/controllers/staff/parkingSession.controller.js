@@ -33,7 +33,11 @@ const search = asyncHandler(async (req, res) => {
  * Returns whether the plate belongs to a registered user, with wallet info.
  */
 const lookupPlate = asyncHandler(async (req, res) => {
-  const data = await parkingSessionService.lookupPlate(req.user, req.params.plate);
+  const data = await parkingSessionService.lookupPlate(
+    req.user,
+    req.params.plate,
+    req.query.building || req.query.buildingId,
+  );
   sendSuccess(res, { data });
 });
 
@@ -52,7 +56,11 @@ const listFreeSlots = asyncHandler(async (req, res) => {
  * the owner account by plate. Body: { image } (base64, data-URL prefix allowed).
  */
 const scan = asyncHandler(async (req, res) => {
-  const data = await parkingSessionService.scanVehicle(req.user, req.body?.image);
+  const data = await parkingSessionService.scanVehicle(
+    req.user,
+    req.body?.image,
+    req.body?.building || req.body?.buildingId,
+  );
   sendSuccess(res, { data });
 });
 

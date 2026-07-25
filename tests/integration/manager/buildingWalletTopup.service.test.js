@@ -75,24 +75,24 @@ describe('buildingWalletTopup.service.settleTopup / verifyTopup', () => {
   test('verifyTopup: PayOS báo PAID → settle; gọi lại không cộng lần 2', async () => {
     await topupSvc.topup(building._id, manager._id, 50000);
 
-    const v1 = await topupSvc.verifyTopup(555001);
+    const v1 = await topupSvc.verifyTopup(building._id, 555001);
     expect(v1).toMatchObject({ status: 'success', credited: true });
 
-    const v2 = await topupSvc.verifyTopup(555001);
+    const v2 = await topupSvc.verifyTopup(building._id, 555001);
     expect(v2).toMatchObject({ status: 'success', credited: false });
 
     expect((await BuildingWallet.findOne({ building: building._id })).balance).toBe(50000);
   });
 
   test('verifyTopup: orderCode không tồn tại → 404', async () => {
-    await expect(topupSvc.verifyTopup(999999)).rejects.toMatchObject({ statusCode: 404 });
+    await expect(topupSvc.verifyTopup(building._id, 999999)).rejects.toMatchObject({ statusCode: 404 });
   });
 
   test('verifyTopup: PayOS báo chưa PAID → không settle, trả trạng thái pending', async () => {
     await topupSvc.topup(building._id, manager._id, 40000);
     payosService.getPaymentLink.mockResolvedValueOnce({ status: 'PENDING' });
 
-    const r = await topupSvc.verifyTopup(555001);
+    const r = await topupSvc.verifyTopup(building._id, 555001);
     expect(r).toMatchObject({ status: 'pending', credited: false });
     expect((await BuildingWallet.findOne({ building: building._id }))?.balance || 0).toBe(0);
   });

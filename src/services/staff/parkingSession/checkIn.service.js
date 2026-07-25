@@ -5,10 +5,16 @@ const {
   ParkingSession,
   ParkingSlot,
   User,
-  StaffShift,
 } = require('../../../models');
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, plateMatchRegex } = require('../../../utils/plate.util');
+const {
+  assertBuildingAcceptsEntry,
+  assertStaffHasActiveShift,
+} = require('../../shared/entryAuthorization.service');
+const {
+  occupyFixedSlotForCheckIn,
+} = require('../../shared/slotLifecycle.service');
 const {
   resolveVehicleTypeId,
   asObjectId,
@@ -66,32 +72,14 @@ const checkIn = async (user, payload) => {
         throw new AppError('Building not found', 404);
       }
 
-      // Validate giờ hoạt động của tòa nhà
-      if (building.operatingHours?.open && building.operatingHours?.close) {
-        const now = new Date();
-        const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        if (hhmm < building.operatingHours.open || hhmm >= building.operatingHours.close) {
-          throw new AppError(
-            `Tòa nhà ngoài giờ hoạt động (${building.operatingHours.open}–${building.operatingHours.close})`,
-            400,
-            'BUILDING_CLOSED',
-          );
-        }
-      }
-
-      // Chỉ cần nhân viên có ca HÔM NAY là được check-in (không còn ràng buộc theo
-      // HƯỚNG cổng của ca — gate.direction chỉ là cấu hình vật lý + gợi ý tab ở FE).
-      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-      const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
-      const todayShifts = await StaffShift.find({
-        staff: user._id,
-        building: buildingId,
-        workDate: { $gte: todayStart, $lte: todayEnd },
-        status: { $in: ['active', 'scheduled'] },
-      }).session(session);
-      if (!todayShifts.length) {
-        throw new AppError('You have not been assigned a shift today', 403, 'NO_SHIFT_ASSIGNED');
-      }
+      const authorizationTime = new Date();
+      assertBuildingAcceptsEntry(building, authorizationTime);
+      const activeStaffShift = await assertStaffHasActiveShift(
+        user._id,
+        buildingId,
+        authorizationTime,
+        session,
+      );
 
       // Ảnh CHÂN DUNG bắt buộc cho MỌI check-in (kể cả gói) để đối chiếu người khi lấy
       // xe. Ảnh BIỂN SỐ bắt buộc thêm với khách vãng lai / user thường (kiểm tra ở
@@ -101,7 +89,7 @@ const checkIn = async (user, payload) => {
       }
 
       // Nhận diện gói dài hạn sớm (qua biển số lấy từ QR phương tiện hoặc nhập tay).
-      const longTerm = await resolveLongTermSubscription(plateNumber, allowedBuildings);
+      const longTerm = await resolveLongTermSubscription(plateNumber, allowedBuildings, session);
 
       // Gói floating: không còn slot cố định → mọi xe (kể cả gói) đều theo capacity.
       const { totalSlots, activeSessions } = await findCapacityForBuilding(buildingId);
@@ -124,16 +112,7 @@ const checkIn = async (user, payload) => {
         // staff xử lý (user có thể báo sự cố).
         const fixedSlotId = longTerm.slot?._id || longTerm.slot || null;
         if (fixedSlotId) {
-          ltSlot = await ParkingSlot.findById(fixedSlotId).session(session);
-          if (!ltSlot) {
-            throw new AppError('Invalid slot', 400, 'INVALID_SLOT');
-          }
-          if (ltSlot.status === 'maintenance') {
-            throw new AppError('Assigned slot is under maintenance', 409, 'SLOT_MAINTENANCE_NOT_AVAILABLE');
-          }
-          if (ltSlot.status === 'occupied') {
-            throw new AppError('Your reserved slot is currently occupied by another vehicle', 409, 'FIXED_SLOT_OCCUPIED');
-          }
+          ltSlot = await occupyFixedSlotForCheckIn(longTerm, buildingId, session);
           ltSlotId = ltSlot._id;
         } else {
           // Gói floating: gán 1 slot trống thuộc dãy "subscriber" + đúng loại xe.
@@ -162,8 +141,10 @@ const checkIn = async (user, payload) => {
             ltSlotId = suggested._id;
           }
         }
-        ltSlot.status = 'occupied';
-        await ltSlot.save({ session });
+        if (!fixedSlotId) {
+          ltSlot.status = 'occupied';
+          await ltSlot.save({ session });
+        }
 
         const created = await ParkingSession.create(
           [{
@@ -198,6 +179,12 @@ const checkIn = async (user, payload) => {
             forceCheckIn: ltSlotUsageBypassed,
             slotUsageBypassed: ltSlotUsageBypassed,
             bypassedSlotUsageType: ltSlotUsageBypassed ? ltSlot?.usageType : null,
+            staffShiftId: `${activeStaffShift._id}`,
+            assignedGateId: activeStaffShift.gate?._id
+              ? `${activeStaffShift.gate._id}`
+              : activeStaffShift.gate
+                ? `${activeStaffShift.gate}`
+                : null,
           },
         });
 
@@ -309,6 +296,12 @@ const checkIn = async (user, payload) => {
           forceCheckIn,
           slotUsageBypassed: walkInSlotUsageBypassed,
           bypassedSlotUsageType: walkInBypassedSlotUsageType,
+          staffShiftId: `${activeStaffShift._id}`,
+          assignedGateId: activeStaffShift.gate?._id
+            ? `${activeStaffShift.gate._id}`
+            : activeStaffShift.gate
+              ? `${activeStaffShift.gate}`
+              : null,
         },
       });
 

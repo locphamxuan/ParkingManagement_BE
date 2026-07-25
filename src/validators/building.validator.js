@@ -1,4 +1,5 @@
 const AppError = require("../utils/AppError");
+const { parseTime } = require("../utils/businessTime");
 
 const STATUS_LIST = ["active", "inactive", "maintenance"];
 
@@ -6,6 +7,11 @@ const isNonEmptyString = (value) =>
   typeof value === "string" && value.trim().length > 0;
 const isObject = (value) =>
   value && typeof value === "object" && !Array.isArray(value);
+const hasValidOperatingHours = (value) =>
+  isObject(value) &&
+  parseTime(value.open) !== null &&
+  parseTime(value.close) !== null &&
+  value.open !== value.close;
 
 const validateBuildingCreate = (req, _res, next) => {
   const { name, code, totalFloors, pricing, operatingHours } = req.body;
@@ -22,15 +28,12 @@ const validateBuildingCreate = (req, _res, next) => {
   if (!isObject(pricing) || pricing.hourlyRate === undefined) {
     return next(new AppError("pricing.hourlyRate is required", 400));
   }
-  if (
-    !isObject(operatingHours) ||
-    !isNonEmptyString(operatingHours.open) ||
-    !isNonEmptyString(operatingHours.close)
-  ) {
+  if (!hasValidOperatingHours(operatingHours)) {
     return next(
       new AppError(
-        "operatingHours.open and operatingHours.close are required",
+        "operatingHours must use distinct HH:mm open/close values",
         400,
+        "INVALID_OPERATING_HOURS",
       ),
     );
   }
@@ -59,8 +62,12 @@ const validateBuildingUpdate = (req, _res, next) => {
   if (pricing !== undefined && !isObject(pricing)) {
     return next(new AppError("pricing must be an object", 400));
   }
-  if (operatingHours !== undefined && !isObject(operatingHours)) {
-    return next(new AppError("operatingHours must be an object", 400));
+  if (operatingHours !== undefined && !hasValidOperatingHours(operatingHours)) {
+    return next(new AppError(
+      "operatingHours must use distinct HH:mm open/close values",
+      400,
+      "INVALID_OPERATING_HOURS",
+    ));
   }
   if (status !== undefined && !STATUS_LIST.includes(status)) {
     return next(

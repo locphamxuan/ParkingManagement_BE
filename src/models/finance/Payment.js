@@ -1,6 +1,12 @@
 const mongoose = require("mongoose");
 
-const PAYMENT_STATUS = ["pending", "success", "failed", "refunded"];
+const PAYMENT_STATUS = [
+  "pending",
+  "success",
+  "failed",
+  "refunded",
+  "reconciliation_required",
+];
 const PAYMENT_TYPES = ["session", "reservation", "subscription", "refund", "topup", "cancellation_fee"];
 const PAYMENT_METHODS = ["cash", "wallet", "qr", "card", "payos"];
 
@@ -56,8 +62,10 @@ const paymentSchema = new mongoose.Schema(
     },
     note: { type: String, trim: true, default: "" },
     // PayOS fields
-    payosOrderCode: { type: Number, default: null, index: true },
+    payosOrderCode: { type: Number, default: null },
     payosPaymentLinkId: { type: String, default: null },
+    payosCheckoutUrl: { type: String, default: null },
+    payosQrCode: { type: String, default: null },
   },
   { timestamps: true }
 );
@@ -66,7 +74,6 @@ paymentSchema.index({ building: 1, createdAt: -1 });
 paymentSchema.index({ parkingSession: 1 });                  // session payment lookup
 paymentSchema.index({ subscription: 1 });                    // subscription payment lookup
 paymentSchema.index({ user: 1, createdAt: -1 });             // user transaction history
-
 module.exports = mongoose.model("Payment", paymentSchema);
 module.exports.PAYMENT_STATUS = PAYMENT_STATUS;
 module.exports.PAYMENT_TYPES = PAYMENT_TYPES;

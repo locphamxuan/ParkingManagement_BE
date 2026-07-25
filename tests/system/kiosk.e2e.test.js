@@ -30,7 +30,11 @@ describe('E2E · POST /api/kiosk/package-checkin (public, no auth)', () => {
     const vt = await f.createVehicleType(building._id);
     const floor = await f.createFloor(building._id);
     const pkg = await f.createPackage(building._id, vt._id);
-    const slot = await f.createSlot(building._id, floor._id, { usageType: 'subscriber', vehicleType: vt._id });
+    const slot = await f.createSlot(building._id, floor._id, {
+      usageType: 'subscriber',
+      vehicleType: vt._id,
+      status: 'reserved',
+    });
     const user = await User.create({
       email: 'kiosk-http@test.com', password: 'secret1', fullName: 'Kiosk Http', role: 'user',
       licensePlates: [{ plateNumber: '51F-555.55' }],
