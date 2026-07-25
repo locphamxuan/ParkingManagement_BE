@@ -45,6 +45,40 @@ test('trả kèm checkIn/checkOut/duration + populate slot(floor)/gate — FE we
   expect(item.slot.floor.name).toBe(floor.name);
 });
 
+test('phân trang ổn định khi nhiều phiên trùng entryTime — không lặp, không mất item', async () => {
+  const entryTime = new Date('2026-07-01T08:00:00Z');
+  const created = [];
+  for (let i = 0; i < 5; i += 1) {
+    created.push(await ParkingSession.create({
+      plateNumber: `51F-90${i}.00`,
+      building: building._id,
+      user: user._id,
+      entryTime,
+      status: 'completed',
+    }));
+  }
+  const expectedOrder = created
+    .map((session) => `${session._id}`)
+    .sort()
+    .reverse();
+
+  const page1 = await svc.list(user._id, { page: 1, limit: 2 });
+  const page2 = await svc.list(user._id, { page: 2, limit: 2 });
+  const page3 = await svc.list(user._id, { page: 3, limit: 2 });
+
+  expect(page1.pagination.total).toBe(5);
+  expect(page1.pagination.totalPages).toBe(3);
+
+  const paged = [...page1.items, ...page2.items, ...page3.items].map((item) => `${item._id}`);
+  expect(paged).toEqual(expectedOrder);          // deterministic: _id giảm dần
+  expect(new Set(paged).size).toBe(5);           // không item nào bị lặp
+  expect(paged).toHaveLength(5);                 // không item nào bị mất
+
+  // Gọi lại vẫn ra đúng thứ tự cũ (không phụ thuộc thứ tự tự nhiên của storage).
+  const page1Again = await svc.list(user._id, { page: 1, limit: 2 });
+  expect(page1Again.items.map((item) => `${item._id}`)).toEqual(expectedOrder.slice(0, 2));
+});
+
 test('phiên đang active (chưa checkout) → checkOut null, duration null', async () => {
   await ParkingSession.create({
     plateNumber: '51F-888.88', building: building._id, user: user._id, status: 'active',

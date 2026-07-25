@@ -64,7 +64,10 @@ describe('package.service', () => {
       vehicleType: vt._id, name: 'Tháng', code: 'M2', durationDays: 30, price: 300000,
     });
     await f.createReservationPolicy(building._id, { refundPercent: 60 });
-    const user = await f.createUser({ walletBalance: 300000 });
+    const user = await f.createUser({
+      walletBalance: 300000,
+      licensePlates: [{ plateNumber: '51F-999.99', vehicleType: 'car' }],
+    });
     const sub = await longTermSvc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-999.99' });
 
     await packageSvc.cancelSubscription(manager, building._id, sub._id, 'test');
@@ -77,7 +80,10 @@ describe('package.service', () => {
     const pkg = await packageSvc.createPackage(manager, building._id, {
       vehicleType: vt._id, name: 'Tháng', code: 'M3', durationDays: 30, price: 300000,
     });
-    const user = await f.createUser({ walletBalance: 300000 });
+    const user = await f.createUser({
+      walletBalance: 300000,
+      licensePlates: [{ plateNumber: '51F-888.88', vehicleType: 'car' }],
+    });
     const sub = await longTermSvc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-888.88' });
 
     await packageSvc.cancelSubscription(manager, building._id, sub._id, 'test');

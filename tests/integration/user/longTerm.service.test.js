@@ -15,7 +15,10 @@ beforeEach(async () => {
   building = await f.createBuilding();
   vt = await f.createVehicleType(building._id);
   pkg = await f.createPackage(building._id, vt._id, { price: 300000, durationDays: 30 });
-  user = await f.createUser({ walletBalance: 1000000 });
+  user = await f.createUser({
+    walletBalance: 1000000,
+    licensePlates: [{ plateNumber: '51F-123.45', vehicleType: 'car' }],
+  });
   // refundPercent do MANAGER cấu hình theo building — không hardcode trong service.
   await f.createReservationPolicy(building._id, { refundPercent: 95 });
 });
