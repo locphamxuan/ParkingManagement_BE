@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { parseTime } = require("../../utils/businessTime");
 
 const shiftSchema = new mongoose.Schema(
   {
@@ -33,6 +34,13 @@ const shiftSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+shiftSchema.path("endTime").validate(function validateShiftWindow(endTime) {
+  return (
+    parseTime(this.startTime) !== null &&
+    parseTime(endTime) !== null &&
+    this.startTime !== endTime
+  );
+}, "Shift hours must use distinct HH:mm start/end values");
 
 shiftSchema.index({ building: 1, code: 1 }, { unique: true });
 

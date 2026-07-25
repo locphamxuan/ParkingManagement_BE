@@ -1,4 +1,5 @@
 const AppError = require("../utils/AppError");
+const { parseTime } = require("../utils/businessTime");
 
 const isNonEmptyString = (value) =>
   typeof value === "string" && value.trim().length > 0;
@@ -155,11 +156,23 @@ const validateReservationPolicy = wrap((req) => {
 const validateShift = wrap((req) => {
   if (req.method === "POST")
     requireFields(req.body, ["name", "code", "startTime", "endTime"]);
+  const { startTime, endTime } = req.body;
+  if (startTime !== undefined && parseTime(startTime) === null)
+    throw new AppError("startTime must use HH:mm", 400, "INVALID_SHIFT_TIME");
+  if (endTime !== undefined && parseTime(endTime) === null)
+    throw new AppError("endTime must use HH:mm", 400, "INVALID_SHIFT_TIME");
+  if (startTime !== undefined && endTime !== undefined && startTime === endTime)
+    throw new AppError("Shift start and end time must differ", 400, "INVALID_SHIFT_TIME");
 });
 
 const validateStaffShift = wrap((req) => {
   if (req.method === "POST")
     requireFields(req.body, ["shift", "staff", "workDate"]);
+  const allowedStatuses = ["scheduled", "active", "completed", "cancelled"];
+  if (req.body.status !== undefined && !allowedStatuses.includes(req.body.status))
+    throw new AppError("Invalid staff shift status", 400, "INVALID_STAFF_SHIFT_STATUS");
+  if (req.body.workDate !== undefined && Number.isNaN(new Date(req.body.workDate).getTime()))
+    throw new AppError("Invalid workDate", 400, "INVALID_WORK_DATE");
 });
 
 const { FEEDBACK_STATUS } = require("../models/operations/Feedback");

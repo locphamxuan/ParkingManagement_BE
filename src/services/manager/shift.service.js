@@ -38,6 +38,7 @@ const updateShift = async (user, buildingId, id, payload) => {
   ensureManagerOwnsBuilding(user, buildingId);
   const current = await Shift.findOne({ _id: id, building: buildingId });
   if (!current) throw new AppError("Shift not found", 404);
+  const previousValue = current.toObject();
 
   const update = {};
   ["name", "startTime", "endTime"].forEach((k) => {
@@ -47,17 +48,15 @@ const updateShift = async (user, buildingId, id, payload) => {
     update.code = String(payload.code).trim().toUpperCase();
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
 
-  const updated = await Shift.findByIdAndUpdate(id, update, {
-    new: true,
-    runValidators: true,
-  });
+  Object.assign(current, update);
+  const updated = await current.save();
   await writeAuditLog({
     actor: user,
     action: "UPDATE_SHIFT",
     targetTable: "shifts",
     targetId: id,
     building: buildingId,
-    previousValue: current.toObject(),
+    previousValue,
     newValue: updated.toObject(),
   });
   return updated;
@@ -94,6 +93,28 @@ const resolveGate = async (buildingId, gateId) => {
   return gate._id;
 };
 
+const resolveShift = async (buildingId, shiftId) => {
+  if (!shiftId) throw new AppError("shift is required", 400);
+  const shift = await Shift.findOne({ _id: shiftId, building: buildingId, isActive: true });
+  if (!shift) throw new AppError("Shift not found in this building", 404, "SHIFT_BUILDING_MISMATCH");
+  return shift._id;
+};
+
+const resolveStaff = async (buildingId, staffId) => {
+  if (!staffId) throw new AppError("staff is required", 400);
+  const staff = await User.findOne({ _id: staffId, role: ROLES.STAFF, isActive: true });
+  if (!staff) throw new AppError("Selected user must be an active staff member", 400);
+  const assignment = await BuildingManager.exists({
+    building: buildingId,
+    user: staffId,
+    isActive: true,
+  });
+  if (!assignment) {
+    throw new AppError("Staff is not assigned to this building", 403, "STAFF_BUILDING_MISMATCH");
+  }
+  return staff._id;
+};
+
 const listStaffShifts = async (user, buildingId, query = {}) => {
   ensureManagerOwnsBuilding(user, buildingId);
   const filter = { building: buildingId };
@@ -127,20 +148,16 @@ const assignStaffShift = async (user, buildingId, payload) => {
   if (!payload.staff) throw new AppError("staff is required", 400);
   if (!payload.workDate) throw new AppError("workDate is required", 400);
 
-  const shift = await Shift.findOne({ _id: payload.shift, building: buildingId });
-  if (!shift) throw new AppError("Shift not found in this building", 404);
-
-  const staff = await User.findById(payload.staff);
-  if (!staff || staff.role !== ROLES.STAFF) {
-    throw new AppError("Selected user must have role staff", 400);
-  }
-
-  const gate = await resolveGate(buildingId, payload.gate);
+  const [shift, staff, gate] = await Promise.all([
+    resolveShift(buildingId, payload.shift),
+    resolveStaff(buildingId, payload.staff),
+    resolveGate(buildingId, payload.gate),
+  ]);
 
   const created = await StaffShift.create({
     building: buildingId,
-    shift: payload.shift,
-    staff: payload.staff,
+    shift,
+    staff,
     gate: gate ?? null,
     workDate: new Date(payload.workDate),
     status: payload.status || "scheduled",
@@ -166,11 +183,11 @@ const updateStaffShift = async (user, buildingId, id, payload) => {
   if (payload.workDate !== undefined) update.workDate = new Date(payload.workDate);
   if (payload.status !== undefined) update.status = payload.status;
   if (payload.note !== undefined) update.note = payload.note;
-  if (payload.shift !== undefined) update.shift = payload.shift;
-  if (payload.staff !== undefined) update.staff = payload.staff;
+  if (payload.shift !== undefined) update.shift = await resolveShift(buildingId, payload.shift);
+  if (payload.staff !== undefined) update.staff = await resolveStaff(buildingId, payload.staff);
   if (payload.gate !== undefined) update.gate = await resolveGate(buildingId, payload.gate);
 
-  const updated = await StaffShift.findByIdAndUpdate(id, update, {
+  const updated = await StaffShift.findOneAndUpdate({ _id: id, building: buildingId }, update, {
     new: true,
     runValidators: true,
   });

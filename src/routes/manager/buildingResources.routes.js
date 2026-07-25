@@ -167,7 +167,7 @@ router
   .post(v.validateStaffShift, shiftController.assignStaffShift);
 router
   .route("/staff-shifts/:id")
-  .put(shiftController.updateStaffShift)
+  .put(v.validateStaffShift, shiftController.updateStaffShift)
   .delete(shiftController.removeStaffShift);
 router.get("/staff", shiftController.listAvailableStaff);
 

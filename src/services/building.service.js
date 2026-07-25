@@ -1,4 +1,5 @@
 const AppError = require("../utils/AppError");
+const { parseTime } = require("../utils/businessTime");
 const buildingRepository = require("../repositories/building.repository");
 const { Floor } = require("../models");
 
@@ -190,10 +191,6 @@ const updateManagerBuilding = async (user, buildingId, payload) => {
   return attachFloorCount(updated);
 };
 
-// Validate "HH:MM" (24h) time strings used for operating hours.
-const isValidTime = (value) =>
-  typeof value === "string" && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value.trim());
-
 /**
  * Manager cập nhật giờ mở/đóng cửa của tòa nhà (tab riêng "Giờ hoạt động").
  */
@@ -216,11 +213,12 @@ const updateManagerOperatingHours = async (user, buildingId, payload = {}) => {
 
   const open = `${payload.open || ""}`.trim();
   const close = `${payload.close || ""}`.trim();
-  if (!isValidTime(open) || !isValidTime(close)) {
-    throw new AppError("open/close phải có định dạng HH:MM (24h)", 400);
-  }
-  if (open === close) {
-    throw new AppError("Giờ mở và giờ đóng không được trùng nhau", 400);
+  if (parseTime(open) === null || parseTime(close) === null || open === close) {
+    throw new AppError(
+      "open/close phải có định dạng HH:mm và không được trùng nhau",
+      400,
+      "INVALID_OPERATING_HOURS",
+    );
   }
 
   return updateBuilding(buildingId, { operatingHours: { open, close } });
