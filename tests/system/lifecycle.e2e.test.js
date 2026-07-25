@@ -16,6 +16,7 @@ const app = require('../../src/app');
 const db = require('../helpers/db');
 const f = require('../helpers/fixtures');
 const { signToken } = require('../../src/utils/token');
+const { COOKIE_NAME } = require('../../src/utils/authCookie');
 const BuildingManager = require('../../src/models/building/BuildingManager');
 const ParkingSlot = require('../../src/models/building/ParkingSlot');
 const BuildingWallet = require('../../src/models/finance/BuildingWallet');
@@ -72,6 +73,36 @@ describe('E2E · Auth & RBAC boundary (HTTP)', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.token).toBeTruthy();
     expect(res.body.data.user.email).toBe(s.customer.email);
+  });
+
+  test('login đặt httpOnly cookie; /me và logout hoạt động chỉ qua cookie (không cần Authorization header)', async () => {
+    // Cookie có Secure=true (đúng cho browser thật) nên client HTTP thuần của
+    // supertest (không phải TLS) sẽ không tự resend nó — forward thủ công
+    // qua header Cookie để mô phỏng đúng những gì trình duyệt sẽ làm.
+    const s = await seedFullScene();
+
+    const loginRes = await request(app)
+      .post('/api/users/auth/login')
+      .send({ email: s.customer.email, password: 'secret1' });
+    expect(loginRes.status).toBe(200);
+    const setCookie = loginRes.headers['set-cookie'] || [];
+    const authCookie = setCookie.find((c) => c.startsWith(`${COOKIE_NAME}=`));
+    expect(authCookie).toBeTruthy();
+    expect(authCookie).toMatch(/HttpOnly/i);
+
+    // Không set Authorization — chỉ gửi cookie, giống trình duyệt sau khi login.
+    const meRes = await request(app)
+      .get('/api/users/auth/me')
+      .set('Cookie', authCookie);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.data.user.email).toBe(s.customer.email);
+
+    const logoutRes = await request(app)
+      .post('/api/users/auth/logout')
+      .set('Cookie', authCookie);
+    expect(logoutRes.status).toBe(200);
+    const clearCookie = logoutRes.headers['set-cookie'] || [];
+    expect(clearCookie.some((c) => c.startsWith(`${COOKIE_NAME}=;`))).toBe(true);
   });
 
   test('login sai mật khẩu → 401', async () => {
