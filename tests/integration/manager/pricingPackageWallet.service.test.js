@@ -11,6 +11,7 @@ const Feedback = require('../../../src/models/operations/Feedback');
 const ParkingSession = require('../../../src/models/operations/ParkingSession');
 const Payment = require('../../../src/models/finance/Payment');
 const User = require('../../../src/models/user/User');
+const BuildingManager = require('../../../src/models/building/BuildingManager');
 const longTermSvc = require('../../../src/services/user/longTerm.service');
 
 let building, manager, vt;
@@ -138,6 +139,7 @@ describe('shift.service', () => {
   test('tạo ca + gán nhân viên (chỉ staff)', async () => {
     const shift = await shiftSvc.createShift(manager, building._id, { name: 'Sáng', code: 'S1', startTime: '06:00', endTime: '14:00' });
     const staff = await f.createUser({ role: 'staff' });
+    await BuildingManager.create({ building: building._id, user: staff._id });
     const assigned = await shiftSvc.assignStaffShift(manager, building._id, {
       shift: shift._id, staff: staff._id, workDate: new Date(),
     });
