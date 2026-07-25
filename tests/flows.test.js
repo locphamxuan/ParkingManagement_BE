@@ -75,7 +75,7 @@ describe('Walk-in (khách vãng lai)', () => {
     const { building, staff } = await seedBase();
     await ParkingSlot.create({ building: building._id, floor: (await Floor.findOne())._id, code: 'A1' });
     const session = await svc.checkIn(staff, { building: building._id, plateNumber: '59G2-10000', vehicleType: 'car', portraitImage: 'FACE_IN' });
-    expect(session.item.plateNumber).toBe('59G2-100.00');
+    expect(session.plateNumber).toBe('59G2-100.00');
   });
 
   test('đủ ảnh → tạo session; checkout lưu ảnh ra + tính phí theo policy', async () => {
