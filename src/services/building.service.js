@@ -154,6 +154,9 @@ const getManagerBuilding = async (user, buildingId) => {
   return Promise.all(buildings.map(attachFloorCount));
 };
 
+// Trạng thái manager được phép đọc/ghi trên tòa mình phụ trách.
+const MANAGER_EDITABLE_STATUSES = ["active", "maintenance"];
+
 const updateManagerBuilding = async (user, buildingId, payload) => {
   // buildingId is required for update
   if (!buildingId) {
@@ -172,9 +175,15 @@ const updateManagerBuilding = async (user, buildingId, payload) => {
 
   const building = await getBuildingOrFail(buildingId);
 
-  // Only allow updates to active buildings
-  if (building.status !== "active") {
-    throw new AppError("Can only update buildings with status=active", 403);
+  // Manager tự bật/tắt bảo trì cho tòa mình phụ trách, nên phải sửa được CẢ khi
+  // đang 'maintenance' — nếu chỉ cho 'active' thì đặt bảo trì xong sẽ kẹt một
+  // chiều, phải nhờ admin mở lại. 'inactive' là vòng đời của admin.
+  if (!MANAGER_EDITABLE_STATUSES.includes(building.status)) {
+    throw new AppError(
+      `Can only update buildings with status=${MANAGER_EDITABLE_STATUSES.join(" or ")}`,
+      403,
+      "BUILDING_STATUS_FORBIDDEN",
+    );
   }
 
   // Manager chỉ sửa các trường cơ bản. Giá do tab "Giá" (PricePolicy) quản lý;
@@ -185,6 +194,20 @@ const updateManagerBuilding = async (user, buildingId, payload) => {
   const safePayload = {};
   for (const key of ALLOWED_FIELDS) {
     if (payload[key] !== undefined) safePayload[key] = payload[key];
+  }
+
+  // Chỉ cho manager chuyển giữa active ↔ maintenance; 'inactive' (ngừng khai
+  // thác) vẫn là quyền admin, tránh manager tự đưa tòa vào trạng thái không tự
+  // khôi phục được.
+  if (
+    safePayload.status !== undefined &&
+    !MANAGER_EDITABLE_STATUSES.includes(safePayload.status)
+  ) {
+    throw new AppError(
+      `Manager can only switch a building between ${MANAGER_EDITABLE_STATUSES.join(" and ")}`,
+      403,
+      "BUILDING_STATUS_FORBIDDEN",
+    );
   }
 
   const updated = await updateBuilding(buildingId, safePayload);
