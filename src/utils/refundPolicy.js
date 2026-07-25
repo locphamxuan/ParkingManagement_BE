@@ -18,8 +18,9 @@ const clampPercent = (value, fallback) => {
  */
 const getRefundPercent = async (buildingId, session = null) => {
   const policy = await ReservationPolicy.findOne({ building: buildingId })
-    .select('refundPercent')
+    .select('refundPercent isActive')
     .session(session);
+  if (policy && !policy.isActive) return 0;
   return clampPercent(policy?.refundPercent, DEFAULT_REFUND_PERCENT);
 };
 
