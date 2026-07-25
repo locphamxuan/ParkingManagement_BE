@@ -23,6 +23,7 @@ const User = require('../../../src/models/user/User');
 const BuildingWallet = require('../../../src/models/finance/BuildingWallet');
 const { ParkingSession } = require('../../../src/models');
 const AppError = require('../../../src/utils/AppError');
+const logger = require('../../../src/utils/logger');
 
 jest.setTimeout(120000);
 
@@ -60,6 +61,39 @@ describe('webhook.service.handle', () => {
   test('orderCode không tồn tại/đã xử lý → no-op (idempotent), không throw', async () => {
     mockWebhook({ code: '00', orderCode: 424242 });
     await expect(webhookService.handle({})).resolves.toBeUndefined();
+  });
+
+  test('order lạ được CẢNH BÁO có cấu trúc để đối soát, không im lặng bỏ qua', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    mockWebhook({ code: '00', orderCode: 424243 });
+
+    await webhookService.handle({});
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [message, context] = warn.mock.calls[0];
+    expect(message).toContain('Unknown or already-processed order');
+    expect(context).toMatchObject({ orderCode: 424243 });
+    warn.mockRestore();
+  });
+
+  test('payment type không hỗ trợ qua webhook được cảnh báo kèm paymentId', async () => {
+    const user = await fixtures.createUser();
+    const payment = await Payment.create({
+      type: 'refund', method: 'payos', amount: 1000, status: 'pending',
+      user: user._id, payosOrderCode: 424244,
+    });
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    mockWebhook({ code: '00', orderCode: 424244 });
+
+    await webhookService.handle({});
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [message, context] = warn.mock.calls[0];
+    expect(message).toContain('Unsupported payment type');
+    expect(context).toMatchObject({ orderCode: 424244, paymentId: `${payment._id}`, type: 'refund' });
+    // Không tự ý đổi trạng thái payment loại không hỗ trợ.
+    expect((await Payment.findById(payment._id)).status).toBe('pending');
+    warn.mockRestore();
   });
 
   test("type='topup' KHÔNG có building → cộng ví USER", async () => {

@@ -38,8 +38,8 @@ const initiateTopup = asyncHandler(async (req, res) => {
 
 // Manually verify a PayOS top-up (fallback when webhook is delayed)
 const verifyTopup = asyncHandler(async (req, res) => {
-  const { orderCode } = req.params;
-  const result = await topupService.verifyTopup(orderCode);
+  const { buildingId, orderCode } = req.params;
+  const result = await topupService.verifyTopup(buildingId, orderCode);
   sendSuccess(res, { data: result });
 });
 
