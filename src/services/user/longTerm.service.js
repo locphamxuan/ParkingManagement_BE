@@ -6,6 +6,7 @@ const ParkingSession = require('../../models/operations/ParkingSession');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const Payment = require('../../models/finance/Payment');
 const User = require('../../models/user/User');
+const Notification = require('../../models/log/Notification');
 const AppError = require('../../utils/AppError');
 const mongoose = require('mongoose');
 const { normalizePlate, plateMatchRegex } = require('../../utils/plate.util');
@@ -173,6 +174,16 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
           pkg.building, pkg.price, 'subscription_fee', payment._id, mongoSession,
         );
       }
+
+      await Notification.insertMany([{
+        user: userId,
+        type: 'general',
+        title: 'Mua gói dài hạn thành công',
+        message: `Đã đăng ký thành công gói ${pkg.name} cho xe ${normalizedPlate}. Hạn sử dụng đến ${endDate.toLocaleDateString('vi-VN')}.`,
+        building: pkg.building,
+        plateNumber: normalizedPlate,
+        isRead: false,
+      }], { session: mongoSession });
     });
   } catch (err) {
     // Unique partial index trên { plateNumber, status:'active' } chặn 2 gói active cùng biển
@@ -436,6 +447,16 @@ const renewSubscription = async (userId, subscriptionId) => {
           pkg.building, pkg.price, 'subscription_fee', payment._id, mongoSession,
         );
       }
+
+      await Notification.insertMany([{
+        user: userId,
+        type: 'general',
+        title: 'Gia hạn gói dài hạn thành công',
+        message: `Đã gia hạn thành công gói ${pkg.name} cho xe ${subscription.plateNumber}. Hạn mới đến ${newEnd.toLocaleDateString('vi-VN')}.`,
+        building: pkg.building,
+        plateNumber: subscription.plateNumber,
+        isRead: false,
+      }], { session: mongoSession });
 
       result = subscription;
     });

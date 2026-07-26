@@ -359,6 +359,22 @@ async function _finalizeSession(
     .join(' | ');
   await parkingSession.save({ session: mongoSession });
 
+  if (parkingSession.user) {
+    try {
+      await Notification.insertMany([{
+        user: parkingSession.user,
+        type: 'general',
+        title: 'Xe đã xuất bãi thành công',
+        message: `Xe ${parkingSession.plateNumber} đã hoàn tất check-out. Phí gửi xe: ${fee.toLocaleString('vi-VN')} VNĐ.`,
+        building: parkingSession.building,
+        plateNumber: parkingSession.plateNumber,
+        isRead: false,
+      }], { session: mongoSession });
+    } catch (e) {
+      logger.error('[checkOut] checkout notification failed:', e.message);
+    }
+  }
+
   await finalizeSlotAfterCheckout(parkingSession, mongoSession, parkingSession.exitTime);
 
   await logAudit(mongoSession, {

@@ -7,6 +7,7 @@ const {
   VehicleType,
   Zone,
   User,
+  Notification,
 } = require('../../../models');
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, plateMatchRegex } = require('../../../utils/plate.util');
@@ -208,6 +209,22 @@ const checkIn = async (user, payload) => {
           { session },
         );
 
+        if (created[0].user) {
+          try {
+            await Notification.insertMany([{
+              user: created[0].user,
+              type: 'general',
+              title: 'Xe đã check-in vào bãi',
+              message: `Xe ${plateNumber} đã check-in thành công qua cổng.`,
+              building: buildingId,
+              plateNumber,
+              isRead: false,
+            }], { session });
+          } catch (e) {
+            // non-blocking
+          }
+        }
+
         await logAudit(session, {
           actor: user._id,
           action: ltSlotUsageBypassed ? 'FORCE_SLOT_USAGE_BYPASS' : 'LONG_TERM_SUBSCRIPTION_CHECK_IN',
@@ -331,6 +348,22 @@ const checkIn = async (user, payload) => {
         }],
         { session },
       );
+
+      if (created[0].user) {
+        try {
+          await Notification.insertMany([{
+            user: created[0].user,
+            type: 'general',
+            title: 'Xe đã check-in vào bãi',
+            message: `Xe ${plateNumber} đã check-in thành công qua cổng.`,
+            building: buildingId,
+            plateNumber,
+            isRead: false,
+          }], { session });
+        } catch (e) {
+          // non-blocking
+        }
+      }
 
       await logAudit(session, {
         actor: user._id,

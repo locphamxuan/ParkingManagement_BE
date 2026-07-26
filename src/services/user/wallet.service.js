@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const User = require('../../models/user/User');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const Payment = require('../../models/finance/Payment');
+const Notification = require('../../models/log/Notification');
 const AppError = require('../../utils/AppError');
 const payosService = require('../payment/payos.service');
 const { createPayosIntent } = require('../payment/paymentIntent.service');
@@ -133,6 +134,17 @@ const settleTopup = async (orderCode) => {
           status: 'success',
           reason: 'payos_topup',
           metadata: { payosOrderCode: oc },
+        }],
+        { session: mongoSession },
+      );
+
+      await Notification.insertMany(
+        [{
+          user: payment.user,
+          type: 'general',
+          title: 'Nạp tiền vào ví thành công',
+          message: `Đã nạp ${amount.toLocaleString('vi-VN')} VNĐ vào ví. Số dư ví hiện tại: ${user.walletBalance.toLocaleString('vi-VN')} VNĐ.`,
+          isRead: false,
         }],
         { session: mongoSession },
       );
