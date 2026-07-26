@@ -57,7 +57,13 @@ const authorizeBuildingAccess = (req, _res, next) => {
   );
 
   if (!allowed) {
-    return next(new AppError("Forbidden: You do not have permission to manage this specific building.", 403));
+    return next(
+      new AppError(
+        "Forbidden: You do not have permission to manage this specific building.",
+        403,
+        "BUILDING_ACCESS_DENIED",
+      ),
+    );
   }
 
   next();

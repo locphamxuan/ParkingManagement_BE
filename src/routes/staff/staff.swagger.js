@@ -140,10 +140,32 @@
  *                         items:
  *                           type: array
  *                           items: { $ref: '#/components/schemas/StaffShift' }
+ * components:
+ *   schemas:
+ *     StaffQrSession:
+ *       type: object
+ *       description: Minimal active-session summary for gate operations (no fee, no PII).
+ *       properties:
+ *         id: { type: string, format: objectId }
+ *         plateNumber: { type: string, example: 59G2-038.80 }
+ *         entryTime: { type: string, format: date-time }
+ *     StaffQrPackage:
+ *       type: object
+ *       properties:
+ *         id: { type: string, format: objectId }
+ *         name: { type: string, example: Gói tháng }
+ *         code: { type: string, nullable: true }
+ *         plateNumber: { type: string, example: 59G2-038.80 }
+ *         startDate: { type: string, format: date-time }
+ *         endDate: { type: string, format: date-time }
  * /api/staff/users/lookup-qr/{qrCode}:
  *   get:
  *     tags: [Staff - Users Lookup]
- *     summary: Look up a user by QR code
+ *     summary: Look up a user by QR code (account QR), scoped to one building
+ *     description: >
+ *       `building` is REQUIRED and must be a building the staff member is assigned to;
+ *       there is no fallback to all assigned buildings. The response is minimized for
+ *       gate operations — it never contains email, phone, walletBalance or licensePlates.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -151,6 +173,11 @@
  *         name: qrCode
  *         required: true
  *         schema: { type: string }
+ *       - in: query
+ *         name: building
+ *         required: true
+ *         description: The currently selected building. Missing → 400 BUILDING_REQUIRED.
+ *         schema: { type: string, format: objectId }
  *     responses:
  *       200:
  *         description: User lookup returned successfully.
@@ -164,21 +191,43 @@
  *                     data:
  *                       type: object
  *                       properties:
- *                         user: { $ref: '#/components/schemas/PublicUser' }
+ *                         userId: { type: string, format: objectId }
+ *                         hasAccount: { type: boolean }
+ *                         user:
+ *                           type: object
+ *                           nullable: true
+ *                           properties:
+ *                             id: { type: string, format: objectId }
+ *                             fullName: { type: string }
+ *                             isActive: { type: boolean }
  *                         activeSessions:
  *                           type: array
- *                           items: { $ref: '#/components/schemas/ParkingSession' }
+ *                           items: { $ref: '#/components/schemas/StaffQrSession' }
+ *                         activePackages:
+ *                           type: array
+ *                           items: { $ref: '#/components/schemas/StaffQrPackage' }
+ *       400: { description: BUILDING_REQUIRED — query parameter `building` is missing., $ref: '#/components/responses/ValidationError' }
+ *       403: { description: FORBIDDEN_BUILDING_SCOPE — building is not assigned to this staff member., $ref: '#/components/responses/ForbiddenError' }
  * /api/staff/users/lookup-plate-qr/{qrCode}:
  *   get:
  *     tags: [Staff - Users Lookup]
- *     summary: Look up a license plate by QR token
+ *     summary: Look up a license plate by QR token, scoped to one building
+ *     description: >
+ *       `building` is REQUIRED and must be assigned to the staff member. Only the
+ *       scanned plate is returned — never the owner's identity, contact details or
+ *       their other registered plates.
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: qrCode
  *         required: true
- *         schema: { type: string }
+ *         schema: { type: string, example: PLT-abc123 }
+ *       - in: query
+ *         name: building
+ *         required: true
+ *         description: The currently selected building. Missing → 400 BUILDING_REQUIRED.
+ *         schema: { type: string, format: objectId }
  *     responses:
  *       200:
  *         description: Plate lookup returned successfully.
@@ -192,15 +241,27 @@
  *                     data:
  *                       type: object
  *                       properties:
- *                         plate: { $ref: '#/components/schemas/LicensePlate' }
- *                         owner: { $ref: '#/components/schemas/PublicUser' }
+ *                         qrCode: { type: string }
+ *                         found: { type: boolean }
+ *                         plate:
+ *                           type: object
+ *                           nullable: true
+ *                           properties:
+ *                             plateNumber: { type: string, example: 59G2-038.80 }
+ *                             vehicleType: { type: string, example: car }
+ *                             brand: { type: string, nullable: true, example: Toyota }
  *                         activeSessions:
  *                           type: array
- *                           items: { $ref: '#/components/schemas/ParkingSession' }
+ *                           items: { $ref: '#/components/schemas/StaffQrSession' }
+ *       400: { description: BUILDING_REQUIRED — query parameter `building` is missing., $ref: '#/components/responses/ValidationError' }
+ *       403: { description: FORBIDDEN_BUILDING_SCOPE — building is not assigned to this staff member., $ref: '#/components/responses/ForbiddenError' }
  * /api/staff/users/resolve-qr/{code}:
  *   get:
  *     tags: [Staff - Users Lookup]
- *     summary: Resolve a QR payload to either account or vehicle data
+ *     summary: Resolve a QR payload to either account or vehicle data, scoped to one building
+ *     description: >
+ *       `building` is REQUIRED and is applied to BOTH branches (`PLT-` plate token and
+ *       account ObjectId). Response is the matching lookup payload tagged with `kind`.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -208,6 +269,11 @@
  *         name: code
  *         required: true
  *         schema: { type: string }
+ *       - in: query
+ *         name: building
+ *         required: true
+ *         description: The currently selected building. Missing → 400 BUILDING_REQUIRED.
+ *         schema: { type: string, format: objectId }
  *     responses:
  *       200:
  *         description: QR resolution returned successfully.
@@ -220,7 +286,11 @@
  *                   properties:
  *                     data:
  *                       type: object
+ *                       properties:
+ *                         kind: { type: string, enum: [plate, user] }
  *                       additionalProperties: true
+ *       400: { description: BUILDING_REQUIRED / INVALID_QR_CODE., $ref: '#/components/responses/ValidationError' }
+ *       403: { description: FORBIDDEN_BUILDING_SCOPE — building is not assigned to this staff member., $ref: '#/components/responses/ForbiddenError' }
  */
 /**
  * @swagger
