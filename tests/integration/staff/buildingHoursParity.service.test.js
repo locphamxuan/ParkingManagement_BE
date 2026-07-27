@@ -40,6 +40,7 @@ let floor;
 let vehicleType;
 let staff;
 let qrCode;
+let kioskGate;
 
 beforeAll(async () => { await db.connect(); });
 afterAll(async () => { await db.close(); });
@@ -50,6 +51,7 @@ beforeEach(async () => {
   building = await f.createBuilding();
   vehicleType = await f.createVehicleType(building._id);
   floor = await f.createFloor(building._id, { capacity: 50 });
+  kioskGate = await f.createGate(building._id, { direction: 'in' });
 
   staff = await f.createUser({ role: 'staff' });
   staff.assignedBuildings = [building._id];
@@ -107,7 +109,7 @@ const staffOutcome = async () => {
 
 const kioskOutcome = async () => {
   try {
-    await kioskService.selfCheckInByQr({ qrCode });
+    await kioskService.selfCheckInByQr({ qrCode, gate: kioskGate._id });
     return 'ok';
   } catch (error) {
     return error.errorCode || 'UNKNOWN';

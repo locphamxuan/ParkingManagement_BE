@@ -20,6 +20,8 @@ const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
 const { vehicleKindFromType } = require('./helpers');
 const { assertStaffHasActiveShift } = require('../../shared/entryAuthorization.service');
 const { finalizeSlotAfterCheckout } = require('../../shared/slotLifecycle.service');
+const { resolveOperationalGate } = require('../../shared/gateAuthorization.service');
+const { assertEvidenceImage } = require('../../../utils/evidence');
 
 // ── Helpers (module-private) ─────────────────────────────────────────────────
 
@@ -44,6 +46,13 @@ async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
     new Date(),
     mongoSession,
   );
+  const exitGate = await resolveOperationalGate({
+    gateId: payload.exitGate || payload.gate || null,
+    buildingId: parkingSession.building,
+    operation: 'out',
+    assignedGateId: activeStaffShift.gate?._id || activeStaffShift.gate || null,
+    mongoSession,
+  });
 
   if (parkingSession.status !== 'active') {
     throw new AppError('Session not active', 400);
@@ -56,9 +65,10 @@ async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
 
   return {
     parkingSession,
-    exitPlateImage: payload.exitPlateImage || null,
-    exitPortraitImage: payload.exitPortraitImage || null,
+    exitPlateImage: assertEvidenceImage(payload.exitPlateImage, 'exitPlateImage'),
+    exitPortraitImage: assertEvidenceImage(payload.exitPortraitImage, 'exitPortraitImage'),
     activeStaffShift,
+    exitGate,
   };
 }
 
@@ -74,6 +84,7 @@ async function _handleLongTermCheckout(
   exitPlateImage,
   exitPortraitImage,
   activeStaffShift,
+  exitGate,
   mongoSession,
 ) {
   const now = new Date();
@@ -152,6 +163,7 @@ async function _handleLongTermCheckout(
       );
     }
 
+    const isCashPending = feeMethod === 'cash';
     const [payment] = await Payment.create(
       [{
         building: parkingSession.building,
@@ -159,7 +171,7 @@ async function _handleLongTermCheckout(
         type: 'session',
         method: feeMethod,
         amount: overageFee,
-        status: 'success',
+        status: isCashPending ? 'pending' : 'success',
         user: parkingSession.user || null,
         staff: user._id,
         note: `long_term_overage:${overageHours.toFixed(2)}h`,
@@ -167,9 +179,11 @@ async function _handleLongTermCheckout(
       { session: mongoSession },
     );
 
-    await buildingWalletService.credit(
-      parkingSession.building, overageFee, 'parking_fee', payment._id, mongoSession,
-    );
+    if (!isCashPending) {
+      await buildingWalletService.credit(
+        parkingSession.building, overageFee, 'parking_fee', payment._id, mongoSession,
+      );
+    }
 
     if (parkingSession.user) {
       const capMsg = maxHoursPerDay ? `${maxHoursPerDay}h/day` : 'package';
@@ -198,6 +212,7 @@ async function _handleLongTermCheckout(
   parkingSession.paymentMethod = feeMethod;
   parkingSession.exitPlateImage = exitPlateImage;
   parkingSession.exitPortraitImage = exitPortraitImage;
+  parkingSession.exitGate = exitGate?._id || null;
   parkingSession.note = [
     parkingSession.note,
     overageHours > 0 ? `long_term_overage:${overageHours.toFixed(2)}h` : null,
@@ -346,6 +361,7 @@ async function _finalizeSession(
   exitPlateImage,
   exitPortraitImage,
   activeStaffShift,
+  exitGate,
   mongoSession,
 ) {
   parkingSession.exitTime = new Date();
@@ -354,6 +370,7 @@ async function _finalizeSession(
   parkingSession.paymentMethod = feeMethod;
   parkingSession.exitPlateImage = exitPlateImage;
   parkingSession.exitPortraitImage = exitPortraitImage;
+  parkingSession.exitGate = exitGate?._id || null;
   parkingSession.note = [parkingSession.note, payload.forceCheckoutReason, payload.bypassMismatch ? 'plate_mismatch_bypassed' : null]
     .filter(Boolean)
     .join(' | ');
@@ -413,7 +430,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
   let postCommitEmail = null;
   try {
     const result = await mongoSession.withTransaction(async () => {
-      const { parkingSession, exitPlateImage, exitPortraitImage, activeStaffShift } =
+      const { parkingSession, exitPlateImage, exitPortraitImage, activeStaffShift, exitGate } =
         await _verifyAndLoadSession(user, sessionId, payload, mongoSession);
 
       // Long-term subscription → separate flow with overage billing.
@@ -425,6 +442,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
           exitPlateImage,
           exitPortraitImage,
           activeStaffShift,
+          exitGate,
           mongoSession,
         );
       } else {
@@ -441,7 +459,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
 
         await _finalizeSession(
           user, parkingSession, payload, fee, feeMethod,
-          exitPlateImage, exitPortraitImage, activeStaffShift, mongoSession,
+          exitPlateImage, exitPortraitImage, activeStaffShift, exitGate, mongoSession,
         );
       }
 

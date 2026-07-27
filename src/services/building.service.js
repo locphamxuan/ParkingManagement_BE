@@ -105,11 +105,14 @@ const updateBuildingStatus = async (id, status) => {
 };
 
 const removeBuilding = async (id) => {
-  const deleted = await buildingRepository.deleteById(id);
-  if (!deleted) {
+  const archived = await buildingRepository.updateById(id, {
+    status: 'inactive',
+    isActive: false,
+  });
+  if (!archived) {
     throw new AppError("Building not found", 404);
   }
-  return deleted;
+  return archived;
 };
 
 // Số tầng THẬT của toà = đếm Floor đã tạo (qua trang Floor management), KHÔNG

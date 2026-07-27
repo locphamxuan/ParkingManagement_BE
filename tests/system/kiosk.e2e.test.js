@@ -1,8 +1,4 @@
-/**
- * SYSTEM / E2E — xác nhận hợp đồng "kiosk self-checkin công khai, không cần token"
- * qua HTTP thật. Route duy nhất trong hệ thống cố ý bỏ qua `authenticate` — nếu ai
- * đó lỡ thêm middleware auth vào đây, kiosk vật lý ngoài cổng sẽ hỏng hoàn toàn.
- */
+/** System/E2E contract for a managed kiosk device authenticated by device token. */
 const request = require('supertest');
 const app = require('../../src/app');
 const db = require('../helpers/db');
@@ -14,21 +10,21 @@ beforeAll(async () => { await db.connect(); });
 afterAll(async () => { await db.close(); });
 beforeEach(async () => { await db.clear(); f.resetSeq(); });
 
-describe('E2E · POST /api/kiosk/package-checkin (public, no auth)', () => {
-  test('không kèm Authorization header vẫn được xử lý (không phải 401)', async () => {
+describe('E2E · POST /api/kiosk/package-checkin (managed device)', () => {
+  test('missing device token is rejected before business logic', async () => {
     const res = await request(app)
       .post('/api/kiosk/package-checkin')
       .send({ qrCode: 'PLT-unknown' });
 
-    expect(res.status).not.toBe(401);
-    expect(res.status).toBe(404); // KIOSK_QR_NOT_FOUND — qua được auth, fail ở business logic
-    expect(res.body.errorCode || res.body.code).toBeTruthy();
+    expect(res.status).toBe(401);
+    expect(res.body.errorCode || res.body.code).toBe('KIOSK_DEVICE_UNAUTHORIZED');
   });
 
   test('happy path đầy đủ qua HTTP: QR hợp lệ + gói active → 200 + tạo phiên', async () => {
     const building = await f.createBuilding();
     const vt = await f.createVehicleType(building._id);
     const floor = await f.createFloor(building._id);
+    const gate = await f.createGate(building._id, { direction: 'in' });
     const pkg = await f.createPackage(building._id, vt._id);
     const slot = await f.createSlot(building._id, floor._id, {
       usageType: 'subscriber',
@@ -48,7 +44,8 @@ describe('E2E · POST /api/kiosk/package-checkin (public, no auth)', () => {
 
     const res = await request(app)
       .post('/api/kiosk/package-checkin')
-      .send({ qrCode });
+      .set('x-kiosk-device-token', process.env.KIOSK_DEVICE_TOKEN)
+      .send({ qrCode, gate: gate._id });
 
     expect(res.status).toBe(200);
     expect(res.body.data.parkingSession.status).toBe('active');

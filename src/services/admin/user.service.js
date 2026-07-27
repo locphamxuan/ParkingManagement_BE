@@ -3,6 +3,7 @@ const BuildingManager = require("../../models/building/BuildingManager");
 const StaffShift = require("../../models/operations/StaffShift");
 const ParkingSession = require("../../models/operations/ParkingSession");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
+const { Payment, WalletTransaction, Notification } = require('../../models');
 const AppError = require("../../utils/AppError");
 const { ROLES, ROLE_LIST } = require("../../constants/roles");
 const { writeAuditLog } = require("../../utils/audit");
@@ -60,6 +61,13 @@ const create = async (actor, payload) => {
       400
     );
   }
+  if (payload.role === ROLES.ADMIN) {
+    throw new AppError(
+      'Admin accounts are provisioned through the deployment/bootstrap process, not the user-management screen.',
+      403,
+      'ADMIN_PROVISIONING_FORBIDDEN',
+    );
+  }
 
   const exists = await User.exists({ email: payload.email });
   if (exists) throw new AppError("Email already registered", 409);
@@ -115,6 +123,9 @@ const update = async (actor, id, payload) => {
         'USE_ASSIGNMENT_ENDPOINT',
       );
     }
+    if (current.role === ROLES.ADMIN && payload.role !== ROLES.ADMIN) {
+      throw new AppError('Cannot change the role of an admin account', 400, 'ADMIN_ROLE_IMMUTABLE');
+    }
     if (['staff', 'manager'].includes(current.role)) {
       throw new AppError(
         `Cannot change role of a ${current.role} directly. ` +
@@ -125,7 +136,12 @@ const update = async (actor, id, payload) => {
     }
     update.role = payload.role;
   }
-  if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
+  if (payload.isActive !== undefined) {
+    if (current.role === ROLES.ADMIN && !payload.isActive) {
+      throw new AppError('Cannot deactivate an admin account', 400, 'ADMIN_STATUS_IMMUTABLE');
+    }
+    update.isActive = !!payload.isActive;
+  }
 
   const updated = await User.findByIdAndUpdate(id, update, {
     new: true,
@@ -206,6 +222,21 @@ const remove = async (actor, id, { force = false } = {}) => {
       `User has ${activeSubs} active long-term subscription(s). Cancel them first.`,
       409,
       "USER_HAS_ACTIVE_SUBSCRIPTION",
+    );
+  }
+
+  const hasHistoricalRecords = await Promise.all([
+    ParkingSession.exists({ $or: [{ user: id }, { staff: id }] }),
+    LongTermSubscription.exists({ user: id }),
+    Payment.exists({ $or: [{ user: id }, { staff: id }] }),
+    WalletTransaction.exists({ user: id }),
+    Notification.exists({ user: id }),
+  ]);
+  if (hasHistoricalRecords.some(Boolean)) {
+    throw new AppError(
+      'This account has operational or financial history and cannot be deleted. Lock the account instead so audit records remain traceable.',
+      409,
+      'USER_HAS_HISTORY',
     );
   }
 

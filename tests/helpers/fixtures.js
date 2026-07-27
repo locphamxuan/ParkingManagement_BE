@@ -13,6 +13,7 @@ const PricePolicy = require('../../src/models/policy/PricePolicy');
 const LongTermPackage = require('../../src/models/policy/LongTermPackage');
 const Shift = require('../../src/models/operations/Shift');
 const StaffShift = require('../../src/models/operations/StaffShift');
+const Gate = require('../../src/models/building/Gate');
 
 let seq = 0;
 const next = () => (seq += 1);
@@ -149,6 +150,17 @@ const createStaffShift = (buildingId, staffId, shiftId, over = {}) => {
   });
 };
 
+const createGate = (buildingId, over = {}) => {
+  const n = next();
+  return Gate.create({
+    building: buildingId,
+    code: over.code || `G${n}`,
+    name: over.name || `Gate ${n}`,
+    direction: over.direction || 'both',
+    status: over.status || 'active',
+  });
+};
+
 // Tạo user role=manager với assignedBuildings đã gán (in-memory) để qua
 // ensureManagerOwnsBuilding trong các service manager. Không cần lưu assignedBuildings.
 const managerFor = async (buildingIds, over = {}) => {
@@ -172,4 +184,5 @@ module.exports = {
   createPackage,
   createShift,
   createStaffShift,
+  createGate,
 };

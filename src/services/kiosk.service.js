@@ -15,6 +15,8 @@ const {
 } = require('./staff/parkingSession/helpers');
 const { assertBuildingAcceptsEntry } = require('./shared/entryAuthorization.service');
 const { occupyFixedSlotForCheckIn } = require('./shared/slotLifecycle.service');
+const { resolveOperationalGate } = require('./shared/gateAuthorization.service');
+const { assertEvidenceImage } = require('../utils/evidence');
 
 /**
  * Resolve a REGISTERED vehicle QR token (PLT-...) to its canonical plate + owner.
@@ -59,8 +61,8 @@ const resolvePlateFromQr = async ({ qrCode }) => {
 const selfCheckInByQr = async (payload = {}) => {
   const { plateNumber, user: qrOwnerId } = await resolvePlateFromQr(payload);
   const plateRx = plateMatchRegex(plateNumber) || plateNumber;
-  const plateImage = payload.plateImage || null;
-  const portraitImage = payload.portraitImage || null;
+  const plateImage = assertEvidenceImage(payload.plateImage, 'plateImage');
+  const portraitImage = assertEvidenceImage(payload.portraitImage, 'portraitImage');
 
   const session = await mongoose.startSession();
   try {
@@ -91,6 +93,13 @@ const selfCheckInByQr = async (payload = {}) => {
         throw new AppError('Building not found', 404, 'BUILDING_NOT_FOUND');
       }
       assertBuildingAcceptsEntry(building);
+      const entryGate = await resolveOperationalGate({
+        gateId: payload.gate || payload.entryGate || null,
+        buildingId,
+        operation: 'in',
+        mongoSession: session,
+        required: true,
+      });
 
       // Chặn trùng: xe đang có phiên active trong tòa này.
       const duplicate = await ParkingSession.findOne({
@@ -141,7 +150,7 @@ const selfCheckInByQr = async (payload = {}) => {
             plateNumber: subscription.plateNumber,
             user: subscription.user,
             staff: null,
-            entryGate: payload.gate || null,
+            entryGate: entryGate._id,
             fee: 0,
             paymentMethod: 'long_term',
             status: 'active',
@@ -162,6 +171,7 @@ const selfCheckInByQr = async (payload = {}) => {
         after: created[0].toObject(),
         severity: 'low',
         description: `Long-term subscription ${subscription._id} self check-in via kiosk QR`,
+        metadata: { kiosk: true, gateId: `${entryGate._id}` },
       });
 
       return { subscription, parkingSession: created[0] };

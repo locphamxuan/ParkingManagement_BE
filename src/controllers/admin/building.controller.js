@@ -4,6 +4,7 @@ const buildingService = require("../../services/building.service");
 const buildingManagerService = require("../../services/buildingManager.service");
 const gateService = require("../../services/manager/gate.service");
 const LongTermPackage = require('../../models/policy/LongTermPackage');
+const { writeAuditLog } = require('../../utils/audit');
 
 const listBuildings = asyncHandler(async (req, res) => {
   const data = await buildingService.listBuildings(req.query);
@@ -49,10 +50,20 @@ const updateBuildingStatus = asyncHandler(async (req, res) => {
 });
 
 const deleteBuilding = asyncHandler(async (req, res) => {
-  await buildingService.removeBuilding(req.params.id);
+  const building = await buildingService.removeBuilding(req.params.id);
+  await writeAuditLog({
+    actor: req.user,
+    action: 'ARCHIVE_BUILDING',
+    targetTable: 'buildings',
+    targetId: building._id,
+    building: building._id,
+    newValue: { status: building.status, isActive: building.isActive },
+    severity: 'high',
+    description: 'Building archived; operational and financial history retained.',
+  });
   sendSuccess(res, {
-    message: "Building deleted successfully",
-    data: null,
+    message: "Building archived successfully",
+    data: { building },
   });
 });
 

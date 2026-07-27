@@ -77,6 +77,14 @@ paymentSchema.index({ building: 1, createdAt: -1 });
 paymentSchema.index({ parkingSession: 1 });                  // session payment lookup
 paymentSchema.index({ subscription: 1 });                    // subscription payment lookup
 paymentSchema.index({ user: 1, createdAt: -1 });             // user transaction history
+paymentSchema.index(
+  { payosOrderCode: 1 },
+  {
+    unique: true,
+    name: 'uniq_payos_order_code',
+    partialFilterExpression: { payosOrderCode: { $type: 'number' } },
+  },
+);
 
 paymentSchema.pre("findOneAndUpdate", function setSettlementTimeOnUpdate(next) {
   const update = this.getUpdate() || {};

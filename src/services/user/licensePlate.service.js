@@ -40,6 +40,18 @@ const add = async (userId, { plateNumber, vehicleType, brand }) => {
   const duplicate = user.licensePlates.some((p) => normalizePlate(p.plateNumber) === normalized);
   if (duplicate) throw new AppError('Biển số xe đã tồn tại trong danh sách', 409);
 
+  const otherOwner = await User.exists({
+    _id: { $ne: user._id },
+    'licensePlates.plateNumber': plateMatchRegex(normalized) || normalized,
+  });
+  if (otherOwner) {
+    throw new AppError(
+      'This license plate is already linked to another account. Please contact parking support if ownership changed.',
+      409,
+      'PLATE_OWNED_BY_ANOTHER_USER',
+    );
+  }
+
   const updated = await User.findByIdAndUpdate(
     userId,
     { $push: { licensePlates: { plateNumber: normalized, vehicleType: vehicleType || 'car', brand: brand || null, isDefault: false, qrCode: generatePlateQrCode() } } },

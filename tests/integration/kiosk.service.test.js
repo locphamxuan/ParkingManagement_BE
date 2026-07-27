@@ -11,7 +11,7 @@ const LongTermSubscription = require('../../src/models/policy/LongTermSubscripti
 const ParkingSlot = require('../../src/models/building/ParkingSlot');
 const ParkingSession = require('../../src/models/operations/ParkingSession');
 
-let building, vt, floor, user, pkg;
+let building, vt, floor, user, pkg, kioskGate;
 
 beforeAll(async () => { await db.connect(); });
 afterAll(async () => { await db.close(); });
@@ -21,6 +21,7 @@ beforeEach(async () => {
   building = await f.createBuilding();
   vt = await f.createVehicleType(building._id);
   floor = await f.createFloor(building._id);
+  kioskGate = await f.createGate(building._id, { direction: 'in' });
   pkg = await f.createPackage(building._id, vt._id);
 });
 
@@ -75,7 +76,7 @@ describe('kiosk.service.selfCheckInByQr', () => {
   test('QR hợp lệ + gói active + slot cố định trống → tạo phiên, gán đúng slot cố định, fee=0', async () => {
     const { dedicatedSlot, qrCode, subscription } = await seedSubscriberWithDedicatedSlot();
 
-    const result = await kioskSvc.selfCheckInByQr({ qrCode });
+    const result = await kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id });
 
     expect(result.parkingSession.status).toBe('active');
     expect(result.parkingSession.fee).toBe(0);
@@ -92,7 +93,7 @@ describe('kiosk.service.selfCheckInByQr', () => {
     await dedicatedSlot.save();
     await f.createSlot(building._id, floor._id, { usageType: 'subscriber', vehicleType: vt._id });
 
-    await expect(kioskSvc.selfCheckInByQr({ qrCode })).rejects.toMatchObject({
+    await expect(kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id })).rejects.toMatchObject({
       statusCode: 409, errorCode: 'FIXED_SLOT_OCCUPIED',
     });
   });
@@ -102,7 +103,7 @@ describe('kiosk.service.selfCheckInByQr', () => {
     dedicatedSlot.status = 'occupied';
     await dedicatedSlot.save();
 
-    await expect(kioskSvc.selfCheckInByQr({ qrCode })).rejects.toMatchObject({
+    await expect(kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id })).rejects.toMatchObject({
       statusCode: 409, errorCode: 'FIXED_SLOT_OCCUPIED',
     });
   });
@@ -114,7 +115,7 @@ describe('kiosk.service.selfCheckInByQr', () => {
       entryTime: new Date(),
     });
 
-    await expect(kioskSvc.selfCheckInByQr({ qrCode })).rejects.toMatchObject({
+    await expect(kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id })).rejects.toMatchObject({
       statusCode: 409, errorCode: 'DUPLICATE_PLATE',
     });
     expect(await ParkingSession.countDocuments({ plateNumber: '51F-777.77', status: 'active' })).toBe(1);

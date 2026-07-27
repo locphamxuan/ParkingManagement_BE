@@ -15,9 +15,11 @@ const {
   assertBuildingAcceptsEntry,
   assertStaffHasActiveShift,
 } = require('../../shared/entryAuthorization.service');
+const { resolveOperationalGate } = require('../../shared/gateAuthorization.service');
 const {
   occupyFixedSlotForCheckIn,
 } = require('../../shared/slotLifecycle.service');
+const { assertEvidenceImage } = require('../../../utils/evidence');
 const {
   resolveVehicleTypeId,
   vehicleKindFromType,
@@ -70,7 +72,7 @@ const checkIn = async (user, payload) => {
         : null;
       const isMotorcycle = vehicleKindFromType(vehicleTypeRecord) === 'motorcycle';
       const requestedZoneId = asObjectId(payload?.zone || payload?.zoneId);
-      const gate = asObjectId(payload?.gate);
+      const requestedGateId = payload?.gate || payload?.entryGate || null;
       const forceCheckIn = Boolean(payload?.forceCheckIn);
       const vehicleBrand = payload?.vehicleBrand
         ? `${payload.vehicleBrand}`.trim()
@@ -79,8 +81,15 @@ const checkIn = async (user, payload) => {
       //  1) Camera chân dung → portraitImage (tài xế) — BẮT BUỘC mọi check-in.
       //  2) Camera biển số   → plateImage.
       //  3) Camera QR account/phương tiện → resolve qua endpoint riêng (không lưu ảnh).
-      const plateImage = payload?.plateImage || null;
-      const portraitImage = payload?.portraitImage || null;
+      const plateImage = assertEvidenceImage(payload?.plateImage, 'plateImage', { required: true });
+      if (!payload?.portraitImage) {
+        throw new AppError(
+          'A driver portrait photo is required to verify the person at pickup',
+          400,
+          'PORTRAIT_REQUIRED',
+        );
+      }
+      const portraitImage = assertEvidenceImage(payload?.portraitImage, 'portraitImage', { required: true });
 
       if (!buildingId) {
         throw new AppError('building is required', 400);
@@ -103,14 +112,17 @@ const checkIn = async (user, payload) => {
         authorizationTime,
         session,
       );
+      const entryGate = await resolveOperationalGate({
+        gateId: requestedGateId,
+        buildingId,
+        operation: 'in',
+        assignedGateId: activeStaffShift.gate?._id || activeStaffShift.gate || null,
+        mongoSession: session,
+      });
 
       // Ảnh CHÂN DUNG bắt buộc cho MỌI check-in (kể cả gói) để đối chiếu người khi lấy
       // xe. Ảnh BIỂN SỐ bắt buộc thêm với khách vãng lai / user thường (kiểm tra ở
       // dưới); gói định danh bằng quét biển/QR nên không bắt ảnh biển.
-      if (!portraitImage) {
-        throw new AppError('A driver portrait photo is required to verify the person at pickup', 400, 'PORTRAIT_REQUIRED');
-      }
-
       // Nhận diện gói dài hạn sớm (qua biển số lấy từ QR phương tiện hoặc nhập tay).
       const longTerm = await resolveLongTermSubscription(plateNumber, allowedBuildings, session);
 
@@ -202,7 +214,7 @@ const checkIn = async (user, payload) => {
             vehicleBrand,
             plateImage,
             portraitImage,
-            entryGate: gate,
+            entryGate: entryGate?._id || null,
             slot: ltSlotId,
             note: `long_term:${longTerm._id}`,
           }],
@@ -252,11 +264,44 @@ const checkIn = async (user, payload) => {
 
       // Link the session to the plate's owner account when one exists (account is
       // the secondary identifier). Format-tolerant so 59G2-03880 / 59G2-038.80 match.
-      const registeredOwner = await User.findOne({
+      const registeredOwners = await User.find({
         'licensePlates.plateNumber': plateMatchRegex(plateNumber) || plateNumber,
       })
-        .select('_id')
+        .select('_id licensePlates')
         .session(session);
+      if (registeredOwners.length > 1) {
+        throw new AppError(
+          'This license plate is linked to multiple accounts and must be resolved by an administrator',
+          409,
+          'DUPLICATE_PLATE_OWNERSHIP',
+        );
+      }
+      const registeredOwner = registeredOwners[0] || null;
+      const registeredPlate = registeredOwner?.licensePlates?.find(
+        (item) => normalizePlate(item.plateNumber) === plateNumber,
+      );
+      if (registeredPlate) {
+        const registeredKind = ['motorcycle', 'ebike', 'emotorbike'].includes(registeredPlate.vehicleType)
+          ? 'motorcycle'
+          : 'car';
+        const detectedKind = vehicleKindFromType(vehicleTypeRecord);
+        if (detectedKind && registeredKind !== detectedKind) {
+          if (!forceCheckIn) {
+            throw new AppError(
+              `Vehicle type does not match registration (registered: ${registeredKind}).`,
+              409,
+              'VEHICLE_TYPE_MISMATCH',
+            );
+          }
+          if (!`${payload?.overrideReason || ''}`.trim()) {
+            throw new AppError(
+              'An override reason is required when the vehicle type differs from registration',
+              400,
+              'OVERRIDE_REASON_REQUIRED',
+            );
+          }
+        }
+      }
 
       // Đối tượng của lượt check-in (để khớp dãy/slot): có tài khoản → 'registered',
       // còn lại → 'walk_in'.
@@ -343,7 +388,7 @@ const checkIn = async (user, payload) => {
           vehicleBrand,
           plateImage,
           portraitImage,
-          entryGate: gate,
+          entryGate: entryGate?._id || null,
           note: duplicate && forceCheckIn ? 'duplicate_bypassed' : '',
         }],
         { session },
@@ -380,6 +425,7 @@ const checkIn = async (user, payload) => {
           plateNumber,
           duplicatePlateWarning: Boolean(duplicate),
           forceCheckIn,
+          overrideReason: forceCheckIn ? `${payload?.overrideReason || ''}`.trim() || null : null,
           slotUsageBypassed: walkInSlotUsageBypassed,
           bypassedSlotUsageType: walkInBypassedSlotUsageType,
           staffShiftId: `${activeStaffShift._id}`,
