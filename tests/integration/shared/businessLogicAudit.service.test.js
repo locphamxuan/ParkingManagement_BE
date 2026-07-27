@@ -84,7 +84,8 @@ test('dirty and ambiguous dataset reports categories with sample IDs', async () 
     status: 'active',
     paymentMethod: 'long_term',
   });
-  await Payment.collection.dropIndexes().catch(() => {});
+  await Payment.init();
+  await Payment.collection.dropIndex('uniq_payos_order_code');
   await Payment.collection.insertMany([
     {
       type: 'session',
