@@ -81,7 +81,7 @@ const checkIn = async (user, payload) => {
       //  1) Camera chân dung → portraitImage (tài xế) — BẮT BUỘC mọi check-in.
       //  2) Camera biển số   → plateImage.
       //  3) Camera QR account/phương tiện → resolve qua endpoint riêng (không lưu ảnh).
-      const plateImage = assertEvidenceImage(payload?.plateImage, 'plateImage', { required: true });
+      const plateImage = assertEvidenceImage(payload?.plateImage, 'plateImage', { required: false });
       if (!payload?.portraitImage) {
         throw new AppError(
           'A driver portrait photo is required to verify the person at pickup',

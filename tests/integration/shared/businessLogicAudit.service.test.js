@@ -84,7 +84,8 @@ test('dirty and ambiguous dataset reports categories with sample IDs', async () 
     status: 'active',
     paymentMethod: 'long_term',
   });
-  await Payment.create([
+  await Payment.collection.dropIndexes().catch(() => {});
+  await Payment.collection.insertMany([
     {
       type: 'session',
       method: 'payos',
@@ -92,6 +93,8 @@ test('dirty and ambiguous dataset reports categories with sample IDs', async () 
       status: 'pending',
       parkingSession: parkingSession._id,
       payosOrderCode: 990001,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     },
     {
       type: 'session',
@@ -100,6 +103,8 @@ test('dirty and ambiguous dataset reports categories with sample IDs', async () 
       status: 'pending',
       parkingSession: parkingSession._id,
       payosOrderCode: 990001,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     },
   ]);
   const staff = await f.createUser({ role: 'staff' });
