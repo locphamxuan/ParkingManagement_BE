@@ -1,12 +1,6 @@
 const AppError = require('../../utils/AppError');
 const buildingRepository = require('../../repositories/building.repository');
-
-const normalizeBuildingId = (building) => `${building._id || building}`;
-
-const getAssignedBuildingIds = (user) =>
-  Array.isArray(user?.assignedBuildings)
-    ? user.assignedBuildings.map((building) => normalizeBuildingId(building))
-    : [];
+const { getAssignedBuildingIds } = require('../../utils/managerScope');
 
 const fetchAssignedBuildings = async (user) => {
   const assignedIds = getAssignedBuildingIds(user);

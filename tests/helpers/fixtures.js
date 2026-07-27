@@ -13,6 +13,7 @@ const PricePolicy = require('../../src/models/policy/PricePolicy');
 const LongTermPackage = require('../../src/models/policy/LongTermPackage');
 const Shift = require('../../src/models/operations/Shift');
 const StaffShift = require('../../src/models/operations/StaffShift');
+const Gate = require('../../src/models/building/Gate');
 
 let seq = 0;
 const next = () => (seq += 1);
@@ -131,8 +132,8 @@ const createShift = (buildingId, over = {}) => {
     building: buildingId,
     name: over.name || `Shift ${n}`,
     code: over.code || `SH${n}`,
-    startTime: over.startTime || '06:00',
-    endTime: over.endTime || '14:00',
+    startTime: over.startTime || '00:00',
+    endTime: over.endTime || '23:59',
     isActive: over.isActive ?? true,
   });
 };
@@ -146,6 +147,17 @@ const createStaffShift = (buildingId, staffId, shiftId, over = {}) => {
     workDate: over.workDate || today,
     status: over.status || 'active',
     ...(over.gate ? { gate: over.gate } : {}),
+  });
+};
+
+const createGate = (buildingId, over = {}) => {
+  const n = next();
+  return Gate.create({
+    building: buildingId,
+    code: over.code || `G${n}`,
+    name: over.name || `Gate ${n}`,
+    direction: over.direction || 'both',
+    status: over.status || 'active',
   });
 };
 
@@ -172,4 +184,5 @@ module.exports = {
   createPackage,
   createShift,
   createStaffShift,
+  createGate,
 };

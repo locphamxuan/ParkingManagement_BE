@@ -24,6 +24,9 @@ const env = {
   esmsApiKey: process.env.ESMS_API_KEY || null,
   esmsSecretKey: process.env.ESMS_SECRET_KEY || null,
   esmsBrandname: process.env.ESMS_BRANDNAME || null,
+  // Secret provisioned on each managed gate kiosk. It is deliberately not a
+  // browser-visible value; a kiosk without it cannot create parking sessions.
+  kioskDeviceToken: process.env.KIOSK_DEVICE_TOKEN || null,
 };
 
 const required = ['mongodbUri', 'jwtSecret', 'payosClientId', 'payosApiKey', 'payosChecksumKey'];

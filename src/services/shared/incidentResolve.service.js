@@ -83,7 +83,7 @@ const settlePendingPenaltyAtCheckout = async (staffUser, parkingSession, payment
 
   const [payment] = await Payment.create([{
     building: parkingSession.building,
-    type: 'session',
+    type: 'penalty',
     method: paymentMethod,
     amount: penaltyFee,
     status: isCashPending ? 'pending' : 'success',
@@ -95,7 +95,7 @@ const settlePendingPenaltyAtCheckout = async (staffUser, parkingSession, payment
   }], { session: mongoSession });
 
   if (penaltyFee > 0 && !isCashPending) {
-    await buildingWalletService.credit(parkingSession.building, penaltyFee, 'parking_fee', payment._id, mongoSession);
+    await buildingWalletService.credit(parkingSession.building, penaltyFee, 'penalty_fee', payment._id, mongoSession);
   }
 
   incident.status = 'resolved';
@@ -105,14 +105,28 @@ const settlePendingPenaltyAtCheckout = async (staffUser, parkingSession, payment
   incident.resolvedAt = new Date();
   await incident.save({ session: mongoSession });
 
-  await Notification.create([{
+  const notificationsToCreate = [{
     user: incident.reportedBy,
     type: 'incident_resolved',
     title: 'Your incident has been resolved',
     message: `Incident ${incident.code} has been resolved — the violator was charged a ${penaltyFee.toLocaleString('en-US')} VND penalty fee at checkout.`,
     building: incident.building,
     isRead: false,
-  }], { session: mongoSession });
+  }];
+
+  if (parkingSession.user && String(parkingSession.user) !== String(incident.reportedBy)) {
+    notificationsToCreate.push({
+      user: parkingSession.user,
+      type: 'incident_resolved',
+      title: 'Violation Penalty Collected',
+      message: `A penalty fee of ${penaltyFee.toLocaleString('vi-VN')} VND for violation (${incident.type}) on vehicle ${parkingSession.plateNumber} was settled upon checkout.`,
+      building: parkingSession.building,
+      plateNumber: parkingSession.plateNumber,
+      isRead: false,
+    });
+  }
+
+  await Notification.insertMany(notificationsToCreate, { session: mongoSession });
 
   return payment;
 };
@@ -248,10 +262,10 @@ const applyIncidentAction = async (actorUser, incident, payload = {}) => {
         .populate(POPULATE_REPORTER)
         .populate(POPULATE_RESOLVER);
 
-      // Thông báo cho người báo cáo về tiến triển / kết quả xử lý.
+      // Thông báo cho người báo cáo và chủ xe vi phạm (nếu có tài khoản).
       const isDone = update.status === 'resolved' || update.status === 'closed';
       const isPenaltyPending = update.status === 'penalty_pending';
-      await Notification.create([{
+      const notificationsToCreate = [{
         user: incident.reportedBy,
         type: isDone ? 'incident_resolved' : 'incident_update',
         title: isDone ? 'Your incident has been resolved' : 'Your incident is being handled',
@@ -262,7 +276,30 @@ const applyIncidentAction = async (actorUser, incident, payload = {}) => {
             : `Incident ${incident.code} status: ${update.status || incident.status}.`,
         building: incident.building,
         isRead: false,
-      }], { session: mongoSession });
+      }];
+
+      if (isPenaltyPending && update.violatorPlate) {
+        const violatorRx = plateMatchRegex(update.violatorPlate) || update.violatorPlate;
+        const [violatorSub, violatorSession] = await Promise.all([
+          LongTermSubscription.findOne({ plateNumber: violatorRx, building: incident.building }).select('user').session(mongoSession),
+          ParkingSession.findOne({ plateNumber: violatorRx, building: incident.building, user: { $ne: null } }).select('user').session(mongoSession),
+        ]);
+
+        const violatorUserId = violatorSub?.user || violatorSession?.user;
+        if (violatorUserId && String(violatorUserId) !== String(incident.reportedBy)) {
+          notificationsToCreate.push({
+            user: violatorUserId,
+            type: 'incident_update',
+            title: 'Penalty Fee Approved for Vehicle',
+            message: `A violation (${incident.type}) for vehicle ${update.violatorPlate} was recorded. A penalty fee of ${update.penaltyFee.toLocaleString('vi-VN')} VND has been approved and will be collected upon checkout.`,
+            building: incident.building,
+            plateNumber: update.violatorPlate,
+            isRead: false,
+          });
+        }
+      }
+
+      await Notification.insertMany(notificationsToCreate, { session: mongoSession });
 
       result = { item: updated };
     });

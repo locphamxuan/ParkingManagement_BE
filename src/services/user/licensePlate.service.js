@@ -1,8 +1,10 @@
 const mongoose = require('mongoose');
 const User = require('../../models/user/User');
 const { generatePlateQrCode } = require('../../models/user/User');
+const LongTermSubscription = require('../../models/policy/LongTermSubscription');
+const ParkingSession = require('../../models/operations/ParkingSession');
 const AppError = require('../../utils/AppError');
-const { normalizePlate, isValidVietnamPlate } = require('../../utils/plate.util');
+const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../utils/plate.util');
 
 const MAX_PLATES_PER_USER = 5;
 
@@ -38,6 +40,18 @@ const add = async (userId, { plateNumber, vehicleType, brand }) => {
   const duplicate = user.licensePlates.some((p) => normalizePlate(p.plateNumber) === normalized);
   if (duplicate) throw new AppError('Biển số xe đã tồn tại trong danh sách', 409);
 
+  const otherOwner = await User.exists({
+    _id: { $ne: user._id },
+    'licensePlates.plateNumber': plateMatchRegex(normalized) || normalized,
+  });
+  if (otherOwner) {
+    throw new AppError(
+      'This license plate is already linked to another account. Please contact parking support if ownership changed.',
+      409,
+      'PLATE_OWNED_BY_ANOTHER_USER',
+    );
+  }
+
   const updated = await User.findByIdAndUpdate(
     userId,
     { $push: { licensePlates: { plateNumber: normalized, vehicleType: vehicleType || 'car', brand: brand || null, isDefault: false, qrCode: generatePlateQrCode() } } },
@@ -48,6 +62,36 @@ const add = async (userId, { plateNumber, vehicleType, brand }) => {
 };
 
 const update = async (userId, plateId, { vehicleType }) => {
+  const owner = await User.findOne({ _id: userId, 'licensePlates._id': plateId })
+    .select('licensePlates');
+  const plate = owner?.licensePlates?.id(plateId);
+  if (!plate) throw new AppError('License plate not found', 404);
+
+  if (vehicleType && vehicleType !== plate.vehicleType) {
+    const now = new Date();
+    const [hasActiveSubscription, hasActiveSession] = await Promise.all([
+      LongTermSubscription.exists({
+        user: userId,
+        plateNumber: plateMatchRegex(plate.plateNumber),
+        status: 'active',
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+      }),
+      ParkingSession.exists({
+        user: userId,
+        plateNumber: plateMatchRegex(plate.plateNumber),
+        status: 'active',
+      }),
+    ]);
+    if (hasActiveSubscription || hasActiveSession) {
+      throw new AppError(
+        'Cannot change vehicle type while this plate has an active package or parking session',
+        409,
+        'VEHICLE_TYPE_CONFLICT',
+      );
+    }
+  }
+
   const result = await User.findOneAndUpdate(
     { _id: userId, 'licensePlates._id': plateId },
     { $set: { 'licensePlates.$.vehicleType': vehicleType } },
@@ -61,7 +105,38 @@ const update = async (userId, plateId, { vehicleType }) => {
 const remove = async (userId, plateId) => {
   const user = await User.findById(userId).select('licensePlates');
   if (!user) throw new AppError('User not found', 404);
-  if (!user.licensePlates.id(plateId)) throw new AppError('Biển số xe không tìm thấy', 404);
+  const plate = user.licensePlates.id(plateId);
+  if (!plate) throw new AppError('License plate not found', 404);
+
+  const now = new Date();
+  const [hasActiveSubscription, hasActiveSession] = await Promise.all([
+    LongTermSubscription.exists({
+      user: userId,
+      plateNumber: plateMatchRegex(plate.plateNumber),
+      status: 'active',
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+    }),
+    ParkingSession.exists({
+      user: userId,
+      plateNumber: plateMatchRegex(plate.plateNumber),
+      status: 'active',
+    }),
+  ]);
+  if (hasActiveSubscription) {
+    throw new AppError(
+      'Cannot remove a plate with an active long-term package',
+      409,
+      'PLATE_HAS_ACTIVE_SUBSCRIPTION',
+    );
+  }
+  if (hasActiveSession) {
+    throw new AppError(
+      'Cannot remove a plate with an active parking session',
+      409,
+      'PLATE_HAS_ACTIVE_SESSION',
+    );
+  }
 
   const result = await User.findByIdAndUpdate(
     userId,

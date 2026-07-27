@@ -16,7 +16,7 @@ const PricePolicy = require('../src/models/policy/PricePolicy');
 const ReservationPolicy = require('../src/models/policy/ReservationPolicy');
 const LongTermPackage = require('../src/models/policy/LongTermPackage');
 const LongTermSubscription = require('../src/models/policy/LongTermSubscription');
-const { ParkingSession, StaffShift } = require('../src/models');
+const { ParkingSession, Shift, StaffShift } = require('../src/models');
 
 const svc = require('../src/services/staff/parkingSession.service');
 
@@ -35,17 +35,25 @@ const seedBase = async () => {
   const building = await Building.create({
     name: 'B1', code: 'B1', totalFloors: 1, pricing: { hourlyRate: RATE },
     // Mở 24/24 để test không flaky theo giờ chạy (mặc định 06:00–22:00 sẽ chặn check-in ban đêm).
-    operatingHours: { open: '00:00', close: '24:00' },
+    operatingHours: { open: '00:00', close: '23:59' },
   });
   const vt = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô' });
   const floor = await Floor.create({ building: building._id, code: 'F1', name: 'Floor 1', capacity: 100 });
   await PricePolicy.create({ building: building._id, vehicleType: vt._id, name: 'Reg', type: 'regular', hourlyRate: RATE });
   await ReservationPolicy.create({ building: building._id });
   const staff = { _id: new mongoose.Types.ObjectId(), assignedBuildings: [building._id] };
+  const shift = await Shift.create({
+    building: building._id,
+    name: 'All day',
+    code: 'ALL',
+    startTime: '00:00',
+    endTime: '23:59',
+    isActive: true,
+  });
   // Check-in/out yêu cầu nhân viên có ca làm việc HÔM NAY tại tòa nhà.
   await StaffShift.create({
-    staff: staff._id, building: building._id, shift: new mongoose.Types.ObjectId(),
-    workDate: new Date(), status: 'scheduled',
+    staff: staff._id, building: building._id, shift: shift._id,
+    workDate: new Date(), status: 'active',
   });
   return { building, vt, floor, staff };
 };
@@ -63,12 +71,11 @@ describe('Walk-in (khách vãng lai)', () => {
     ).rejects.toMatchObject({ errorCode: 'PORTRAIT_REQUIRED' });
   });
 
-  test('vãng lai có chân dung nhưng thiếu ảnh biển → PLATE_IMAGE_REQUIRED', async () => {
+  test('vãng lai có chân dung nhưng không có ảnh biển → vẫn cho phép check-in', async () => {
     const { building, staff } = await seedBase();
     await ParkingSlot.create({ building: building._id, floor: (await Floor.findOne())._id, code: 'A1' });
-    await expect(
-      svc.checkIn(staff, { building: building._id, plateNumber: '59G2-10000', vehicleType: 'car', portraitImage: 'FACE_IN' }),
-    ).rejects.toMatchObject({ errorCode: 'PLATE_IMAGE_REQUIRED' });
+    const session = await svc.checkIn(staff, { building: building._id, plateNumber: '59G2-10000', vehicleType: 'car', portraitImage: 'FACE_IN' });
+    expect(session.plateNumber).toBe('59G2-100.00');
   });
 
   test('đủ ảnh → tạo session; checkout lưu ảnh ra + tính phí theo policy', async () => {

@@ -60,7 +60,7 @@ describe('checkIn (walk-in)', () => {
     other.assignedBuildings = [building._id];
     await expect(checkIn(other, {
       building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG,
-    })).rejects.toMatchObject({ errorCode: 'NO_SHIFT_ASSIGNED' });
+    })).rejects.toMatchObject({ errorCode: 'NO_ACTIVE_SHIFT' });
   });
 
   test('ngoài phạm vi tòa nhà được gán → 403', async () => {

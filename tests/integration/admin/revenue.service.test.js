@@ -38,4 +38,48 @@ describe('getReport', () => {
     const report = await svc.getReport({ from, to, buildingId: building._id });
     expect(report.grandTotal).toBe(50000);
   });
+
+  test('separates gross, refunds, net, pending cash and wallet funding', async () => {
+    await Payment.create([
+      { building: building._id, type: 'session', method: 'wallet', amount: 100000, status: 'success' },
+      { building: building._id, type: 'penalty', method: 'cash', amount: 25000, status: 'success' },
+      { building: building._id, type: 'refund', method: 'wallet', amount: 30000, status: 'success' },
+      { building: building._id, type: 'session', method: 'cash', amount: 40000, status: 'pending' },
+      { building: building._id, type: 'topup', method: 'payos', amount: 500000, status: 'success' },
+    ]);
+
+    const report = await svc.getReport({ from, to, buildingId: building._id });
+
+    expect(report.summary).toMatchObject({
+      grossRevenue: 125000,
+      refunds: 30000,
+      netRevenue: 95000,
+      pendingCash: 40000,
+      walletFunding: 500000,
+      successfulPayments: 2,
+      pendingCashPayments: 1,
+    });
+    expect(report.items[0].bySource).toMatchObject({
+      parking: 100000,
+      penalty: 25000,
+    });
+  });
+
+  test('a pending payment receives settledAt when it is confirmed', async () => {
+    const payment = await Payment.create({
+      building: building._id,
+      type: 'session',
+      method: 'cash',
+      amount: 20000,
+      status: 'pending',
+    });
+    expect(payment.settledAt).toBeNull();
+
+    const settled = await Payment.findOneAndUpdate(
+      { _id: payment._id, status: 'pending' },
+      { $set: { status: 'success' } },
+      { new: true },
+    );
+    expect(settled.settledAt).toBeInstanceOf(Date);
+  });
 });

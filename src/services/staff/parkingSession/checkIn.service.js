@@ -4,13 +4,25 @@ const buildingRepository = require('../../../repositories/building.repository');
 const {
   ParkingSession,
   ParkingSlot,
+  VehicleType,
+  Zone,
   User,
-  StaffShift,
+  Notification,
 } = require('../../../models');
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, plateMatchRegex } = require('../../../utils/plate.util');
 const {
+  assertBuildingAcceptsEntry,
+  assertStaffHasActiveShift,
+} = require('../../shared/entryAuthorization.service');
+const { resolveOperationalGate } = require('../../shared/gateAuthorization.service');
+const {
+  occupyFixedSlotForCheckIn,
+} = require('../../shared/slotLifecycle.service');
+const { assertEvidenceImage } = require('../../../utils/evidence');
+const {
   resolveVehicleTypeId,
+  vehicleKindFromType,
   asObjectId,
   findDuplicateActiveSession,
   resolveLongTermSubscription,
@@ -32,6 +44,20 @@ const isSlotUsageCompatible = (slot, usageType) => {
   return true;
 };
 
+const resolveSelectedZone = async ({ zoneId, buildingId, vehicleType, usageType, mongoSession, forceCheckIn }) => {
+  if (!zoneId) return null;
+
+  const zone = await Zone.findOne({ _id: zoneId, building: buildingId }).session(mongoSession);
+  if (!zone) throw new AppError('Invalid zone', 400, 'INVALID_ZONE');
+  if (vehicleType && zone.vehicleType && String(zone.vehicleType) !== String(vehicleType)) {
+    throw new AppError('The selected zone is not configured for this vehicle type', 409, 'ZONE_VEHICLE_TYPE_MISMATCH');
+  }
+  if (!isSlotUsageCompatible(zone, usageType) && !forceCheckIn) {
+    throw new AppError('The selected zone is not allowed for this customer type', 409, 'ZONE_USAGE_MISMATCH');
+  }
+  return zone;
+};
+
 const checkIn = async (user, payload) => {
   const session = await mongoose.startSession();
   try {
@@ -41,7 +67,12 @@ const checkIn = async (user, payload) => {
       // FE sends 'car'/'motorcycle'; resolve to the building's VehicleType _id so
       // pricing (by vehicle type) and reporting work. Falls back to null if unset.
       const vehicleType = await resolveVehicleTypeId(buildingId, payload?.vehicleType, session);
-      const gate = asObjectId(payload?.gate);
+      const vehicleTypeRecord = vehicleType
+        ? await VehicleType.findById(vehicleType).session(session)
+        : null;
+      const isMotorcycle = vehicleKindFromType(vehicleTypeRecord) === 'motorcycle';
+      const requestedZoneId = asObjectId(payload?.zone || payload?.zoneId);
+      const requestedGateId = payload?.gate || payload?.entryGate || null;
       const forceCheckIn = Boolean(payload?.forceCheckIn);
       const vehicleBrand = payload?.vehicleBrand
         ? `${payload.vehicleBrand}`.trim()
@@ -50,8 +81,15 @@ const checkIn = async (user, payload) => {
       //  1) Camera chân dung → portraitImage (tài xế) — BẮT BUỘC mọi check-in.
       //  2) Camera biển số   → plateImage.
       //  3) Camera QR account/phương tiện → resolve qua endpoint riêng (không lưu ảnh).
-      const plateImage = payload?.plateImage || null;
-      const portraitImage = payload?.portraitImage || null;
+      const plateImage = assertEvidenceImage(payload?.plateImage, 'plateImage', { required: false });
+      if (!payload?.portraitImage) {
+        throw new AppError(
+          'A driver portrait photo is required to verify the person at pickup',
+          400,
+          'PORTRAIT_REQUIRED',
+        );
+      }
+      const portraitImage = assertEvidenceImage(payload?.portraitImage, 'portraitImage', { required: true });
 
       if (!buildingId) {
         throw new AppError('building is required', 400);
@@ -66,42 +104,27 @@ const checkIn = async (user, payload) => {
         throw new AppError('Building not found', 404);
       }
 
-      // Validate giờ hoạt động của tòa nhà
-      if (building.operatingHours?.open && building.operatingHours?.close) {
-        const now = new Date();
-        const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        if (hhmm < building.operatingHours.open || hhmm >= building.operatingHours.close) {
-          throw new AppError(
-            `Tòa nhà ngoài giờ hoạt động (${building.operatingHours.open}–${building.operatingHours.close})`,
-            400,
-            'BUILDING_CLOSED',
-          );
-        }
-      }
-
-      // Chỉ cần nhân viên có ca HÔM NAY là được check-in (không còn ràng buộc theo
-      // HƯỚNG cổng của ca — gate.direction chỉ là cấu hình vật lý + gợi ý tab ở FE).
-      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-      const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
-      const todayShifts = await StaffShift.find({
-        staff: user._id,
-        building: buildingId,
-        workDate: { $gte: todayStart, $lte: todayEnd },
-        status: { $in: ['active', 'scheduled'] },
-      }).session(session);
-      if (!todayShifts.length) {
-        throw new AppError('You have not been assigned a shift today', 403, 'NO_SHIFT_ASSIGNED');
-      }
+      const authorizationTime = new Date();
+      assertBuildingAcceptsEntry(building, authorizationTime);
+      const activeStaffShift = await assertStaffHasActiveShift(
+        user._id,
+        buildingId,
+        authorizationTime,
+        session,
+      );
+      const entryGate = await resolveOperationalGate({
+        gateId: requestedGateId,
+        buildingId,
+        operation: 'in',
+        assignedGateId: activeStaffShift.gate?._id || activeStaffShift.gate || null,
+        mongoSession: session,
+      });
 
       // Ảnh CHÂN DUNG bắt buộc cho MỌI check-in (kể cả gói) để đối chiếu người khi lấy
       // xe. Ảnh BIỂN SỐ bắt buộc thêm với khách vãng lai / user thường (kiểm tra ở
       // dưới); gói định danh bằng quét biển/QR nên không bắt ảnh biển.
-      if (!portraitImage) {
-        throw new AppError('A driver portrait photo is required to verify the person at pickup', 400, 'PORTRAIT_REQUIRED');
-      }
-
       // Nhận diện gói dài hạn sớm (qua biển số lấy từ QR phương tiện hoặc nhập tay).
-      const longTerm = await resolveLongTermSubscription(plateNumber, allowedBuildings);
+      const longTerm = await resolveLongTermSubscription(plateNumber, allowedBuildings, session);
 
       // Gói floating: không còn slot cố định → mọi xe (kể cả gói) đều theo capacity.
       const { totalSlots, activeSessions } = await findCapacityForBuilding(buildingId);
@@ -124,21 +147,23 @@ const checkIn = async (user, payload) => {
         // staff xử lý (user có thể báo sự cố).
         const fixedSlotId = longTerm.slot?._id || longTerm.slot || null;
         if (fixedSlotId) {
-          ltSlot = await ParkingSlot.findById(fixedSlotId).session(session);
-          if (!ltSlot) {
-            throw new AppError('Invalid slot', 400, 'INVALID_SLOT');
-          }
-          if (ltSlot.status === 'maintenance') {
-            throw new AppError('Assigned slot is under maintenance', 409, 'SLOT_MAINTENANCE_NOT_AVAILABLE');
-          }
-          if (ltSlot.status === 'occupied') {
-            throw new AppError('Your reserved slot is currently occupied by another vehicle', 409, 'FIXED_SLOT_OCCUPIED');
-          }
+          ltSlot = await occupyFixedSlotForCheckIn(longTerm, buildingId, session);
           ltSlotId = ltSlot._id;
         } else {
+          const selectedZone = await resolveSelectedZone({
+            zoneId: requestedZoneId,
+            buildingId,
+            vehicleType,
+            usageType: 'subscriber',
+            mongoSession: session,
+            forceCheckIn,
+          });
           // Gói floating: gán 1 slot trống thuộc dãy "subscriber" + đúng loại xe.
           // Staff chọn → validate tương thích; không chọn → tự gợi ý slot phù hợp.
-          ltSlotId = asObjectId(payload?.slot || payload?.slotId);
+          ltSlotId = isMotorcycle ? null : asObjectId(payload?.slot || payload?.slotId);
+          if (selectedZone && !isMotorcycle && !ltSlotId) {
+            throw new AppError('Please select a parking slot in the selected zone', 400, 'SLOT_REQUIRED');
+          }
           if (ltSlotId) {
             ltSlot = await ParkingSlot.findById(ltSlotId).session(session);
             if (!ltSlot || (ltSlot.building && String(ltSlot.building) !== String(buildingId))) {
@@ -147,6 +172,9 @@ const checkIn = async (user, payload) => {
             if (ltSlot.status !== 'available') {
               throw new AppError('The slot is occupied or unavailable', 409, 'SLOT_NOT_AVAILABLE');
             }
+            if (selectedZone && String(ltSlot.zone) !== String(selectedZone._id)) {
+              throw new AppError('The selected slot does not belong to the selected zone', 409, 'SLOT_ZONE_MISMATCH');
+            }
             if (!isSlotUsageCompatible(ltSlot, 'subscriber')) {
               if (!forceCheckIn) {
                 throw new AppError('The slot is not in a zone for long-term packages', 409, 'SLOT_USAGE_MISMATCH');
@@ -154,16 +182,24 @@ const checkIn = async (user, payload) => {
               ltSlotUsageBypassed = true;
             }
           } else {
-            const [suggested] = await findCompatibleSlots(buildingId, vehicleType, 'subscriber', session);
+            const [suggested] = await findCompatibleSlots(
+              buildingId, vehicleType, 'subscriber', session, selectedZone?._id || null,
+            );
             if (!suggested) {
-              throw new AppError('No suitable slot available for the package vehicle', 409, 'SLOT_REQUIRED_FOR_LONG_TERM');
+              throw new AppError(
+                selectedZone ? 'No suitable slot is available in the selected zone' : 'No suitable slot available for the package vehicle',
+                409,
+                'SLOT_REQUIRED_FOR_LONG_TERM',
+              );
             }
             ltSlot = suggested;
             ltSlotId = suggested._id;
           }
         }
-        ltSlot.status = 'occupied';
-        await ltSlot.save({ session });
+        if (!fixedSlotId) {
+          ltSlot.status = 'occupied';
+          await ltSlot.save({ session });
+        }
 
         const created = await ParkingSession.create(
           [{
@@ -178,12 +214,28 @@ const checkIn = async (user, payload) => {
             vehicleBrand,
             plateImage,
             portraitImage,
-            entryGate: gate,
+            entryGate: entryGate?._id || null,
             slot: ltSlotId,
             note: `long_term:${longTerm._id}`,
           }],
           { session },
         );
+
+        if (created[0].user) {
+          try {
+            await Notification.insertMany([{
+              user: created[0].user,
+              type: 'general',
+              title: 'Xe đã check-in vào bãi',
+              message: `Xe ${plateNumber} đã check-in thành công qua cổng.`,
+              building: buildingId,
+              plateNumber,
+              isRead: false,
+            }], { session });
+          } catch (e) {
+            // non-blocking
+          }
+        }
 
         await logAudit(session, {
           actor: user._id,
@@ -198,6 +250,12 @@ const checkIn = async (user, payload) => {
             forceCheckIn: ltSlotUsageBypassed,
             slotUsageBypassed: ltSlotUsageBypassed,
             bypassedSlotUsageType: ltSlotUsageBypassed ? ltSlot?.usageType : null,
+            staffShiftId: `${activeStaffShift._id}`,
+            assignedGateId: activeStaffShift.gate?._id
+              ? `${activeStaffShift.gate._id}`
+              : activeStaffShift.gate
+                ? `${activeStaffShift.gate}`
+                : null,
           },
         });
 
@@ -206,16 +264,43 @@ const checkIn = async (user, payload) => {
 
       // Link the session to the plate's owner account when one exists (account is
       // the secondary identifier). Format-tolerant so 59G2-03880 / 59G2-038.80 match.
-      const registeredOwner = await User.findOne({
+      const registeredOwners = await User.find({
         'licensePlates.plateNumber': plateMatchRegex(plateNumber) || plateNumber,
       })
-        .select('_id')
+        .select('_id licensePlates')
         .session(session);
-
-      // Không phải gói (đã return ở trên) → khách vãng lai hoặc user thường check-in
-      // trực tiếp: BẮT BUỘC thêm ảnh biển số (ảnh chân dung đã bắt buộc ở trên).
-      if (!plateImage) {
-        throw new AppError('A license plate photo is required to check in', 400, 'PLATE_IMAGE_REQUIRED');
+      if (registeredOwners.length > 1) {
+        throw new AppError(
+          'This license plate is linked to multiple accounts and must be resolved by an administrator',
+          409,
+          'DUPLICATE_PLATE_OWNERSHIP',
+        );
+      }
+      const registeredOwner = registeredOwners[0] || null;
+      const registeredPlate = registeredOwner?.licensePlates?.find(
+        (item) => normalizePlate(item.plateNumber) === plateNumber,
+      );
+      if (registeredPlate) {
+        const registeredKind = ['motorcycle', 'ebike', 'emotorbike'].includes(registeredPlate.vehicleType)
+          ? 'motorcycle'
+          : 'car';
+        const detectedKind = vehicleKindFromType(vehicleTypeRecord);
+        if (detectedKind && registeredKind !== detectedKind) {
+          if (!forceCheckIn) {
+            throw new AppError(
+              `Vehicle type does not match registration (registered: ${registeredKind}).`,
+              409,
+              'VEHICLE_TYPE_MISMATCH',
+            );
+          }
+          if (!`${payload?.overrideReason || ''}`.trim()) {
+            throw new AppError(
+              'An override reason is required when the vehicle type differs from registration',
+              400,
+              'OVERRIDE_REASON_REQUIRED',
+            );
+          }
+        }
       }
 
       // Đối tượng của lượt check-in (để khớp dãy/slot): có tài khoản → 'registered',
@@ -223,9 +308,23 @@ const checkIn = async (user, payload) => {
       const usageType = resolveCustomerUsageType({ longTerm: null, registeredOwner });
 
       // Tự gợi ý slot tương thích nếu staff chưa chọn.
-      let selectedSlotId = asObjectId(payload?.slot);
+      const selectedZone = await resolveSelectedZone({
+        zoneId: requestedZoneId,
+        buildingId,
+        vehicleType,
+        usageType,
+        mongoSession: session,
+        forceCheckIn,
+      });
+      // Motorcycles select a zone only; the system allocates a free bay there.
+      let selectedSlotId = isMotorcycle ? null : asObjectId(payload?.slot || payload?.slotId);
+      if (selectedZone && !isMotorcycle && !selectedSlotId) {
+        throw new AppError('Please select a parking slot in the selected zone', 400, 'SLOT_REQUIRED');
+      }
       if (!selectedSlotId) {
-        const [suggested] = await findCompatibleSlots(buildingId, vehicleType, usageType, session);
+        const [suggested] = await findCompatibleSlots(
+          buildingId, vehicleType, usageType, session, selectedZone?._id || null,
+        );
         if (suggested) {
           selectedSlotId = suggested._id;
         } else {
@@ -258,6 +357,9 @@ const checkIn = async (user, payload) => {
         if (slot?.status !== 'available') {
           throw new AppError('The slot is occupied or unavailable', 409, 'SLOT_NOT_AVAILABLE');
         }
+        if (selectedZone && String(slot.zone) !== String(selectedZone._id)) {
+          throw new AppError('The selected slot does not belong to the selected zone', 409, 'SLOT_ZONE_MISMATCH');
+        }
         // Chỉ chặn theo ĐỐI TƯỢNG. Loại xe do dãy/slot quyết định nên không chặn —
         // staff tự do chọn dãy loại xe nào sau khi camera nhận diện.
         if (slot && !isSlotUsageCompatible(slot, usageType)) {
@@ -286,11 +388,27 @@ const checkIn = async (user, payload) => {
           vehicleBrand,
           plateImage,
           portraitImage,
-          entryGate: gate,
+          entryGate: entryGate?._id || null,
           note: duplicate && forceCheckIn ? 'duplicate_bypassed' : '',
         }],
         { session },
       );
+
+      if (created[0].user) {
+        try {
+          await Notification.insertMany([{
+            user: created[0].user,
+            type: 'general',
+            title: 'Xe đã check-in vào bãi',
+            message: `Xe ${plateNumber} đã check-in thành công qua cổng.`,
+            building: buildingId,
+            plateNumber,
+            isRead: false,
+          }], { session });
+        } catch (e) {
+          // non-blocking
+        }
+      }
 
       await logAudit(session, {
         actor: user._id,
@@ -307,8 +425,15 @@ const checkIn = async (user, payload) => {
           plateNumber,
           duplicatePlateWarning: Boolean(duplicate),
           forceCheckIn,
+          overrideReason: forceCheckIn ? `${payload?.overrideReason || ''}`.trim() || null : null,
           slotUsageBypassed: walkInSlotUsageBypassed,
           bypassedSlotUsageType: walkInBypassedSlotUsageType,
+          staffShiftId: `${activeStaffShift._id}`,
+          assignedGateId: activeStaffShift.gate?._id
+            ? `${activeStaffShift.gate._id}`
+            : activeStaffShift.gate
+              ? `${activeStaffShift.gate}`
+              : null,
         },
       });
 

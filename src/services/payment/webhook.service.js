@@ -17,6 +17,7 @@ const walletService = require('../user/wallet.service');
 const buildingWalletTopupService = require('../manager/buildingWalletTopup.service');
 const parkingSessionService = require('../staff/parkingSession.service');
 const AppError = require('../../utils/AppError');
+const logger = require('../../utils/logger');
 
 /* ─────────────────────────────────────────────
    Top-up   → walletService.settleTopup
@@ -54,7 +55,10 @@ const handle = async (body) => {
   });
 
   // Unknown order or already processed → ignore (idempotent)
-  if (!pendingPayment) return;
+  if (!pendingPayment) {
+    logger.warn('[PayOS webhook] Unknown or already-processed order', { orderCode });
+    return;
+  }
 
   // Top-up & session each run their own race-safe transaction (shared with their
   // manual verify endpoints), so they're handled outside the reservation txn.
@@ -71,6 +75,12 @@ const handle = async (body) => {
     await parkingSessionService.settleSessionPayment(orderCode);
     return;
   }
+
+  logger.warn('[PayOS webhook] Unsupported payment type', {
+    orderCode,
+    paymentId: `${pendingPayment._id}`,
+    type: pendingPayment.type,
+  });
 
   // Các loại payment khác không xử lý qua webhook → bỏ qua (idempotent).
 };

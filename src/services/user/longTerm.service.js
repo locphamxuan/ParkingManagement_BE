@@ -6,10 +6,14 @@ const ParkingSession = require('../../models/operations/ParkingSession');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const Payment = require('../../models/finance/Payment');
 const User = require('../../models/user/User');
+const Notification = require('../../models/log/Notification');
 const AppError = require('../../utils/AppError');
 const mongoose = require('mongoose');
-const { normalizePlate } = require('../../utils/plate.util');
+const { normalizePlate, plateMatchRegex } = require('../../utils/plate.util');
 const buildingWalletService = require('../manager/buildingWallet.service');
+const {
+  claimFixedSlotForRenewal,
+} = require('../shared/slotLifecycle.service');
 
 const Building = require('../../models/building/Building');
 
@@ -32,6 +36,17 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
   const normalizedPlate = normalizePlate(plateNumber);
   if (!normalizedPlate) {
     throw new AppError('Biển số xe không hợp lệ', 400);
+  }
+  const ownedPlate = await User.exists({
+    _id: userId,
+    'licensePlates.plateNumber': plateMatchRegex(normalizedPlate) || normalizedPlate,
+  });
+  if (!ownedPlate) {
+    throw new AppError(
+      'Biển số không thuộc tài khoản hiện tại',
+      403,
+      'PLATE_OWNERSHIP_REQUIRED',
+    );
   }
 
   // Kiểm tra xem biển số này đã đăng ký gói dài hạn nào đang hoạt động / chờ thanh toán chưa.
@@ -63,11 +78,28 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
   try {
     await mongoSession.withTransaction(async () => {
       const updatedUser = await User.findOneAndUpdate(
-        { _id: userId, walletBalance: { $gte: pkg.price } },
+        {
+          _id: userId,
+          walletBalance: { $gte: pkg.price },
+          'licensePlates.plateNumber': plateMatchRegex(normalizedPlate) || normalizedPlate,
+        },
         { $inc: { walletBalance: -pkg.price } },
         { new: true, session: mongoSession },
       ).select('walletBalance');
-      if (!updatedUser) throw new AppError('Số dư ví không đủ', 400);
+      if (!updatedUser) {
+        const stillOwnsPlate = await User.exists({
+          _id: userId,
+          'licensePlates.plateNumber': plateMatchRegex(normalizedPlate) || normalizedPlate,
+        }).session(mongoSession);
+        if (!stillOwnsPlate) {
+          throw new AppError(
+            'Biển số không còn thuộc tài khoản hiện tại',
+            403,
+            'PLATE_OWNERSHIP_REQUIRED',
+          );
+        }
+        throw new AppError('Số dư ví không đủ', 400);
+      }
 
       // Slot cố định (tùy chọn): validate ô thuộc dãy 'subscriber' đúng loại xe của gói,
       // rồi claim atomic available→reserved (giữ riêng cả kỳ). null = gói floating.
@@ -142,10 +174,28 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
           pkg.building, pkg.price, 'subscription_fee', payment._id, mongoSession,
         );
       }
+
+      await Notification.insertMany([{
+        user: userId,
+        type: 'general',
+        title: 'Mua gói dài hạn thành công',
+        message: `Đã đăng ký thành công gói ${pkg.name} cho xe ${normalizedPlate}. Hạn sử dụng đến ${endDate.toLocaleDateString('vi-VN')}.`,
+        building: pkg.building,
+        plateNumber: normalizedPlate,
+        isRead: false,
+      }], { session: mongoSession });
     });
   } catch (err) {
     // Unique partial index trên { plateNumber, status:'active' } chặn 2 gói active cùng biển
     // (kể cả khi 2 request mua song song lọt qua check ở trên).
+    if (err && err.code === 11000 && err.keyPattern?.slot) {
+      throw new AppError(
+        'Ô đỗ đã thuộc một gói dài hạn khác',
+        409,
+        'FIXED_SLOT_UNAVAILABLE',
+        { requiresSlotSelection: true },
+      );
+    }
     if (err && err.code === 11000) {
       throw new AppError('Biển số xe này đã đăng ký một gói dài hạn khác đang hoạt động', 400);
     }
@@ -330,10 +380,28 @@ const renewSubscription = async (userId, subscriptionId) => {
       }
 
       const pkg = subscription.package;
+      const ownsPlate = await User.exists({
+        _id: userId,
+        'licensePlates.plateNumber': plateMatchRegex(subscription.plateNumber) || subscription.plateNumber,
+      }).session(mongoSession);
+      if (!ownsPlate) {
+        throw new AppError(
+          'Biển số không còn thuộc tài khoản hiện tại',
+          403,
+          'PLATE_OWNERSHIP_REQUIRED',
+        );
+      }
+
+      await claimFixedSlotForRenewal(subscription, mongoSession);
 
       // Trừ ví (atomic) — pattern giống subscribe.
       const updatedUser = await User.findOneAndUpdate(
-        { _id: userId, walletBalance: { $gte: pkg.price } },
+        {
+          _id: userId,
+          walletBalance: { $gte: pkg.price },
+          'licensePlates.plateNumber':
+            plateMatchRegex(subscription.plateNumber) || subscription.plateNumber,
+        },
         { $inc: { walletBalance: -pkg.price } },
         { new: true, session: mongoSession },
       ).select('walletBalance');
@@ -379,6 +447,16 @@ const renewSubscription = async (userId, subscriptionId) => {
           pkg.building, pkg.price, 'subscription_fee', payment._id, mongoSession,
         );
       }
+
+      await Notification.insertMany([{
+        user: userId,
+        type: 'general',
+        title: 'Gia hạn gói dài hạn thành công',
+        message: `Đã gia hạn thành công gói ${pkg.name} cho xe ${subscription.plateNumber}. Hạn mới đến ${newEnd.toLocaleDateString('vi-VN')}.`,
+        building: pkg.building,
+        plateNumber: subscription.plateNumber,
+        isRead: false,
+      }], { session: mongoSession });
 
       result = subscription;
     });

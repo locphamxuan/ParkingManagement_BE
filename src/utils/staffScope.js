@@ -1,5 +1,6 @@
 const AppError = require('./AppError');
 const { AuditLog } = require('../models');
+const { redactEvidenceForAudit } = require('./evidence');
 
 const OBJECTID_RE = /^[0-9a-fA-F]{24}$/;
 
@@ -35,8 +36,9 @@ const logAudit = async (session, payload) =>
       targetTable: payload.entityType,
       targetId: payload.entityId || null,
       building: payload.building || null,
-      previousValue: payload.before || null,
-      newValue: payload.after || null,
+      previousValue: redactEvidenceForAudit(payload.before) || null,
+      newValue: redactEvidenceForAudit(payload.after) || null,
+      metadata: redactEvidenceForAudit(payload.metadata) || null,
       severity: payload.severity || 'low',
       description: payload.description || '',
     }],

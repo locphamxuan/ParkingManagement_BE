@@ -1,4 +1,5 @@
 const AppError = require("../utils/AppError");
+const { parseTime } = require("../utils/businessTime");
 const buildingRepository = require("../repositories/building.repository");
 const { Floor } = require("../models");
 
@@ -104,11 +105,14 @@ const updateBuildingStatus = async (id, status) => {
 };
 
 const removeBuilding = async (id) => {
-  const deleted = await buildingRepository.deleteById(id);
-  if (!deleted) {
+  const archived = await buildingRepository.updateById(id, {
+    status: 'inactive',
+    isActive: false,
+  });
+  if (!archived) {
     throw new AppError("Building not found", 404);
   }
-  return deleted;
+  return archived;
 };
 
 // Số tầng THẬT của toà = đếm Floor đã tạo (qua trang Floor management), KHÔNG
@@ -153,6 +157,9 @@ const getManagerBuilding = async (user, buildingId) => {
   return Promise.all(buildings.map(attachFloorCount));
 };
 
+// Trạng thái manager được phép đọc/ghi trên tòa mình phụ trách.
+const MANAGER_EDITABLE_STATUSES = ["active", "maintenance"];
+
 const updateManagerBuilding = async (user, buildingId, payload) => {
   // buildingId is required for update
   if (!buildingId) {
@@ -171,9 +178,15 @@ const updateManagerBuilding = async (user, buildingId, payload) => {
 
   const building = await getBuildingOrFail(buildingId);
 
-  // Only allow updates to active buildings
-  if (building.status !== "active") {
-    throw new AppError("Can only update buildings with status=active", 403);
+  // Manager tự bật/tắt bảo trì cho tòa mình phụ trách, nên phải sửa được CẢ khi
+  // đang 'maintenance' — nếu chỉ cho 'active' thì đặt bảo trì xong sẽ kẹt một
+  // chiều, phải nhờ admin mở lại. 'inactive' là vòng đời của admin.
+  if (!MANAGER_EDITABLE_STATUSES.includes(building.status)) {
+    throw new AppError(
+      `Can only update buildings with status=${MANAGER_EDITABLE_STATUSES.join(" or ")}`,
+      403,
+      "BUILDING_STATUS_FORBIDDEN",
+    );
   }
 
   // Manager chỉ sửa các trường cơ bản. Giá do tab "Giá" (PricePolicy) quản lý;
@@ -186,13 +199,23 @@ const updateManagerBuilding = async (user, buildingId, payload) => {
     if (payload[key] !== undefined) safePayload[key] = payload[key];
   }
 
+  // Chỉ cho manager chuyển giữa active ↔ maintenance; 'inactive' (ngừng khai
+  // thác) vẫn là quyền admin, tránh manager tự đưa tòa vào trạng thái không tự
+  // khôi phục được.
+  if (
+    safePayload.status !== undefined &&
+    !MANAGER_EDITABLE_STATUSES.includes(safePayload.status)
+  ) {
+    throw new AppError(
+      `Manager can only switch a building between ${MANAGER_EDITABLE_STATUSES.join(" and ")}`,
+      403,
+      "BUILDING_STATUS_FORBIDDEN",
+    );
+  }
+
   const updated = await updateBuilding(buildingId, safePayload);
   return attachFloorCount(updated);
 };
-
-// Validate "HH:MM" (24h) time strings used for operating hours.
-const isValidTime = (value) =>
-  typeof value === "string" && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value.trim());
 
 /**
  * Manager cập nhật giờ mở/đóng cửa của tòa nhà (tab riêng "Giờ hoạt động").
@@ -216,11 +239,12 @@ const updateManagerOperatingHours = async (user, buildingId, payload = {}) => {
 
   const open = `${payload.open || ""}`.trim();
   const close = `${payload.close || ""}`.trim();
-  if (!isValidTime(open) || !isValidTime(close)) {
-    throw new AppError("open/close phải có định dạng HH:MM (24h)", 400);
-  }
-  if (open === close) {
-    throw new AppError("Giờ mở và giờ đóng không được trùng nhau", 400);
+  if (parseTime(open) === null || parseTime(close) === null || open === close) {
+    throw new AppError(
+      "open/close phải có định dạng HH:mm và không được trùng nhau",
+      400,
+      "INVALID_OPERATING_HOURS",
+    );
   }
 
   return updateBuilding(buildingId, { operatingHours: { open, close } });

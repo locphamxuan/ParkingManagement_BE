@@ -46,6 +46,14 @@ describe('user.service', () => {
       .rejects.toMatchObject({ statusCode: 400 });
   });
 
+  test('generic update cannot bypass admin role/status protection', async () => {
+    const other = await f.createUser({ role: 'admin' });
+    await expect(userSvc.update(admin, other._id, { role: 'user' }))
+      .rejects.toMatchObject({ errorCode: 'ADMIN_ROLE_IMMUTABLE' });
+    await expect(userSvc.update(admin, other._id, { isActive: false }))
+      .rejects.toMatchObject({ errorCode: 'ADMIN_STATUS_IMMUTABLE' });
+  });
+
   test('updateStatus khóa/mở user thường', async () => {
     const u = await f.createUser({ role: 'user' });
     const locked = await userSvc.updateStatus(admin, u._id, false);
@@ -87,8 +95,8 @@ describe('user.service', () => {
     // Gói không còn active → xóa user được.
     sub.status = 'cancelled';
     await sub.save();
-    const out = await userSvc.remove(admin, u._id);
-    expect(String(out.id)).toBe(String(u._id));
+    await expect(userSvc.remove(admin, u._id))
+      .rejects.toMatchObject({ errorCode: 'USER_HAS_HISTORY' });
   });
 
   test('khóa user còn phiên active: vẫn khóa được, audit ghi severity high kèm số phiên', async () => {

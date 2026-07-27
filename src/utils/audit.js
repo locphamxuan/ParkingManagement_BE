@@ -1,5 +1,6 @@
 ﻿const AuditLog = require("../models/log/AuditLog");
 const logger = require("./logger");
+const { redactEvidenceForAudit } = require('./evidence');
 
 const writeAuditLog = async ({
   actor,
@@ -21,8 +22,8 @@ const writeAuditLog = async ({
       targetTable,
       targetId: targetId ? String(targetId) : null,
       building: building || null,
-      previousValue,
-      newValue,
+      previousValue: redactEvidenceForAudit(previousValue),
+      newValue: redactEvidenceForAudit(newValue),
       severity,
       description,
     });

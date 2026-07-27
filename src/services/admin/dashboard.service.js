@@ -5,6 +5,7 @@ const ParkingSlot = require("../../models/building/ParkingSlot");
 const Payment = require("../../models/finance/Payment");
 const { ROLES } = require("../../constants/roles");
 const { localUtcOffset } = require("../../utils/dateBucket");
+const { REVENUE_PAYMENT_TYPES } = require("../../constants/finance");
 
 const getDateRange = (period) => {
   const now = new Date();
@@ -54,19 +55,30 @@ const getOverview = async (period = "today") => {
       // 'cancellation_fee' KHÔNG được cộng thêm: tiền cọc gốc đã tính vào revenue qua
       // type 'reservation' lúc đặt chỗ; cancellation_fee chỉ là bản ghi audit của phần
       // giữ lại trong cọc đó, cộng thêm sẽ đếm trùng (double-count).
-      { $match: { status: "success", type: { $in: ["session", "reservation", "subscription"] }, createdAt: { $gte: from, $lte: to } } },
-      { $group: { _id: "$method", amount: { $sum: "$amount" }, count: { $sum: 1 } } },
+      { $set: { effectiveAt: { $ifNull: ["$settledAt", "$createdAt"] } } },
+      { $match: { status: "success", type: { $in: [...REVENUE_PAYMENT_TYPES, "refund"] }, effectiveAt: { $gte: from, $lte: to } } },
+      {
+        $group: {
+          _id: "$method",
+          amount: { $sum: { $cond: [{ $in: ["$type", REVENUE_PAYMENT_TYPES] }, "$amount", 0] } },
+          refunds: { $sum: { $cond: [{ $eq: ["$type", "refund"] }, "$amount", 0] } },
+          count: { $sum: { $cond: [{ $in: ["$type", REVENUE_PAYMENT_TYPES] }, 1, 0] } },
+        },
+      },
     ]),
     // Xu hướng doanh thu 7 ngày (toàn hệ thống) — thay cho việc gọi dashboard từng tòa nhà.
     Payment.aggregate([
-      { $match: { status: "success", type: { $in: ["session", "reservation", "subscription"] }, createdAt: { $gte: sevenDaysAgo, $lt: tomorrow } } },
+      { $set: { effectiveAt: { $ifNull: ["$settledAt", "$createdAt"] } } },
+      { $match: { status: "success", type: { $in: [...REVENUE_PAYMENT_TYPES, "refund"] }, effectiveAt: { $gte: sevenDaysAgo, $lt: tomorrow } } },
       {
         $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: localUtcOffset() } },
-          revenue: { $sum: "$amount" },
-          sessions: { $sum: 1 },
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$effectiveAt", timezone: localUtcOffset() } },
+          revenue: { $sum: { $cond: [{ $in: ["$type", REVENUE_PAYMENT_TYPES] }, "$amount", 0] } },
+          refunds: { $sum: { $cond: [{ $eq: ["$type", "refund"] }, "$amount", 0] } },
+          sessions: { $sum: { $cond: [{ $in: ["$type", REVENUE_PAYMENT_TYPES] }, 1, 0] } },
         },
       },
+      { $set: { netRevenue: { $subtract: ["$revenue", "$refunds"] } } },
       { $sort: { _id: 1 } },
     ]),
     // Tỷ lệ lấp đầy theo từng tòa nhà — 1 aggregation thay cho N call.
@@ -81,16 +93,23 @@ const getOverview = async (period = "today") => {
     ]),
     // Doanh thu hôm nay theo từng tòa nhà — 1 aggregation.
     Payment.aggregate([
-      { $match: { status: "success", type: { $in: ["session", "reservation", "subscription"] }, building: { $ne: null }, createdAt: { $gte: today, $lt: tomorrow } } },
+      { $set: { effectiveAt: { $ifNull: ["$settledAt", "$createdAt"] } } },
+      { $match: { status: "success", type: { $in: REVENUE_PAYMENT_TYPES }, building: { $ne: null }, effectiveAt: { $gte: today, $lt: tomorrow } } },
       { $group: { _id: "$building", amount: { $sum: "$amount" } } },
     ]),
   ]);
 
   const revenueByMethod = periodPayments.reduce((acc, row) => {
-    acc[row._id] = { amount: row.amount, count: row.count };
+    acc[row._id] = {
+      amount: row.amount,
+      refunds: row.refunds,
+      net: row.amount - row.refunds,
+      count: row.count,
+    };
     return acc;
   }, {});
   const totalRevenue = periodPayments.reduce((acc, row) => acc + row.amount, 0);
+  const totalRefunds = periodPayments.reduce((acc, row) => acc + row.refunds, 0);
 
   const weekly = weeklyAgg.map((d) => ({ date: d._id, revenue: d.revenue, sessions: d.sessions }));
 
@@ -110,7 +129,18 @@ const getOverview = async (period = "today") => {
       users: totalUsers,
       activeSessions,
     },
-    revenue: { total: totalRevenue, byMethod: revenueByMethod, weekly },
+    revenue: {
+      total: totalRevenue,
+      gross: totalRevenue,
+      refunds: totalRefunds,
+      net: totalRevenue - totalRefunds,
+      byMethod: revenueByMethod,
+      weekly,
+      definitions: {
+        gross: "Successful earned payments before refunds",
+        net: "Gross revenue minus refunds",
+      },
+    },
     buildingStats,
   };
 };

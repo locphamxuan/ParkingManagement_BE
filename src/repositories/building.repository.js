@@ -24,14 +24,11 @@ const updateById = (id, payload) =>
     runValidators: true,
   });
 
-const deleteById = (id) => Building.findByIdAndDelete(id);
-
 module.exports = {
   list,
   count,
   findById,
   create,
   updateById,
-  deleteById,
 };
 

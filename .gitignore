@@ -34,6 +34,8 @@ docs/session-operations-test-report.md
 docs/staff-api-data-structures.md
 docs/reports/
 /docs/
+!/docs/
+!/docs/COUNCIL_DEFENSE_NOTES.md
 
 # Generated exports / reports
 postman/

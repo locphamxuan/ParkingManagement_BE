@@ -7,8 +7,9 @@
     "start": "node src/server.js",
     "dev": "nodemon --watch src --ext js,json src/server.js",
     "dev:memory": "node tools/run-dev-memory-db.js",
-    "seed": "node src/scripts/seed-demo.js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "audit:business-logic": "node src/businessLogicAudit.cli.js --dry-run",
+    "report:stale-payos": "node src/stalePayosReport.cli.js"
   },
   "keywords": [
     "parking",

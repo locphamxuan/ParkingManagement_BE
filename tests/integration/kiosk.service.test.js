@@ -11,7 +11,7 @@ const LongTermSubscription = require('../../src/models/policy/LongTermSubscripti
 const ParkingSlot = require('../../src/models/building/ParkingSlot');
 const ParkingSession = require('../../src/models/operations/ParkingSession');
 
-let building, vt, floor, user, pkg;
+let building, vt, floor, user, pkg, kioskGate;
 
 beforeAll(async () => { await db.connect(); });
 afterAll(async () => { await db.close(); });
@@ -21,6 +21,7 @@ beforeEach(async () => {
   building = await f.createBuilding();
   vt = await f.createVehicleType(building._id);
   floor = await f.createFloor(building._id);
+  kioskGate = await f.createGate(building._id, { direction: 'in' });
   pkg = await f.createPackage(building._id, vt._id);
 });
 
@@ -31,7 +32,7 @@ const seedSubscriberWithDedicatedSlot = async () => {
     licensePlates: [{ plateNumber: '51F-777.77', vehicleType: 'car' }],
   });
   const dedicatedSlot = await f.createSlot(building._id, floor._id, {
-    usageType: 'subscriber', vehicleType: vt._id,
+    usageType: 'subscriber', vehicleType: vt._id, status: 'reserved',
   });
   const subscription = await LongTermSubscription.create({
     user: user._id, package: pkg._id, building: building._id,
@@ -75,7 +76,7 @@ describe('kiosk.service.selfCheckInByQr', () => {
   test('QR hợp lệ + gói active + slot cố định trống → tạo phiên, gán đúng slot cố định, fee=0', async () => {
     const { dedicatedSlot, qrCode, subscription } = await seedSubscriberWithDedicatedSlot();
 
-    const result = await kioskSvc.selfCheckInByQr({ qrCode });
+    const result = await kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id });
 
     expect(result.parkingSession.status).toBe('active');
     expect(result.parkingSession.fee).toBe(0);
@@ -90,11 +91,11 @@ describe('kiosk.service.selfCheckInByQr', () => {
     const { dedicatedSlot, qrCode } = await seedSubscriberWithDedicatedSlot();
     dedicatedSlot.status = 'occupied';
     await dedicatedSlot.save();
-    const fallbackSlot = await f.createSlot(building._id, floor._id, { usageType: 'subscriber', vehicleType: vt._id });
+    await f.createSlot(building._id, floor._id, { usageType: 'subscriber', vehicleType: vt._id });
 
-    const result = await kioskSvc.selfCheckInByQr({ qrCode });
-
-    expect(String(result.parkingSession.slot)).toBe(String(fallbackSlot._id));
+    await expect(kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id })).rejects.toMatchObject({
+      statusCode: 409, errorCode: 'FIXED_SLOT_OCCUPIED',
+    });
   });
 
   test('không còn slot nào (cố định occupied, không có fallback) → 409 NO_SLOT_AVAILABLE', async () => {
@@ -102,8 +103,8 @@ describe('kiosk.service.selfCheckInByQr', () => {
     dedicatedSlot.status = 'occupied';
     await dedicatedSlot.save();
 
-    await expect(kioskSvc.selfCheckInByQr({ qrCode })).rejects.toMatchObject({
-      statusCode: 409, errorCode: 'NO_SLOT_AVAILABLE',
+    await expect(kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id })).rejects.toMatchObject({
+      statusCode: 409, errorCode: 'FIXED_SLOT_OCCUPIED',
     });
   });
 
@@ -114,7 +115,7 @@ describe('kiosk.service.selfCheckInByQr', () => {
       entryTime: new Date(),
     });
 
-    await expect(kioskSvc.selfCheckInByQr({ qrCode })).rejects.toMatchObject({
+    await expect(kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id })).rejects.toMatchObject({
       statusCode: 409, errorCode: 'DUPLICATE_PLATE',
     });
     expect(await ParkingSession.countDocuments({ plateNumber: '51F-777.77', status: 'active' })).toBe(1);

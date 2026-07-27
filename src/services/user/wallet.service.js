@@ -2,8 +2,10 @@ const mongoose = require('mongoose');
 const User = require('../../models/user/User');
 const WalletTransaction = require('../../models/finance/WalletTransaction');
 const Payment = require('../../models/finance/Payment');
+const Notification = require('../../models/log/Notification');
 const AppError = require('../../utils/AppError');
 const payosService = require('../payment/payos.service');
+const { createPayosIntent } = require('../payment/paymentIntent.service');
 const env = require('../../config/env');
 
 // PayOS / VND minimum: 2,000 ₫ (PayOS minimum is 2,000 VND)
@@ -28,40 +30,33 @@ const topup = async (userId, amount) => {
   const user = await User.findById(userId).select('_id email fullName');
   if (!user) throw new AppError('User not found', 404);
 
-  const orderCode = payosService.generateOrderCode();
-
-  const returnUrl = `${env.clientUrl}/wallet/topup/success?orderCode=${orderCode}`;
+  const returnUrl = `${env.clientUrl}/wallet/topup/success`;
   const cancelUrl = `${env.clientUrl}/wallet/topup/cancel`;
 
-  // Create PayOS payment link
   const {
     checkoutUrl,
     qrCode,
+    orderCode,
     paymentLinkId,
     bin,
     accountNumber,
     accountName,
     description: payosDescription,
-  } = await payosService.createPaymentLink({
-    orderCode,
-    amount,
-    description: 'Nap vi PBMS',
-    buyerName: user.fullName,
-    buyerEmail: user.email,
-    returnUrl,
-    cancelUrl,
-  });
-
-  // Persist pending Payment — webhook will update status to 'success'
-  await Payment.create({
-    type: 'topup',
-    method: 'payos',
-    amount,
-    status: 'pending',
-    user: userId,
-    payosOrderCode: orderCode,
-    payosPaymentLinkId: paymentLinkId,
-    note: 'Wallet top-up via PayOS',
+  } = await createPayosIntent({
+    paymentData: {
+      type: 'topup',
+      amount,
+      user: userId,
+      note: 'Wallet top-up via PayOS',
+    },
+    linkData: {
+      amount,
+      description: 'Nap vi PBMS',
+      buyerName: user.fullName,
+      buyerEmail: user.email,
+      returnUrl,
+      cancelUrl,
+    },
   });
 
   return {
@@ -139,6 +134,17 @@ const settleTopup = async (orderCode) => {
           status: 'success',
           reason: 'payos_topup',
           metadata: { payosOrderCode: oc },
+        }],
+        { session: mongoSession },
+      );
+
+      await Notification.insertMany(
+        [{
+          user: payment.user,
+          type: 'general',
+          title: 'Nạp tiền vào ví thành công',
+          message: `Đã nạp ${amount.toLocaleString('vi-VN')} VNĐ vào ví. Số dư ví hiện tại: ${user.walletBalance.toLocaleString('vi-VN')} VNĐ.`,
+          isRead: false,
         }],
         { session: mongoSession },
       );

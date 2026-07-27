@@ -4,6 +4,7 @@ const BuildingWalletTransaction = require('../../models/finance/BuildingWalletTr
 const Payment = require('../../models/finance/Payment');
 const AppError = require('../../utils/AppError');
 const payosService = require('../payment/payos.service');
+const { createPayosIntent } = require('../payment/paymentIntent.service');
 const env = require('../../config/env');
 
 const MIN_TOPUP = 2_000;
@@ -17,62 +18,66 @@ const topup = async (buildingId, managerId, amount) => {
   if (!Number.isInteger(amount)) throw new AppError('amount must be an integer (VND)', 400);
   if (amount < MIN_TOPUP) throw new AppError(`Minimum top-up is ${MIN_TOPUP.toLocaleString('en-US')} ₫`, 400);
 
-  const orderCode = payosService.generateOrderCode();
-  const returnUrl = `${env.clientUrl}/manager/wallet?topup=success&orderCode=${orderCode}`;
+  const returnUrl = `${env.clientUrl}/manager/wallet?topup=success`;
   const cancelUrl = `${env.clientUrl}/manager/wallet?topup=cancel`;
 
-  const { checkoutUrl, qrCode, paymentLinkId } = await payosService.createPaymentLink({
-    orderCode,
-    amount,
-    description: 'Nap vi toa nha PBMS',
-    returnUrl,
-    cancelUrl,
+  const intent = await createPayosIntent({
+    paymentData: {
+      building: buildingId,
+      type: 'topup',
+      amount,
+      user: managerId,
+      note: 'Building wallet top-up via PayOS',
+    },
+    linkData: {
+      amount,
+      description: 'Nap vi toa nha PBMS',
+      returnUrl,
+      cancelUrl,
+    },
   });
 
-  await Payment.create({
-    building: buildingId,
-    type: 'topup',
-    method: 'payos',
-    amount,
-    status: 'pending',
-    user: managerId,
-    payosOrderCode: orderCode,
-    payosPaymentLinkId: paymentLinkId,
-    note: 'Building wallet top-up via PayOS',
-  });
-
-  return { checkoutUrl, qrCode, orderCode };
+  return {
+    checkoutUrl: intent.checkoutUrl,
+    qrCode: intent.qrCode,
+    orderCode: intent.orderCode,
+  };
 };
 
 /**
  * Settle a successful PayOS top-up into the building wallet — idempotent.
  * Called by webhook and manual verify endpoint.
  */
-const settleTopup = async (orderCode) => {
+const settleTopup = async (orderCode, buildingId = null) => {
   const oc = Number(orderCode);
   const mongoSession = await mongoose.startSession();
   let result = { credited: false, status: 'already_processed', balance: null, amount: 0 };
   try {
     await mongoSession.withTransaction(async () => {
       const payment = await Payment.findOneAndUpdate(
-        { payosOrderCode: oc, type: 'topup', status: 'pending' },
+        {
+          payosOrderCode: oc,
+          type: 'topup',
+          status: 'pending',
+          ...(buildingId ? { building: buildingId } : {}),
+        },
         { status: 'success' },
         { new: true, session: mongoSession },
       );
       if (!payment) return;
 
       const amount = payment.amount;
-      const buildingId = payment.building;
+      const targetBuildingId = payment.building;
 
       const wallet = await BuildingWallet.findOneAndUpdate(
-        { building: buildingId },
+        { building: targetBuildingId },
         { $inc: { balance: amount, totalReceived: amount } },
         { new: true, upsert: true, session: mongoSession },
       );
 
       await BuildingWalletTransaction.create(
         [{
-          building: buildingId,
+          building: targetBuildingId,
           type: 'credit',
           amount,
           balanceAfter: wallet.balance,
@@ -93,11 +98,15 @@ const settleTopup = async (orderCode) => {
 /**
  * Manually verify a PayOS top-up order — fallback when webhook doesn't reach server.
  */
-const verifyTopup = async (orderCode) => {
+const verifyTopup = async (buildingId, orderCode) => {
   const oc = Number(orderCode);
   if (!oc) throw new AppError('Invalid orderCode', 400);
 
-  const payment = await Payment.findOne({ payosOrderCode: oc, type: 'topup' });
+  const payment = await Payment.findOne({
+    payosOrderCode: oc,
+    type: 'topup',
+    building: buildingId,
+  });
   if (!payment) throw new AppError('Payment order not found', 404);
 
   if (payment.status === 'success') return { status: 'success', credited: false };
@@ -111,7 +120,7 @@ const verifyTopup = async (orderCode) => {
 
   const payosStatus = String(info?.status || '').toUpperCase();
   if (payosStatus === 'PAID') {
-    const r = await settleTopup(oc);
+    const r = await settleTopup(oc, buildingId);
     return { status: 'success', credited: r.credited };
   }
   return { status: payosStatus.toLowerCase() || 'pending', credited: false };

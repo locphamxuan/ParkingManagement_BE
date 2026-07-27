@@ -37,4 +37,12 @@ const webhookLimiter = rateLimit({
   message: { success: false, message: 'Quá nhiều webhook request.' },
 });
 
-module.exports = { authLimiter, passwordResetLimiter, smsOtpRequestLimiter, webhookLimiter };
+const kioskLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many kiosk check-in requests.' },
+});
+
+module.exports = { authLimiter, passwordResetLimiter, smsOtpRequestLimiter, webhookLimiter, kioskLimiter };

@@ -1,9 +1,22 @@
 const mongoose = require('mongoose');
 const AppError = require('../utils/AppError');
-const { LongTermSubscription, ParkingSession, ParkingSlot, User } = require('../models');
+const {
+  Building,
+  LongTermSubscription,
+  ParkingSession,
+  ParkingSlot,
+  User,
+} = require('../models');
 const { logAudit } = require('../utils/staffScope');
 const { normalizePlate, plateMatchRegex } = require('../utils/plate.util');
-const { activeSubscriptionMatch } = require('./staff/parkingSession/helpers');
+const {
+  activeSubscriptionMatch,
+  findCompatibleSlots,
+} = require('./staff/parkingSession/helpers');
+const { assertBuildingAcceptsEntry } = require('./shared/entryAuthorization.service');
+const { occupyFixedSlotForCheckIn } = require('./shared/slotLifecycle.service');
+const { resolveOperationalGate } = require('./shared/gateAuthorization.service');
+const { assertEvidenceImage } = require('../utils/evidence');
 
 /**
  * Resolve a REGISTERED vehicle QR token (PLT-...) to its canonical plate + owner.
@@ -46,16 +59,17 @@ const resolvePlateFromQr = async ({ qrCode }) => {
  * (biển + chân dung) làm bằng chứng. Khách không có gói phải check-in qua nhân viên.
  */
 const selfCheckInByQr = async (payload = {}) => {
-  const { plateNumber } = await resolvePlateFromQr(payload);
+  const { plateNumber, user: qrOwnerId } = await resolvePlateFromQr(payload);
   const plateRx = plateMatchRegex(plateNumber) || plateNumber;
-  const plateImage = payload.plateImage || null;
-  const portraitImage = payload.portraitImage || null;
+  const plateImage = assertEvidenceImage(payload.plateImage, 'plateImage');
+  const portraitImage = assertEvidenceImage(payload.portraitImage, 'portraitImage');
 
   const session = await mongoose.startSession();
   try {
     const result = await session.withTransaction(async () => {
       const subFilter = {
         plateNumber: plateRx,
+        user: qrOwnerId,
         ...activeSubscriptionMatch(),
       };
       if (payload.building) subFilter.building = payload.building;
@@ -74,6 +88,18 @@ const selfCheckInByQr = async (payload = {}) => {
       }
 
       const buildingId = subscription.building;
+      const building = await Building.findById(buildingId).session(session);
+      if (!building) {
+        throw new AppError('Building not found', 404, 'BUILDING_NOT_FOUND');
+      }
+      assertBuildingAcceptsEntry(building);
+      const entryGate = await resolveOperationalGate({
+        gateId: payload.gate || payload.entryGate || null,
+        buildingId,
+        operation: 'in',
+        mongoSession: session,
+        required: true,
+      });
 
       // Chặn trùng: xe đang có phiên active trong tòa này.
       const duplicate = await ParkingSession.findOne({
@@ -85,19 +111,11 @@ const selfCheckInByQr = async (payload = {}) => {
         throw new AppError('Phương tiện đang có phiên gửi xe trong bãi.', 409, 'DUPLICATE_PLATE');
       }
 
-      // Slot: ưu tiên slot cố định của gói; nếu không có/không trống → gán slot trống
-      // thuộc dãy 'subscriber' cùng tòa.
       let slot = null;
-      if (subscription.slot && subscription.slot.status !== 'maintenance') {
-        slot = await ParkingSlot.findById(subscription.slot._id || subscription.slot).session(session);
-        if (slot && slot.status === 'occupied') slot = null;
-      }
-      if (!slot) {
-        slot = await ParkingSlot.findOne({
-          building: buildingId,
-          status: 'available',
-          usageType: 'subscriber',
-        }).session(session);
+      if (subscription.slot) {
+        slot = await occupyFixedSlotForCheckIn(subscription, buildingId, session);
+      } else {
+        [slot] = await findCompatibleSlots(buildingId, null, 'subscriber', session);
       }
       if (!slot) {
         throw new AppError(
@@ -107,8 +125,21 @@ const selfCheckInByQr = async (payload = {}) => {
         );
       }
 
-      slot.status = 'occupied';
-      await slot.save({ session });
+      if (!subscription.slot) {
+        const occupied = await ParkingSlot.findOneAndUpdate(
+          { _id: slot._id, status: 'available' },
+          { $set: { status: 'occupied' } },
+          { new: true, session },
+        );
+        if (!occupied) {
+          throw new AppError(
+            'The selected slot is no longer available',
+            409,
+            'NO_SLOT_AVAILABLE',
+          );
+        }
+        slot = occupied;
+      }
 
       const created = await ParkingSession.create(
         [
@@ -119,7 +150,7 @@ const selfCheckInByQr = async (payload = {}) => {
             plateNumber: subscription.plateNumber,
             user: subscription.user,
             staff: null,
-            entryGate: payload.gate || null,
+            entryGate: entryGate._id,
             fee: 0,
             paymentMethod: 'long_term',
             status: 'active',
@@ -140,6 +171,7 @@ const selfCheckInByQr = async (payload = {}) => {
         after: created[0].toObject(),
         severity: 'low',
         description: `Long-term subscription ${subscription._id} self check-in via kiosk QR`,
+        metadata: { kiosk: true, gateId: `${entryGate._id}` },
       });
 
       return { subscription, parkingSession: created[0] };

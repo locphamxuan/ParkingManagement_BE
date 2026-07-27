@@ -1,8 +1,17 @@
 # PBMS Backend — System Design
 
 Parking Building Management System (PBMS) — REST API cho 4 vai trò:
-**user** (khách gửi xe), **staff** (nhân viên cổng), **manager** (quản lý tòa nhà),
-**admin** (quản trị nền tảng, đồng thời là operator với quyền xem read-only building).
+**user** (khách gửi xe), **staff** (nhân viên bảo vệ/cổng), **manager** (người vận
+hành các bãi được giao), **admin** (chủ hệ thống/đơn vị mua PBMS).
+
+- **Admin** quản trị toàn nền tảng: tòa nhà, tài khoản, phân công nhân sự, báo cáo
+  tài chính hợp nhất, đối soát và audit. Admin không check-in/check-out hoặc xác
+  nhận tiền mặt thay Manager.
+- **Manager** cấu hình và chịu trách nhiệm vận hành/tài chính các bãi được giao.
+- **Staff** làm nghiệp vụ vật lý tại cổng trong ca được giao.
+- **User** sử dụng dịch vụ và chỉ truy cập dữ liệu cá nhân.
+
+Ma trận quyền chuẩn được expose tại `GET /api/admin/governance/roles`.
 
 Stack: **Node.js + Express 4**, **MongoDB Atlas + Mongoose 8** (transactions),
 **JWT** (auth, cookie hoặc Bearer header), **PayOS** (cổng thanh toán, `@payos/node`),
@@ -153,6 +162,13 @@ tính năng này như đang sống dù đã xoá 6 ngày trước đó — đã 
   Mọi dòng tiền: `WalletTransaction` (ví user, audit) + `Payment` + credit/debit
   `BuildingWallet` (`BuildingWalletTransaction`). Refund dùng `allowNegative` để ví
   tòa nhà có thể âm khi hoàn tiền.
+- Báo cáo tách `grossRevenue` (đã thu) − `refunds` = `netRevenue`;
+  `pendingCash` là tiền Staff ghi nhận nhưng Manager chưa xác nhận bàn giao;
+  `walletFunding/topup` là luân chuyển vốn, không phải doanh thu. Phí phạt dùng
+  loại `penalty`, không trộn với phí gửi xe.
+- Doanh thu ghi nhận theo `Payment.settledAt`; dữ liệu cũ fallback về `createdAt`.
+- Admin dùng `GET /api/admin/revenue`, `/transactions` và `/reconciliation` để
+  xem báo cáo hợp nhất, sổ giao dịch và bất thường cần đối soát.
 - PayOS: webhook (`payment/webhook.controller`) verify chữ ký → settle theo
   `payosOrderCode` (idempotent, race-safe, dùng chung code với endpoint verify tay).
 

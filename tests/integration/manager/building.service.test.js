@@ -40,6 +40,61 @@ describe('getManagerBuilding', () => {
   });
 });
 
+describe('updateManagerBuilding — vòng đời bảo trì', () => {
+  // Trước đây guard chỉ cho sửa building status=active → manager tự đặt
+  // 'maintenance' xong KHÔNG mở lại được, phải nhờ admin (kẹt một chiều).
+  test('manager phụ trách: active → maintenance → active', async () => {
+    const toMaintenance = await buildingSvc.updateManagerBuilding(manager, building._id, {
+      status: 'maintenance',
+    });
+    expect(toMaintenance.status).toBe('maintenance');
+
+    const backToActive = await buildingSvc.updateManagerBuilding(manager, building._id, {
+      status: 'active',
+    });
+    expect(backToActive.status).toBe('active');
+  });
+
+  test('manager tòa khác KHÔNG chuyển được cả hai chiều', async () => {
+    const otherBuilding = await f.createBuilding({});
+    const otherManager = await f.managerFor(otherBuilding._id);
+
+    await expect(
+      buildingSvc.updateManagerBuilding(otherManager, building._id, { status: 'maintenance' }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+
+    await building.updateOne({ status: 'maintenance' });
+    await expect(
+      buildingSvc.updateManagerBuilding(otherManager, building._id, { status: 'active' }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  test("manager KHÔNG được đặt 'inactive' (vòng đời của admin)", async () => {
+    await expect(
+      buildingSvc.updateManagerBuilding(manager, building._id, { status: 'inactive' }),
+    ).rejects.toMatchObject({ statusCode: 403, errorCode: 'BUILDING_STATUS_FORBIDDEN' });
+
+    const unchanged = await buildingSvc.getManagerBuilding(manager, building._id);
+    expect(unchanged.status).toBe('active');
+  });
+
+  test("tòa đang 'inactive' vẫn ngoài tầm sửa của manager", async () => {
+    await building.updateOne({ status: 'inactive' });
+    await expect(
+      buildingSvc.updateManagerBuilding(manager, building._id, { status: 'active' }),
+    ).rejects.toMatchObject({ statusCode: 403, errorCode: 'BUILDING_STATUS_FORBIDDEN' });
+  });
+
+  test('sửa name khi đang maintenance vẫn được (không chỉ riêng status)', async () => {
+    await building.updateOne({ status: 'maintenance' });
+    const updated = await buildingSvc.updateManagerBuilding(manager, building._id, {
+      name: 'Renamed While Under Maintenance',
+    });
+    expect(updated.name).toBe('Renamed While Under Maintenance');
+    expect(updated.status).toBe('maintenance');
+  });
+});
+
 describe('updateManagerBuilding', () => {
   test('gửi kèm totalFloors → bị bỏ qua (chỉ name/status được sửa), floorCount vẫn tính từ Floor thật', async () => {
     await f.createFloor(building._id);

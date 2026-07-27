@@ -11,3 +11,4 @@ process.env.PAYOS_CLIENT_ID = process.env.PAYOS_CLIENT_ID || 'test-client-id';
 process.env.PAYOS_API_KEY = process.env.PAYOS_API_KEY || 'test-api-key';
 process.env.PAYOS_CHECKSUM_KEY = process.env.PAYOS_CHECKSUM_KEY || 'test-checksum-key';
 process.env.CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+process.env.KIOSK_DEVICE_TOKEN = process.env.KIOSK_DEVICE_TOKEN || 'test-kiosk-device-token';

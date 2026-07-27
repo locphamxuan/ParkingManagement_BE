@@ -1,16 +1,16 @@
 const mongoose = require('mongoose');
 const AppError = require('../../../utils/AppError');
-const { ParkingSession, ParkingSlot, Payment } = require('../../../models');
+const { ParkingSession, Payment } = require('../../../models');
 const { assertBuildingScope } = require('../../../utils/staffScope');
 const payosService = require('../../payment/payos.service');
+const {
+  createPayosIntent,
+  getPendingSessionIntent,
+} = require('../../payment/paymentIntent.service');
 const buildingWalletService = require('../../manager/buildingWallet.service');
+const { finalizeSlotAfterCheckout } = require('../../shared/slotLifecycle.service');
 const { calculateFee } = require('./helpers');
 
-/**
- * Tạo PayOS payment link để thu phí gửi xe trực tiếp.
- * Staff nhận checkoutUrl + qrCode → hiển thị QR cho khách quét.
- * Session giữ nguyên "active" cho đến khi webhook xác nhận thanh toán.
- */
 const initiatePayment = async (staffUser, sessionId) => {
   if (!sessionId) throw new AppError('sessionId is required', 400);
 
@@ -20,111 +20,131 @@ const initiatePayment = async (staffUser, sessionId) => {
   if (!parkingSession) throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
 
   assertBuildingScope(staffUser, parkingSession.building);
-
   if (parkingSession.status !== 'active') {
     throw new AppError('Session is not active', 400, 'SESSION_NOT_ACTIVE');
   }
 
   const fee = await calculateFee(parkingSession);
   if (!fee || fee <= 0) {
-    // Gói dài hạn còn trong hạn mức giờ/ngày → không có phí để thu qua PayOS.
-    throw new AppError('Phiên này không có phí cần thu (miễn phí theo gói).', 400, 'NO_FEE_DUE');
+    throw new AppError(
+      'This session has no fee due under its current package.',
+      400,
+      'NO_FEE_DUE',
+    );
   }
-  const orderCode = payosService.generateOrderCode();
 
-  const { checkoutUrl, qrCode, paymentLinkId } = await payosService.createPaymentLink({
-    orderCode,
-    amount: fee,
-    description: 'Phi giu xe PBMS',
-  });
-
-  // Persist pending Payment — webhook will complete the session
-  await Payment.create({
-    building: parkingSession.building,
-    parkingSession: parkingSession._id,
-    type: 'session',
-    method: 'payos',
-    amount: fee,
-    status: 'pending',
-    user: parkingSession.user || null,
-    staff: staffUser._id,
-    payosOrderCode: orderCode,
-    payosPaymentLinkId: paymentLinkId,
-    note: 'Parking fee via PayOS QR',
-  });
+  let intent = await getPendingSessionIntent(parkingSession._id);
+  if (!intent) {
+    try {
+      intent = await createPayosIntent({
+        paymentData: {
+          building: parkingSession.building,
+          parkingSession: parkingSession._id,
+          type: 'session',
+          amount: fee,
+          user: parkingSession.user || null,
+          staff: staffUser._id,
+          note: 'Parking fee via PayOS QR',
+        },
+        linkData: {
+          amount: fee,
+          description: 'Phi giu xe PBMS',
+        },
+      });
+    } catch (error) {
+      if (error?.code !== 11000 || !error?.keyPattern?.parkingSession) throw error;
+      intent = await getPendingSessionIntent(parkingSession._id);
+      if (!intent) throw error;
+    }
+  }
 
   return {
-    checkoutUrl,
-    qrCode,
-    orderCode,
-    amount: fee,
+    checkoutUrl: intent.checkoutUrl,
+    qrCode: intent.qrCode,
+    orderCode: intent.orderCode,
+    amount: intent.amount,
     plateNumber: parkingSession.plateNumber,
     entryTime: parkingSession.entryTime,
   };
 };
 
-/* ─────────────────────────────────────────────
-   settleSessionPayment
-   Complete a parking session paid via PayOS (bank transfer / VietQR) — race-safe
-   & idempotent. Shared by the PayOS webhook and the manual verify endpoint.
-   Atomically flips the pending Payment → success so only one caller completes the
-   session + credits the manager (building) wallet; never double-credits.
-───────────────────────────────────────────── */
 const settleSessionPayment = async (orderCode) => {
   const oc = Number(orderCode);
   const mongoSession = await mongoose.startSession();
   let result = { settled: false, status: 'already_processed' };
+
   try {
     await mongoSession.withTransaction(async () => {
-      const payment = await Payment.findOneAndUpdate(
-        { payosOrderCode: oc, type: 'session', status: 'pending' },
-        { status: 'success' },
+      const payment = await Payment.findOne({
+        payosOrderCode: oc,
+        type: 'session',
+        status: 'pending',
+      }).session(mongoSession);
+      if (!payment) return;
+
+      const exitTime = new Date();
+      const parkingSession = await ParkingSession.findOneAndUpdate(
+        { _id: payment.parkingSession, status: 'active' },
+        {
+          $set: {
+            exitTime,
+            status: 'completed',
+            fee: payment.amount,
+            paymentMethod: 'payos',
+          },
+        },
         { new: true, session: mongoSession },
       );
-      if (!payment) return; // already processed / unknown → no-op
 
-      const ps = await ParkingSession.findById(payment.parkingSession).session(mongoSession);
-      if (!ps) throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
+      if (!parkingSession) {
+        await Payment.updateOne(
+          { _id: payment._id, status: 'pending' },
+          {
+            $set: {
+              status: 'reconciliation_required',
+              note: `${payment.note || ''} | session_not_active_at_settlement`.trim(),
+            },
+          },
+          { session: mongoSession },
+        );
+        result = { settled: false, status: 'reconciliation_required' };
+        return;
+      }
 
-      if (ps.status === 'active') {
-        ps.exitTime = new Date();
-        ps.status = 'completed';
-        ps.fee = payment.amount;
-        ps.paymentMethod = 'payos';
-        await ps.save({ session: mongoSession });
+      const claimedPayment = await Payment.findOneAndUpdate(
+        { _id: payment._id, status: 'pending' },
+        { $set: { status: 'success' } },
+        { new: true, session: mongoSession },
+      );
+      if (!claimedPayment) {
+        throw new AppError('Payment was already processed', 409, 'PAYMENT_ALREADY_PROCESSED');
+      }
 
-        if (ps.slot) {
-          const slot = await ParkingSlot.findById(ps.slot).session(mongoSession);
-          if (slot && slot.status !== 'maintenance') {
-            slot.status = 'available';
-            await slot.save({ session: mongoSession });
-          }
-        }
+      await finalizeSlotAfterCheckout(parkingSession, mongoSession, exitTime);
 
-        // Credit the manager (building) wallet — same as the cash path.
-        if (payment.amount > 0) {
-          await buildingWalletService.credit(
-            ps.building, payment.amount, 'parking_fee', payment._id, mongoSession,
-          );
-        }
+      if (payment.amount > 0) {
+        await buildingWalletService.credit(
+          parkingSession.building,
+          payment.amount,
+          'parking_fee',
+          payment._id,
+          mongoSession,
+        );
       }
 
       result = { settled: true, status: 'success' };
     });
     return result;
-  } catch (err) {
-    if (err && err.code === 11000) return { settled: false, status: 'already_processed' };
-    throw err;
+  } catch (error) {
+    if (error?.code === 11000) {
+      return { settled: false, status: 'already_processed' };
+    }
+    throw error;
   } finally {
     mongoSession.endSession();
   }
 };
 
-/* ─────────────────────────────────────────────
-   verifySessionPayment
-   Reconcile a session payment with PayOS — fallback when the webhook never
-   reaches the server. Credits the wallet (via settleSessionPayment) if PAID.
-───────────────────────────────────────────── */
 const verifySessionPayment = async (staffUser, orderCode) => {
   const oc = Number(orderCode);
   if (!oc) throw new AppError('Invalid orderCode', 400);
@@ -136,18 +156,21 @@ const verifySessionPayment = async (staffUser, orderCode) => {
   if (payment.status === 'success') {
     return { status: 'success', settled: false };
   }
+  if (payment.status === 'reconciliation_required') {
+    return { status: 'reconciliation_required', settled: false };
+  }
 
   let info;
   try {
     info = await payosService.getPaymentLink(oc);
-  } catch (err) {
-    throw new AppError(`Could not verify payment with PayOS: ${err.message}`, 502);
+  } catch (error) {
+    throw new AppError(`Could not verify payment with PayOS: ${error.message}`, 502);
   }
 
   const payosStatus = String(info?.status || '').toUpperCase();
   if (payosStatus === 'PAID') {
-    const r = await settleSessionPayment(oc);
-    return { status: 'success', settled: r.settled };
+    const settlement = await settleSessionPayment(oc);
+    return { status: settlement.status, settled: settlement.settled };
   }
   return { status: payosStatus.toLowerCase() || 'pending', settled: false };
 };

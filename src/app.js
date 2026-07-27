@@ -17,6 +17,8 @@ app.use(cors({
   origin: (origin, callback) => {
     // No Origin header (curl/Postman/server-to-server, e.g. PayOS webhook) — allow.
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    // Allow any localhost / 127.0.0.1 port (e.g. Expo Web on 8081, Vite on 5173, etc.)
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return callback(null, true);
     return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,

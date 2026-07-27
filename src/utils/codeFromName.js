@@ -37,4 +37,4 @@ const initialsCode = (name, { stopWords = [], maxLen = 10, fallback = "X" } = {}
   return code.slice(0, maxLen) || fallback;
 };
 
-module.exports = { initialsCode, stripDiacritics, STOP_WORDS_VI };
+module.exports = { initialsCode, STOP_WORDS_VI };

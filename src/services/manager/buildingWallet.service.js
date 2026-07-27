@@ -4,10 +4,10 @@ const BuildingWalletTransaction = require('../../models/finance/BuildingWalletTr
 const Payment = require('../../models/finance/Payment');
 const AppError = require('../../utils/AppError');
 const { localUtcOffset } = require('../../utils/dateBucket');
+const { REVENUE_PAYMENT_TYPES } = require('../../constants/finance');
 
 // Loại Payment tính là DOANH THU thật (loại 'topup' = manager tự nạp ví, 'refund' =
 // tiền hoàn ra). Khớp định nghĩa doanh thu ở dashboard manager/admin.
-const REVENUE_PAYMENT_TYPES = ['session', 'reservation', 'subscription'];
 
 // ─── Day helpers (local-server time) ───────────────────────────────────────────
 
@@ -125,7 +125,7 @@ const getDailyRevenue = async (buildingId, date) => {
       $match: {
         building: new mongoose.Types.ObjectId(String(buildingId)),
         type: 'credit',
-        reason: { $in: ['parking_fee', 'reservation_fee', 'subscription_fee'] },
+        reason: { $in: ['parking_fee', 'reservation_fee', 'subscription_fee', 'penalty_fee'] },
         createdAt: { $gte: start, $lte: end },
       },
     },
@@ -155,31 +155,69 @@ const getRevenueBreakdown = async (buildingId, { from, to } = {}) => {
   if (!from) start.setDate(start.getDate() - 13); // 14 ngày gồm hôm nay
   start.setHours(0, 0, 0, 0);
 
-  const baseMatch = { building: bId, status: 'success', type: { $in: REVENUE_PAYMENT_TYPES } };
+  const baseMatch = {
+    building: bId,
+    status: 'success',
+    type: { $in: [...REVENUE_PAYMENT_TYPES, 'refund'] },
+  };
   const byMethodStage = {
-    total: { $sum: '$amount' },
-    cash: { $sum: { $cond: [{ $eq: ['$method', 'cash'] }, '$amount', 0] } },
-    wallet: { $sum: { $cond: [{ $eq: ['$method', 'wallet'] }, '$amount', 0] } },
-    online: { $sum: { $cond: [{ $in: ['$method', ['qr', 'payos', 'card']] }, '$amount', 0] } },
+    total: { $sum: { $cond: [{ $in: ['$type', REVENUE_PAYMENT_TYPES] }, '$amount', 0] } },
+    refunds: { $sum: { $cond: [{ $eq: ['$type', 'refund'] }, '$amount', 0] } },
+    cash: { $sum: { $cond: [{ $and: [{ $in: ['$type', REVENUE_PAYMENT_TYPES] }, { $eq: ['$method', 'cash'] }] }, '$amount', 0] } },
+    wallet: { $sum: { $cond: [{ $and: [{ $in: ['$type', REVENUE_PAYMENT_TYPES] }, { $eq: ['$method', 'wallet'] }] }, '$amount', 0] } },
+    online: { $sum: { $cond: [{ $and: [{ $in: ['$type', REVENUE_PAYMENT_TYPES] }, { $in: ['$method', ['qr', 'payos', 'card']] }] }, '$amount', 0] } },
   };
 
-  const [dayRows, allTime] = await Promise.all([
+  const [dayRows, allTime, pendingCash] = await Promise.all([
     Payment.aggregate([
-      { $match: { ...baseMatch, createdAt: { $gte: start, $lte: end } } },
-      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: localUtcOffset() } }, ...byMethodStage } },
+      { $set: { effectiveAt: { $ifNull: ['$settledAt', '$createdAt'] } } },
+      { $match: { ...baseMatch, effectiveAt: { $gte: start, $lte: end } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$effectiveAt', timezone: localUtcOffset() } }, ...byMethodStage } },
+      { $set: { net: { $subtract: ['$total', '$refunds'] } } },
       { $sort: { _id: -1 } },
     ]),
     Payment.aggregate([
       { $match: baseMatch },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
+      {
+        $group: {
+          _id: null,
+          gross: { $sum: { $cond: [{ $in: ['$type', REVENUE_PAYMENT_TYPES] }, '$amount', 0] } },
+          refunds: { $sum: { $cond: [{ $eq: ['$type', 'refund'] }, '$amount', 0] } },
+        },
+      },
+    ]),
+    Payment.aggregate([
+      {
+        $match: {
+          building: bId,
+          status: 'pending',
+          method: 'cash',
+          type: { $in: REVENUE_PAYMENT_TYPES },
+        },
+      },
+      { $group: { _id: null, amount: { $sum: '$amount' }, count: { $sum: 1 } } },
     ]),
   ]);
 
+  const allTimeGross = allTime[0]?.gross ?? 0;
+  const allTimeRefunds = allTime[0]?.refunds ?? 0;
   return {
-    allTimeTotal: allTime[0]?.total ?? 0,
+    allTimeTotal: allTimeGross,
+    allTimeGross,
+    allTimeRefunds,
+    allTimeNet: allTimeGross - allTimeRefunds,
+    pendingCash: pendingCash[0] || { amount: 0, count: 0 },
+    definitions: {
+      gross: 'Successful operating revenue before refunds',
+      net: 'Gross revenue minus refunds',
+      pendingCash: 'Cash recorded by staff but not yet confirmed by the manager',
+    },
     days: dayRows.map((r) => ({
       date: r._id,
       total: r.total,
+      gross: r.total,
+      refunds: r.refunds,
+      net: r.net,
       byMethod: { cash: r.cash, wallet: r.wallet, online: r.online },
     })),
   };
@@ -216,7 +254,12 @@ const listTransactions = async (buildingId, query = {}) => {
 const listPendingCash = async (buildingId, query = {}) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
-  const filter = { building: buildingId, method: 'cash', status: 'pending', type: 'session' };
+  const filter = {
+    building: buildingId,
+    method: 'cash',
+    status: 'pending',
+    type: { $in: ['session', 'penalty'] },
+  };
 
   const [items, total, sumAgg] = await Promise.all([
     Payment.find(filter)
@@ -227,7 +270,7 @@ const listPendingCash = async (buildingId, query = {}) => {
       .populate('staff', 'fullName email'),
     Payment.countDocuments(filter),
     Payment.aggregate([
-      { $match: { building: new mongoose.Types.ObjectId(String(buildingId)), method: 'cash', status: 'pending', type: 'session' } },
+      { $match: { building: new mongoose.Types.ObjectId(String(buildingId)), method: 'cash', status: 'pending', type: { $in: ['session', 'penalty'] } } },
       { $group: { _id: null, total: { $sum: '$amount' } } },
     ]),
   ]);
@@ -253,7 +296,7 @@ const confirmCash = async (buildingId, paymentId, performedById) => {
     await mongoSession.withTransaction(async () => {
       // Guard status:'pending' để 2 request đồng thời chỉ 1 cái thành công.
       const payment = await Payment.findOneAndUpdate(
-        { _id: paymentId, building: buildingId, method: 'cash', status: 'pending', type: 'session' },
+        { _id: paymentId, building: buildingId, method: 'cash', status: 'pending', type: { $in: ['session', 'penalty'] } },
         { $set: { status: 'success' } },
         { new: true, session: mongoSession },
       );
@@ -273,7 +316,7 @@ const confirmCash = async (buildingId, paymentId, performedById) => {
             type: 'credit',
             amount: payment.amount,
             balanceAfter: wallet.balance,
-            reason: 'parking_fee',
+            reason: payment.type === 'penalty' ? 'penalty_fee' : 'parking_fee',
             relatedPayment: payment._id,
             performedBy: performedById || null,
             note: 'Cash receipt confirmed by manager',

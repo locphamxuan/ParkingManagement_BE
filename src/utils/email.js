@@ -20,6 +20,9 @@ const createTransporter = () =>
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
+    connectionTimeout: Number(process.env.EMAIL_CONNECTION_TIMEOUT_MS) || 10000,
+    greetingTimeout: Number(process.env.EMAIL_GREETING_TIMEOUT_MS) || 10000,
+    socketTimeout: Number(process.env.EMAIL_SOCKET_TIMEOUT_MS) || 10000,
   });
 
 const fromAddress = () => `"PBMS - Parking Management" <${process.env.EMAIL_USER}>`;
@@ -36,8 +39,14 @@ const renderLayout = ({ heading, greeting, bodyHtml }) => [
 ].join("\n");
 
 const send = async ({ to, subject, html }) => {
+  // Tests and local environments without SMTP credentials must not leave a job
+  // waiting on a network socket. Notification delivery is intentionally best effort.
+  if (process.env.NODE_ENV === 'test' || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    return false;
+  }
   const transporter = createTransporter();
   await transporter.sendMail({ from: fromAddress(), to, subject, html });
+  return true;
 };
 
 const sendResetPasswordEmail = async ({ to, resetUrl, fullName }) => {
