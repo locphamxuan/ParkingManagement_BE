@@ -1,0 +1,77 @@
+name: Backend CI/CD
+
+on:
+  pull_request:
+    branches: [dev]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy to Render after tests pass
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Test backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --ci
+
+  deploy-render:
+    name: Deploy to Render
+    needs: quality
+    if: >-
+      github.ref == 'refs/heads/dev' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'workflow_dispatch' && inputs.deploy)
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate deploy hook
+        shell: bash
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [[ -z "$RENDER_DEPLOY_HOOK_URL" ]]; then
+            echo "::error::Missing RENDER_DEPLOY_HOOK_URL repository secret."
+            exit 1
+          fi
+
+      - name: Trigger deploy hook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: >-
+          curl
+          --fail-with-body
+          --silent
+          --show-error
+          --connect-timeout 15
+          --max-time 60
+          --request POST
+          "$RENDER_DEPLOY_HOOK_URL"
