@@ -502,7 +502,7 @@
  *       properties:
  *         _id: { $ref: '#/components/schemas/ObjectId' }
  *         building: { $ref: '#/components/schemas/ObjectId' }
- *         type: { type: string, enum: [session, reservation, subscription, refund, topup, cancellation_fee], description: 'reservation/cancellation_fee are historical values from the removed hourly-reservation feature — still present on old records.', example: session }
+ *         type: { type: string, enum: [session, reservation, subscription, penalty, refund, topup, cancellation_fee], description: 'Earned revenue uses session/reservation/subscription/penalty; refund is an outflow; topup is funding, not revenue.', example: session }
  *         method: { type: string, enum: [cash, wallet, qr, card, payos], example: cash }
  *         amount: { type: number, example: 45000 }
  *         status: { type: string, enum: [pending, success, failed, refunded], description: 'Cash payments start pending until a manager confirms collection via wallet/pending-cash/{paymentId}/confirm; other methods settle as success immediately.', example: success }

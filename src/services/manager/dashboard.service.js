@@ -8,6 +8,7 @@ const Feedback = require("../../models/operations/Feedback");
 const mongoose = require("mongoose");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { localUtcOffset } = require("../../utils/dateBucket");
+const { REVENUE_PAYMENT_TYPES } = require("../../constants/finance");
 
 const startOfDay = (date) => {
   const d = new Date(date);
@@ -51,6 +52,7 @@ const getOverview = async (user, buildingId) => {
       entryTime: { $gte: today, $lt: tomorrow },
     }),
     Payment.aggregate([
+      { $set: { effectiveAt: { $ifNull: ["$settledAt", "$createdAt"] } } },
       {
         $match: {
           building: toObjectId(buildingId),
@@ -59,8 +61,8 @@ const getOverview = async (user, buildingId) => {
           // và 'topup' (manager tự nạp ví) — khớp định nghĩa của ví tòa nhà (getDailyRevenue).
           // 'cancellation_fee' KHÔNG cộng thêm: cọc gốc đã tính qua 'reservation' lúc đặt,
           // cộng thêm sẽ đếm trùng phần giữ lại trong chính cọc đó.
-          type: { $in: ["session", "reservation", "subscription"] },
-          createdAt: { $gte: today, $lt: tomorrow },
+          type: { $in: REVENUE_PAYMENT_TYPES },
+          effectiveAt: { $gte: today, $lt: tomorrow },
         },
       },
       {
@@ -83,19 +85,20 @@ const getOverview = async (user, buildingId) => {
     }),
     // Weekly revenue trend from successful Payments (consistent with today's card).
     Payment.aggregate([
+      { $set: { effectiveAt: { $ifNull: ["$settledAt", "$createdAt"] } } },
       {
         $match: {
           building: toObjectId(buildingId),
           status: "success",
           // Cùng định nghĩa doanh thu với card "hôm nay": loại refund/topup/cancellation_fee.
-          type: { $in: ["session", "reservation", "subscription"] },
-          createdAt: { $gte: sevenDaysAgo, $lt: tomorrow },
+          type: { $in: REVENUE_PAYMENT_TYPES },
+          effectiveAt: { $gte: sevenDaysAgo, $lt: tomorrow },
         },
       },
       {
         $group: {
           _id: {
-            $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: localUtcOffset() },
+            $dateToString: { format: "%Y-%m-%d", date: "$effectiveAt", timezone: localUtcOffset() },
           },
           totalRevenue: { $sum: "$amount" },
           sessionCount: { $sum: 1 },

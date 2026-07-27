@@ -83,7 +83,7 @@ const settlePendingPenaltyAtCheckout = async (staffUser, parkingSession, payment
 
   const [payment] = await Payment.create([{
     building: parkingSession.building,
-    type: 'session',
+    type: 'penalty',
     method: paymentMethod,
     amount: penaltyFee,
     status: isCashPending ? 'pending' : 'success',
@@ -95,7 +95,7 @@ const settlePendingPenaltyAtCheckout = async (staffUser, parkingSession, payment
   }], { session: mongoSession });
 
   if (penaltyFee > 0 && !isCashPending) {
-    await buildingWalletService.credit(parkingSession.building, penaltyFee, 'parking_fee', payment._id, mongoSession);
+    await buildingWalletService.credit(parkingSession.building, penaltyFee, 'penalty_fee', payment._id, mongoSession);
   }
 
   incident.status = 'resolved';
