@@ -113,7 +113,6 @@ const getShiftWindowRelation = (
 
 module.exports = {
   BUSINESS_TIMEZONE,
-  HH_MM_RE,
   parseTime,
   isWithinOperatingWindow,
   isWithinShiftWindow,
