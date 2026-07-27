@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon --watch src --ext js,json src/server.js",
-    "test": "jest --runInBand"
+    "dev:memory": "node tools/run-dev-memory-db.js",
+    "test": "jest --runInBand",
+    "audit:business-logic": "node src/businessLogicAudit.cli.js --dry-run",
+    "report:stale-payos": "node src/stalePayosReport.cli.js"
   },
   "keywords": [
     "parking",
@@ -16,14 +19,19 @@
   ],
   "license": "ISC",
   "dependencies": {
+    "@google/genai": "^2.8.0",
     "@payos/node": "^2.0.5",
     "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.22.2",
+    "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.24.0",
-    "nodemailer": "^8.0.8"
+    "nodemailer": "^8.0.8",
+    "swagger-jsdoc": "^6.3.0",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "jest": "^30.4.2",

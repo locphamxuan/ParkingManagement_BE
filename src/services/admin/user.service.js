@@ -1,5 +1,9 @@
 ﻿const User = require("../../models/user/User");
 const BuildingManager = require("../../models/building/BuildingManager");
+const StaffShift = require("../../models/operations/StaffShift");
+const ParkingSession = require("../../models/operations/ParkingSession");
+const LongTermSubscription = require("../../models/policy/LongTermSubscription");
+const { Payment, WalletTransaction, Notification } = require('../../models');
 const AppError = require("../../utils/AppError");
 const { ROLES, ROLE_LIST } = require("../../constants/roles");
 const { writeAuditLog } = require("../../utils/audit");
@@ -57,6 +61,13 @@ const create = async (actor, payload) => {
       400
     );
   }
+  if (payload.role === ROLES.ADMIN) {
+    throw new AppError(
+      'Admin accounts are provisioned through the deployment/bootstrap process, not the user-management screen.',
+      403,
+      'ADMIN_PROVISIONING_FORBIDDEN',
+    );
+  }
 
   const exists = await User.exists({ email: payload.email });
   if (exists) throw new AppError("Email already registered", 409);
@@ -65,7 +76,9 @@ const create = async (actor, payload) => {
     email: String(payload.email).trim().toLowerCase(),
     password: payload.password,
     fullName: String(payload.fullName).trim(),
-    phone: payload.phone || "",
+    // undefined (không phải "") để field hoàn toàn không tồn tại trên document —
+    // khớp với sparse unique index của phone, tránh 2 user không nhập SĐT đụng E11000.
+    phone: payload.phone ? String(payload.phone).trim() : undefined,
     role: payload.role || ROLES.USER,
     isActive: payload.isActive !== false,
   });
@@ -110,6 +123,9 @@ const update = async (actor, id, payload) => {
         'USE_ASSIGNMENT_ENDPOINT',
       );
     }
+    if (current.role === ROLES.ADMIN && payload.role !== ROLES.ADMIN) {
+      throw new AppError('Cannot change the role of an admin account', 400, 'ADMIN_ROLE_IMMUTABLE');
+    }
     if (['staff', 'manager'].includes(current.role)) {
       throw new AppError(
         `Cannot change role of a ${current.role} directly. ` +
@@ -120,7 +136,12 @@ const update = async (actor, id, payload) => {
     }
     update.role = payload.role;
   }
-  if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
+  if (payload.isActive !== undefined) {
+    if (current.role === ROLES.ADMIN && !payload.isActive) {
+      throw new AppError('Cannot deactivate an admin account', 400, 'ADMIN_STATUS_IMMUTABLE');
+    }
+    update.isActive = !!payload.isActive;
+  }
 
   const updated = await User.findByIdAndUpdate(id, update, {
     new: true,
@@ -149,6 +170,16 @@ const updateStatus = async (actor, id, isActive) => {
     throw new AppError("Cannot change status of admin account", 400);
   }
 
+  // Khóa vẫn được phép khi user còn phiên gửi xe / gói active (chặn kẻ xấu ngay lập tức
+  // là ưu tiên; staff checkout không phụ thuộc login của user) — nhưng ghi rõ vào audit
+  // để admin biết xe của user vẫn đang trong bãi.
+  const [activeSessions, activeSubscriptions] = !isActive
+    ? await Promise.all([
+        ParkingSession.countDocuments({ user: id, status: "active" }),
+        LongTermSubscription.countDocuments({ user: id, status: "active" }),
+      ])
+    : [0, 0];
+
   const updated = await User.findByIdAndUpdate(
     id,
     { isActive: !!isActive },
@@ -161,8 +192,8 @@ const updateStatus = async (actor, id, isActive) => {
     targetTable: "users",
     targetId: id,
     previousValue: { isActive: current.isActive, role: current.role },
-    newValue: { isActive: !!isActive },
-    severity: "medium",
+    newValue: { isActive: !!isActive, activeSessions, activeSubscriptions },
+    severity: !isActive && (activeSessions > 0 || activeSubscriptions > 0) ? "high" : "medium",
   });
   return updated;
 };
@@ -172,6 +203,43 @@ const remove = async (actor, id, { force = false } = {}) => {
   if (current.role === ROLES.ADMIN) {
     throw new AppError("Cannot delete admin account", 400);
   }
+  // Chặn XÓA khi user còn phiên gửi xe active (xe vẫn trong bãi — xóa sẽ mồ côi
+  // session.user, checkout/ví sẽ gãy) hoặc gói dài hạn active (mất dấu tiền gói).
+  // force KHÔNG bypass được 2 guard này — chỉ bypass building assignment bên dưới.
+  const [activeSessions, activeSubs] = await Promise.all([
+    ParkingSession.countDocuments({ user: id, status: "active" }),
+    LongTermSubscription.countDocuments({ user: id, status: "active" }),
+  ]);
+  if (activeSessions > 0) {
+    throw new AppError(
+      `User has ${activeSessions} active parking session(s) — the vehicle is still parked. Check out first.`,
+      409,
+      "USER_HAS_ACTIVE_SESSION",
+    );
+  }
+  if (activeSubs > 0) {
+    throw new AppError(
+      `User has ${activeSubs} active long-term subscription(s). Cancel them first.`,
+      409,
+      "USER_HAS_ACTIVE_SUBSCRIPTION",
+    );
+  }
+
+  const hasHistoricalRecords = await Promise.all([
+    ParkingSession.exists({ $or: [{ user: id }, { staff: id }] }),
+    LongTermSubscription.exists({ user: id }),
+    Payment.exists({ $or: [{ user: id }, { staff: id }] }),
+    WalletTransaction.exists({ user: id }),
+    Notification.exists({ user: id }),
+  ]);
+  if (hasHistoricalRecords.some(Boolean)) {
+    throw new AppError(
+      'This account has operational or financial history and cannot be deleted. Lock the account instead so audit records remain traceable.',
+      409,
+      'USER_HAS_HISTORY',
+    );
+  }
+
   const activeMappings = await BuildingManager.find({ user: id, isActive: true });
   if (activeMappings.length > 0) {
     if (!force) {
@@ -189,6 +257,16 @@ const remove = async (actor, id, { force = false } = {}) => {
       }
     }
   }
+
+  // Cascade-clean operational references so we never leave orphaned documents
+  // pointing at a deleted user (which would break the manager "Gán ca" page):
+  //  - StaffShift: the user can no longer be on any shift → remove the rows.
+  //  - ParkingSession: keep historical records, just detach the staff ref.
+  //  - BuildingManager: drop any leftover mappings (active ones revoked above).
+  await StaffShift.deleteMany({ staff: id });
+  await ParkingSession.updateMany({ staff: id }, { $set: { staff: null } });
+  await BuildingManager.deleteMany({ user: id });
+
   await User.deleteOne({ _id: id });
   await writeAuditLog({
     actor,

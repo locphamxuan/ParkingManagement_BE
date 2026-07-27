@@ -13,40 +13,79 @@ const authorize =
     next();
   };
 
-const extractBuildingId = (req) =>
-  req.params.buildingId ||
-  req.params.id ||
-  req.query.buildingId ||
-  req.query.building ||
-  req.body.buildingId ||
-  req.body.building;
+// 🛠️ FIX TỬ HUYỆN: Kiểm tra an toàn sự tồn tại của req và req.body/query/params
+const extractBuildingId = (req) => {
+  if (!req) return null;
+  return (
+    req.params?.buildingId ||
+    req.params?.id ||
+    req.query?.buildingId ||
+    req.query?.building ||
+    req.body?.buildingId ||
+    req.body?.building
+  );
+};
 
 const authorizeBuildingAccess = (req, _res, next) => {
   if (!req.user) {
     return next(new AppError("Authentication required", 401));
   }
 
-  if (req.user.role === ROLES.ADMIN) {
+  // Nếu là ADMIN tối cao thì cho qua luôn, không cần check building
+  if (req.user.role === 'admin' || req.user.role === ROLES.ADMIN) {
     return next();
   }
 
   const buildingId = extractBuildingId(req);
-  if (!buildingId) {
-    return next(new AppError("buildingId is required", 400));
-  }
 
   const assignedBuildings = Array.isArray(req.user.assignedBuildings)
     ? req.user.assignedBuildings
     : [];
+
+  // Staff endpoints may work from already-known assigned buildings,
+  // so allow requests without explicit buildingId when the user has assignments.
+  if (!buildingId) {
+    if (req.user.role === ROLES.STAFF && assignedBuildings.length > 0) {
+      return next();
+    }
+
+    return next(new AppError("Validation Failed: buildingId is required in params/query/body to verify access scope.", 400));
+  }
+
   const allowed = assignedBuildings.some(
     (building) => `${building._id || building}` === `${buildingId}`,
   );
 
   if (!allowed) {
-    return next(new AppError("Forbidden for this building", 403));
+    return next(
+      new AppError(
+        "Forbidden: You do not have permission to manage this specific building.",
+        403,
+        "BUILDING_ACCESS_DENIED",
+      ),
+    );
   }
 
   next();
 };
 
-module.exports = { authorize, authorizeBuildingAccess };
+/**
+ * Admin = operator chỉ-ĐỌC cấu hình tòa nhà: cho phép GET/HEAD/OPTIONS, chặn
+ * mọi phương thức ghi (POST/PUT/PATCH/DELETE). Manager không bị ảnh hưởng.
+ * Đặt SAU authorize(MANAGER, ADMIN) trên nhóm route quản lý tòa nhà.
+ */
+const READ_METHODS = ["GET", "HEAD", "OPTIONS"];
+const readOnlyForAdmin = (req, _res, next) => {
+  if (req.user?.role === ROLES.ADMIN && !READ_METHODS.includes(req.method)) {
+    return next(
+      new AppError(
+        "Admin chỉ có quyền xem cấu hình tòa nhà (read-only).",
+        403,
+        "ADMIN_READ_ONLY",
+      ),
+    );
+  }
+  next();
+};
+
+module.exports = { authorize, authorizeBuildingAccess, readOnlyForAdmin };

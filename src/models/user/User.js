@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
+const crypto = require('node:crypto');
 const bcrypt = require('bcryptjs');
 const { ROLE_LIST, ROLES } = require('../../constants/roles');
+const { isValidVietnamPlate } = require('../../utils/plate.util');
+
+// Unique opaque QR token for a license plate (staff scans this to identify the vehicle/owner).
+const generatePlateQrCode = () => `PLT-${crypto.randomBytes(8).toString('hex')}`;
 
 const userSchema = new mongoose.Schema(
   {
@@ -10,7 +15,7 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
-      match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please provide a valid email'],
     },
     password: {
       type: String,
@@ -28,6 +33,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       match: [/^[0-9+\-\s()]{8,20}$/, 'Please provide a valid phone number'],
+      // Partial unique index: chỉ enforce unique khi có giá trị, tránh lỗi
+      // duplicate-key giữa nhiều user chưa nhập số điện thoại (null/undefined).
+      unique: true,
+      sparse: true,
     },
     role: {
       type: String,
@@ -49,15 +58,32 @@ const userSchema = new mongoose.Schema(
           required: true,
           uppercase: true,
           trim: true,
+          validate: {
+            validator: isValidVietnamPlate,
+            message: 'Biển số không hợp lệ (định dạng Việt Nam, ví dụ: 59G2-038.80)',
+          },
         },
         vehicleType: {
           type: String,
-          enum: ['motorcycle', 'car', 'suv', 'truck', 'other'],
+          enum: ['motorcycle', 'car', 'ebike', 'emotorbike', 'suv', 'truck', 'other'],
           default: 'car',
+        },
+        // Vehicle make chosen by the user (e.g. Toyota, Honda, VinFast). Optional.
+        brand: {
+          type: String,
+          trim: true,
+          maxlength: [50, 'Brand cannot exceed 50 characters'],
+          default: null,
         },
         isDefault: {
           type: Boolean,
           default: false,
+        },
+        // Unique QR token auto-generated per plate; scanned by staff to identify the vehicle.
+        qrCode: {
+          type: String,
+          default: generatePlateQrCode,
+          index: true,
         },
       },
     ],
@@ -90,6 +116,17 @@ const userSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    // Brute-force lockout: số lần nhập sai liên tiếp + mốc hết khóa.
+    failedLoginAttempts: {
+      type: Number,
+      default: 0,
+      select: false,
+    },
+    lockUntil: {
+      type: Date,
+      default: null,
+      select: false,
+    },
   },
   {
     timestamps: true,
@@ -98,6 +135,8 @@ const userSchema = new mongoose.Schema(
         delete ret.password;
         delete ret.resetPasswordToken;
         delete ret.resetPasswordExpires;
+        delete ret.failedLoginAttempts;
+        delete ret.lockUntil;
         delete ret.__v;
         return ret;
       },
@@ -124,3 +163,4 @@ userSchema.methods.comparePassword = async function comparePassword(
 const User = mongoose.model('User', userSchema);
 
 module.exports = User;
+module.exports.generatePlateQrCode = generatePlateQrCode;

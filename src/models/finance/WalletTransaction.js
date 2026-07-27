@@ -6,7 +6,7 @@ const walletTransactionSchema = new mongoose.Schema(
     payment: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment', default: null },
     type: {
       type: String,
-      enum: ['debit', 'credit'],
+      enum: ['debit', 'credit', 'refund'],
       required: true,
     },
     amount: { type: Number, required: true, min: 0 },

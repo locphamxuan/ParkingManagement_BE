@@ -270,24 +270,24 @@ Header chung (khi cần đăng nhập): `Authorization: Bearer <token>`
 | CRUD | `/packages` | Gói vé dài hạn 
 | CRUD | `/reservation-policies` | Chính sách đặt chỗ 
 | POST | `/reservation-policies/:id/push` | Đẩy policy (`policy_push_logs`) 
-| GET | `/revenue` | Doanh thu / `shift_revenues` 
+| GET | `/buildings/:buildingId/wallet/revenue-breakdown` | Doanh thu gộp, hoàn tiền, thuần và tiền mặt chờ xác nhận
 | GET | `/subscriptions` | Gói đã bán trong tòa 
 | GET | `/feedbacks` | Phản hồi khách 
 
-### 6.4 Admin (`/api/admin`) — Quản trị hệ thống
+### 6.4 Admin (`/api/admin`) — Chủ hệ thống PBMS
 
 | Method | Endpoint | Mô tả | Trạng thái |
 |--------|----------|--------|------------|
 | CRUD | `/users` | Quản lý mọi role 
 | PATCH | `/users/:id/status` | Khóa / mở tài khoản 
 | CRUD | `/buildings` | Toàn bộ tòa nhà 
-| CRUD | `/vehicle-types` | Loại phương tiện 
-| POST | `/building-managers` | Gán manager ↔ building 
-| GET | `/system-wallet` | Ví hệ thống 
-| GET | `/revenue-distributions` | Phân bổ doanh thu 
-| POST | `/revenue-distributions` | Tạo phân bổ 
+| POST | `/buildings/:id/assign-manager` | Gán Manager vận hành bãi
+| POST | `/buildings/:id/assign-staff` | Gán Staff cho bãi
+| GET | `/revenue` | Báo cáo gross/refund/net/pending cash theo bãi
+| GET | `/revenue/transactions` | Sổ Payment toàn hệ thống
+| GET | `/revenue/reconciliation` | Đối soát tiền chờ và sai lệch ví–sổ cái
+| GET | `/governance/roles` | Ma trận trách nhiệm Admin/Manager/Staff/User
 | GET | `/audit-logs` | Nhật ký (`audit_logs`) 
-| GET | `/payments` | Tra cứu thanh toán toàn hệ thống 
 
 
 

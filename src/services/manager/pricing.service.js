@@ -1,8 +1,24 @@
 ﻿const PricePolicy = require("../../models/policy/PricePolicy");
-const PolicyPushLog = require("../../models/policy/PolicyPushLog");
+const VehicleType = require("../../models/building/VehicleType");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
+
+// Trùng lặp bảng giá được xử lý ở tầng MODEL: PricePolicy.pre('save') tự deactivate
+// các policy cùng (building, vehicleType, type) đang active khi tạo/bật policy mới.
+// Vì vậy service KHÔNG chặn conflict nữa (tránh mâu thuẫn với hook auto-deactivate).
+
+const assertValidRate = (rate) => {
+  if (Number.isNaN(rate) || rate < 0) {
+    throw new AppError("hourlyRate must be a non-negative number", 400);
+  }
+};
+
+const assertValidEffectiveRange = (from, to) => {
+  if (to && from && new Date(to).getTime() <= new Date(from).getTime()) {
+    throw new AppError("effectiveTo must be after effectiveFrom", 400);
+  }
+};
 
 const list = async (user, buildingId, query = {}) => {
   ensureManagerOwnsBuilding(user, buildingId);
@@ -17,14 +33,6 @@ const list = async (user, buildingId, query = {}) => {
 };
 
 const writeLog = async (user, buildingId, policy, action, previousValue, newValue) => {
-  await PolicyPushLog.create({
-    building: buildingId,
-    pricePolicy: policy._id,
-    actor: user._id,
-    action,
-    previousValue,
-    newValue,
-  });
   await writeAuditLog({
     actor: user,
     action: `${action.toUpperCase()}_PRICE_POLICY`,
@@ -41,19 +49,26 @@ const create = async (user, buildingId, payload) => {
   ensureManagerOwnsBuilding(user, buildingId);
   if (!payload.vehicleType) throw new AppError("vehicleType is required", 400);
 
+  // Loại xe phải thuộc tòa nhà (tránh tham chiếu chéo tòa nhà).
+  const vtExists = await VehicleType.exists({ _id: payload.vehicleType, building: buildingId });
+  if (!vtExists) throw new AppError("Vehicle type not found in this building", 404);
+
+  const type = payload.type === 'peak' ? 'peak' : 'regular';
+  const hourlyRate = Number(payload.hourlyRate);
+  const effectiveFrom = payload.effectiveFrom || new Date();
+  const effectiveTo = payload.effectiveTo || null;
+  assertValidRate(hourlyRate);
+  assertValidEffectiveRange(effectiveFrom, effectiveTo);
+
   const created = await PricePolicy.create({
     building: buildingId,
     vehicleType: payload.vehicleType,
     name: String(payload.name || "").trim(),
-    type: payload.type || 'regular',
-    hourlyRate: Number(payload.hourlyRate),
-    dailyCap: payload.dailyCap !== undefined ? Number(payload.dailyCap) : null,
-    minRate: payload.minRate !== undefined ? Number(payload.minRate) : 0,
-    maxRate: payload.maxRate !== undefined ? Number(payload.maxRate) : null,
+    type,
+    hourlyRate,
     timeWindow: payload.timeWindow || undefined,
-    holidayDates: payload.holidayDates || [],
-    effectiveFrom: payload.effectiveFrom || new Date(),
-    effectiveTo: payload.effectiveTo || null,
+    effectiveFrom,
+    effectiveTo,
     isActive: payload.isActive !== false,
   });
   await writeLog(user, buildingId, created, "create", null, created.toObject());
@@ -66,22 +81,23 @@ const update = async (user, buildingId, id, payload) => {
   if (!current) throw new AppError("Price policy not found", 404);
 
   const update = {};
-  [
-    "name",
-    "vehicleType",
-    "type",
-    "timeWindow",
-    "holidayDates",
-    "effectiveFrom",
-    "effectiveTo",
-  ].forEach((k) => {
+  ["name", "vehicleType", "type", "timeWindow", "effectiveFrom", "effectiveTo"].forEach((k) => {
     if (payload[k] !== undefined) update[k] = payload[k];
   });
-  ["hourlyRate", "dailyCap", "minRate", "maxRate"].forEach((k) => {
-    if (payload[k] !== undefined)
-      update[k] = payload[k] === null ? null : Number(payload[k]);
-  });
+  if (payload.type !== undefined) update.type = payload.type === 'peak' ? 'peak' : 'regular';
+  if (payload.hourlyRate !== undefined) update.hourlyRate = Number(payload.hourlyRate);
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
+
+  if (payload.vehicleType !== undefined) {
+    const vtExists = await VehicleType.exists({ _id: payload.vehicleType, building: buildingId });
+    if (!vtExists) throw new AppError("Vehicle type not found in this building", 404);
+  }
+  if (update.hourlyRate !== undefined) assertValidRate(update.hourlyRate);
+
+  // Giá trị hiệu lực sau cập nhật (gộp current + payload) để kiểm tra khoảng ngày.
+  const effFrom = update.effectiveFrom ?? current.effectiveFrom;
+  const effTo = update.effectiveTo !== undefined ? update.effectiveTo : current.effectiveTo;
+  assertValidEffectiveRange(effFrom, effTo);
 
   const updated = await PricePolicy.findByIdAndUpdate(id, update, {
     new: true,
@@ -119,29 +135,5 @@ const deactivate = async (user, buildingId, id) => {
   return updated;
 };
 
-const listPushLogs = async (user, buildingId, query = {}) => {
-  ensureManagerOwnsBuilding(user, buildingId);
-  const page = Math.max(Number(query.page) || 1, 1);
-  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
-
-  const filter = { building: buildingId };
-  if (query.pricePolicy) filter.pricePolicy = query.pricePolicy;
-
-  const [items, total] = await Promise.all([
-    PolicyPushLog.find(filter)
-      .populate("actor", "fullName email role")
-      .populate("pricePolicy", "name")
-      .sort("-createdAt")
-      .skip((page - 1) * limit)
-      .limit(limit),
-    PolicyPushLog.countDocuments(filter),
-  ]);
-
-  return {
-    items,
-    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
-  };
-};
-
-module.exports = { list, create, update, deactivate, listPushLogs };
+module.exports = { list, create, update, deactivate };
 

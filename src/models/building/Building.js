@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { parseTime } = require('../../utils/businessTime');
 
 const operatingHoursSchema = new mongoose.Schema(
   {
@@ -7,6 +8,13 @@ const operatingHoursSchema = new mongoose.Schema(
   },
   { _id: false }
 );
+operatingHoursSchema.path('close').validate(function validateWindow(close) {
+  return (
+    parseTime(this.open) !== null &&
+    parseTime(close) !== null &&
+    this.open !== close
+  );
+}, 'Operating hours must use distinct HH:mm open/close values');
 
 const pricingSchema = new mongoose.Schema(
   {

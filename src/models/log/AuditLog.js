@@ -34,6 +34,7 @@ const auditLogSchema = new mongoose.Schema(
     },
     previousValue: { type: mongoose.Schema.Types.Mixed, default: null },
     newValue: { type: mongoose.Schema.Types.Mixed, default: null },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: null },
     severity: {
       type: String,
       enum: AUDIT_SEVERITY,
@@ -45,6 +46,7 @@ const auditLogSchema = new mongoose.Schema(
 );
 
 auditLogSchema.index({ createdAt: -1 });
+auditLogSchema.index({ building: 1, createdAt: -1 }); // admin filter by building
 
 module.exports = mongoose.model("AuditLog", auditLogSchema);
 module.exports.AUDIT_SEVERITY = AUDIT_SEVERITY;

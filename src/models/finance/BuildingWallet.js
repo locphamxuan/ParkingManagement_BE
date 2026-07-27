@@ -11,7 +11,7 @@ const buildingWalletSchema = new mongoose.Schema(
     },
     balance: { type: Number, default: 0, min: 0 },
     totalReceived: { type: Number, default: 0, min: 0 },   // Tổng tiền gửi xe nhận vào
-    totalTransferred: { type: Number, default: 0, min: 0 }, // Tổng đã chuyển lên SystemWallet
+    totalTransferred: { type: Number, default: 0, min: 0 }, // (legacy) Tổng đã chuyển đi khỏi ví
   },
   { timestamps: true },
 );

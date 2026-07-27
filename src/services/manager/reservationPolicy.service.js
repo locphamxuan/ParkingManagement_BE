@@ -1,9 +1,20 @@
-﻿const ReservationPolicy = require("../../models/policy/ReservationPolicy");
+const ReservationPolicy = require("../../models/policy/ReservationPolicy");
+const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
 
+// Chính sách hoàn tiền gói dài hạn — chỉ còn refundPercent sau khi bỏ reservation.
+// Phí phạt vi phạm đã tách sang violationType.service.js (1 mức/loại vi phạm).
+const validatePolicyPayload = (payload) => {
+  if (payload.refundPercent !== undefined) {
+    const v = Number(payload.refundPercent);
+    if (Number.isNaN(v) || v < 0 || v > 100) {
+      throw new AppError("refundPercent must be a number between 0 and 100", 400);
+    }
+  }
+};
+
 const DEFAULT_POLICY = {
-  maxHoldMinutes: 30,
   refundPercent: 80,
   isActive: true,
 };
@@ -20,14 +31,23 @@ const get = async (user, buildingId) => {
   return policy;
 };
 
+// Cho phép Staff & Public xem chính sách hoàn tiền / phạt tiền của tòa nhà
+const getPublic = async (buildingId) => {
+  if (!buildingId) return DEFAULT_POLICY;
+  let policy = await ReservationPolicy.findOne({ building: buildingId });
+  if (!policy) {
+    return { building: buildingId, ...DEFAULT_POLICY };
+  }
+  return policy;
+};
+
 const upsert = async (user, buildingId, payload) => {
   ensureManagerOwnsBuilding(user, buildingId);
+  validatePolicyPayload(payload);
   const current = await ReservationPolicy.findOne({ building: buildingId });
 
   const update = {};
-  ["maxHoldMinutes", "refundPercent"].forEach((k) => {
-    if (payload[k] !== undefined) update[k] = Number(payload[k]);
-  });
+  if (payload.refundPercent !== undefined) update.refundPercent = Number(payload.refundPercent);
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
 
   const updated = await ReservationPolicy.findOneAndUpdate(
@@ -38,11 +58,11 @@ const upsert = async (user, buildingId, payload) => {
 
   await writeAuditLog({
     actor: user,
-    action: "UPDATE_RESERVATION_POLICY",
+    action: "UPDATE_REFUND_POLICY",
     targetTable: "reservation_policies",
     targetId: updated._id,
     building: buildingId,
-    previousValue: current ? current.toObject() : null,
+    previousValue: current?.toObject() ?? null,
     newValue: updated.toObject(),
     severity: "medium",
   });
@@ -50,5 +70,4 @@ const upsert = async (user, buildingId, payload) => {
   return updated;
 };
 
-module.exports = { get, upsert };
-
+module.exports = { get, getPublic, upsert };

@@ -48,10 +48,24 @@ const listSubscriptions = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
+const cancelSubscription = asyncHandler(async (req, res) => {
+  const result = await service.cancelSubscription(
+    req.user,
+    req.params.buildingId,
+    req.params.id,
+    req.body?.reason
+  );
+  sendSuccess(res, {
+    message: `Gói đã được hủy — hoàn ${result.refundPercent}% vào ví người dùng.`,
+    data: result,
+  });
+});
+
 module.exports = {
   listPackages,
   createPackage,
   updatePackage,
   removePackage,
   listSubscriptions,
+  cancelSubscription,
 };

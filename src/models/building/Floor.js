@@ -8,6 +8,7 @@ const floorSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // code do hệ thống tự sinh (F1, F2…) — khóa nội bộ, không cho client đặt.
     code: {
       type: String,
       required: [true, "Floor code is required"],
@@ -19,11 +20,7 @@ const floorSchema = new mongoose.Schema(
       type: String,
       required: [true, "Floor name is required"],
       trim: true,
-      maxlength: 100,
-    },
-    levelNumber: {
-      type: Number,
-      required: [true, "Floor level number is required"],
+      maxlength: 80,
     },
     capacity: {
       type: Number,
@@ -36,16 +33,15 @@ const floorSchema = new mongoose.Schema(
         ref: "VehicleType",
       },
     ],
+    pricePolicy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PricePolicy",
+      default: null,
+    },
     status: {
       type: String,
       enum: ["active", "inactive", "maintenance"],
       default: "active",
-    },
-    // Override pricing riêng cho tầng này (ưu tiên hơn building-level pricing)
-    pricePolicy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'PricePolicy',
-      default: null,
     },
   },
   { timestamps: true }

@@ -1,10 +1,13 @@
 const app = require('./app');
+const logger = require('./utils/logger');
 const connectDB = require('./config/db');
 const env = require('./config/env');
 const { findAvailablePort } = require('./utils/findPort');
-const revenueSettlementJob = require('./jobs/revenueSettlement.job');
 
 let server;
+ 
+
+
 
 const listen = (port) =>
   new Promise((resolve, reject) => {
@@ -15,7 +18,7 @@ const listen = (port) =>
   });
 
 const shutdown = async (signal) => {
-  console.log(`\n[Server] ${signal} — đang tắt...`);
+  logger.info(`\n[Server] ${signal} received — shutting down gracefully...`);
 
   if (server) {
     await new Promise((resolve) => server.close(resolve));
@@ -28,27 +31,36 @@ const shutdown = async (signal) => {
 };
 
 const start = async () => {
+  // Establish database connection
   await connectDB();
 
+  // Cron Schedulers
+  // 1. Subscription Expiry Job: Reminds users of upcoming expiry (7/5/3/1 days), marks expired, and releases grace slots.
+  require('./jobs/subscriptionExpiry.job').start();
+
+  // Resolve active port dynamically
   const port = await findAvailablePort(env.port);
 
   if (port !== env.port) {
-    console.warn(
-      `[Server] Port ${env.port} đang dùng → chuyển sang port ${port} (không cần kill thủ công)`
+    logger.warn(
+      `[Server] Configured port ${env.port} is already in use ➔ Dynamically switching to port ${port}`
     );
   }
 
+  // Start Express HTTP Server
   server = await listen(port);
-  console.log(`[Server] Server đã chạy thành công — http://localhost:${port}`);
-
-  // Auto-settle 30% doanh thu ngày của manager → ví admin (catch-up + hourly)
-  revenueSettlementJob.start();
+  
+  // Terminal Status Logs
+  logger.info(`[Server] Application is successfully running at ➔ http://localhost:${port}`);
+  logger.info(`[Swagger] API Documentation UI available at     ➔ http://localhost:${port}/api-docs`);
 };
 
+// Intercept system termination signals
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+// Execute bootstrapping logic
 start().catch((err) => {
-  console.error('[Server] Unhandled error during start:', err);
+  logger.error('[Server] Unhandled critical error during bootstrap:', err);
   process.exit(1);
 });

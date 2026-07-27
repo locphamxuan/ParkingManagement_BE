@@ -23,7 +23,21 @@ const updateBuilding = asyncHandler(async (req, res) => {
   });
 });
 
+// PUT /manager/buildings/:buildingId/operating-hours
+const updateOperatingHours = asyncHandler(async (req, res) => {
+  const building = await buildingService.updateManagerOperatingHours(
+    req.user,
+    req.params.buildingId,
+    req.body,
+  );
+  sendSuccess(res, {
+    message: "Operating hours updated successfully",
+    data: { building },
+  });
+});
+
 module.exports = {
   getBuilding,
   updateBuilding,
+  updateOperatingHours,
 };

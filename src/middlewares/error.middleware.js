@@ -1,3 +1,4 @@
+const logger = require("../utils/logger");
 const notFound = (req, res, next) => {
   const error = new Error(`Not Found - ${req.originalUrl}`);
   error.statusCode = 404;
@@ -17,8 +18,11 @@ const errorHandler = (err, req, res, _next) => {
 
   if (err.code === 11000) {
     statusCode = 409;
-    const field = Object.keys(err.keyValue || {})[0] || 'field';
-    message = `${field} already exists`;
+    // Với unique index ghép (vd {building, code}), 'building' không phải field gây trùng
+    // thực sự — bỏ qua nó để nêu đúng field (code/name/...). Message thân thiện hơn.
+    const keys = Object.keys(err.keyValue || {});
+    const field = keys.find((k) => k !== 'building') || keys[0] || 'value';
+    message = `A record with this ${field} already exists`;
   }
 
   if (err.name === 'CastError') {
@@ -27,13 +31,14 @@ const errorHandler = (err, req, res, _next) => {
   }
 
   if (process.env.NODE_ENV === 'development') {
-    console.error('[Error]', err);
+    logger.error('[Error]', err);
   }
 
   res.status(statusCode).json({
     success: false,
     message,
     ...(err.errorCode && { errorCode: err.errorCode }),
+    ...(err.details && { details: err.details }),
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 };

@@ -1,29 +1,83 @@
-﻿const Gate = require("../../models/building/Gate");
+const Gate = require("../../models/building/Gate");
+const ParkingSession = require("../../models/operations/ParkingSession");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
 
-const list = async (user, buildingId) => {
-  ensureManagerOwnsBuilding(user, buildingId);
-  return Gate.find({ building: buildingId })
-    .populate("allowedVehicleTypes", "code name")
-    .populate("floors", "code name levelNumber")
-    .sort("code");
+const GATE_STATUS = ["active", "inactive", "maintenance"];
+const GATE_DIRECTION = ["in", "out", "both"];
+
+// Mỗi tòa nhà được tự sinh sẵn 2 cổng mặc định: Cổng vào (in) + Cổng ra (out).
+// Manager CÓ THỂ CRUD thêm/sửa/xóa cổng và đặt thể loại (in/out/both) — xem create/update/remove bên dưới.
+const DEFAULT_GATES = [
+  { code: "IN", name: "Cổng vào", direction: "in" },
+  { code: "OUT", name: "Cổng ra", direction: "out" },
+];
+
+/**
+ * Đảm bảo tòa nhà có sẵn cổng vào + cổng ra (idempotent).
+ * Tạo cổng còn thiếu theo từng `direction`, an toàn khi gọi đồng thời.
+ */
+const ensureDefaultGates = async (buildingId) => {
+  await Promise.all(
+    DEFAULT_GATES.map(async (g) => {
+      const exists = await Gate.findOne({ building: buildingId, direction: g.direction });
+      if (exists) return;
+      try {
+        await Gate.create({
+          building: buildingId,
+          code: g.code,
+          name: g.name,
+          direction: g.direction,
+          allowedVehicleTypes: [],
+          status: "active",
+        });
+      } catch (err) {
+        // Bỏ qua lỗi trùng key (đã được tạo bởi request song song khác).
+        if (err && err.code !== 11000) throw err;
+      }
+    })
+  );
 };
 
-const create = async (user, buildingId, payload) => {
+const list = async (user, buildingId) => {
   ensureManagerOwnsBuilding(user, buildingId);
+  await ensureDefaultGates(buildingId);
+  return Gate.find({ building: buildingId })
+    .populate("allowedVehicleTypes", "code name")
+    .sort("direction");
+};
+
+const normalizeDirection = (direction) => {
+  if (direction === undefined || direction === null) return undefined;
+  if (!GATE_DIRECTION.includes(direction)) {
+    throw new AppError(`direction must be one of: ${GATE_DIRECTION.join(", ")}`, 400);
+  }
+  return direction;
+};
+
+/**
+ * Manager tạo cổng mới và tự đặt thể loại (ra / vào / hai chiều).
+ */
+const create = async (user, buildingId, payload = {}) => {
+  ensureManagerOwnsBuilding(user, buildingId);
+  const code = String(payload.code || "").trim().toUpperCase();
+  if (!code) throw new AppError("Gate code is required", 400);
+
+  const direction = normalizeDirection(payload.direction) || "in";
+
+  const duplicate = await Gate.findOne({ building: buildingId, code });
+  if (duplicate) throw new AppError("Mã cổng đã tồn tại trong tòa nhà", 409);
+
   const created = await Gate.create({
     building: buildingId,
-    code: String(payload.code || "").trim().toUpperCase(),
-    name: String(payload.name || "").trim(),
-    direction: payload.direction || "both",
-    allowedVehicleTypes: Array.isArray(payload.allowedVehicleTypes)
-      ? payload.allowedVehicleTypes
-      : [],
-    floors: Array.isArray(payload.floors) ? payload.floors : [],
-    status: payload.status || "active",
+    code,
+    name: payload.name !== undefined ? String(payload.name).trim() : null,
+    direction,
+    status: GATE_STATUS.includes(payload.status) ? payload.status : "active",
+    allowedVehicleTypes: [],
   });
+
   await writeAuditLog({
     actor: user,
     action: "CREATE_GATE",
@@ -35,21 +89,33 @@ const create = async (user, buildingId, payload) => {
   return created;
 };
 
-const update = async (user, buildingId, id, payload) => {
+/**
+ * Manager sửa cổng (mã, tên, thể loại ra/vào, trạng thái).
+ */
+const update = async (user, buildingId, id, payload = {}) => {
   ensureManagerOwnsBuilding(user, buildingId);
   const current = await Gate.findOne({ _id: id, building: buildingId });
   if (!current) throw new AppError("Gate not found", 404);
 
   const update = {};
-  ["name", "direction", "status"].forEach((k) => {
-    if (payload[k] !== undefined) update[k] = payload[k];
-  });
-  if (payload.code !== undefined)
-    update.code = String(payload.code).trim().toUpperCase();
-  if (Array.isArray(payload.allowedVehicleTypes))
-    update.allowedVehicleTypes = payload.allowedVehicleTypes;
-  if (Array.isArray(payload.floors))
-    update.floors = payload.floors;
+  if (payload.code !== undefined) {
+    const code = String(payload.code).trim().toUpperCase();
+    if (!code) throw new AppError("Gate code cannot be empty", 400);
+    if (code !== current.code) {
+      const duplicate = await Gate.findOne({ building: buildingId, code, _id: { $ne: id } });
+      if (duplicate) throw new AppError("Mã cổng đã tồn tại trong tòa nhà", 409);
+    }
+    update.code = code;
+  }
+  if (payload.name !== undefined) update.name = String(payload.name).trim() || null;
+  const direction = normalizeDirection(payload.direction);
+  if (direction !== undefined) update.direction = direction;
+  if (payload.status !== undefined) {
+    if (!GATE_STATUS.includes(payload.status)) {
+      throw new AppError(`status must be one of: ${GATE_STATUS.join(", ")}`, 400);
+    }
+    update.status = payload.status;
+  }
 
   const updated = await Gate.findByIdAndUpdate(id, update, {
     new: true,
@@ -67,10 +133,37 @@ const update = async (user, buildingId, id, payload) => {
   return updated;
 };
 
+/**
+ * Manager xóa cổng. Chặn xóa nếu còn xe đang đi qua cổng này (phiên active).
+ */
 const remove = async (user, buildingId, id) => {
   ensureManagerOwnsBuilding(user, buildingId);
   const current = await Gate.findOne({ _id: id, building: buildingId });
   if (!current) throw new AppError("Gate not found", 404);
+
+  const activeUsing = await ParkingSession.countDocuments({
+    building: buildingId,
+    status: "active",
+    $or: [{ entryGate: id }, { exitGate: id }],
+  });
+  if (activeUsing > 0) {
+    throw new AppError("Cannot delete a gate that is in use by an active parking session.", 409);
+  }
+
+  // Chặn xóa nếu xóa xong tòa nhà không còn cổng VÀO hoặc không còn cổng RA —
+  // tránh tình trạng staff không thể check-in/out. ('both' tính cho cả 2 chiều.)
+  const remaining = await Gate.find({ building: buildingId, _id: { $ne: id } }).select("direction");
+  const hasIn = remaining.some((g) => g.direction === "in" || g.direction === "both");
+  const hasOut = remaining.some((g) => g.direction === "out" || g.direction === "both");
+  const removingCoversIn = current.direction === "in" || current.direction === "both";
+  const removingCoversOut = current.direction === "out" || current.direction === "both";
+  if (removingCoversIn && !hasIn) {
+    throw new AppError("Cannot delete the last entry (in) gate — the building must keep at least one.", 409);
+  }
+  if (removingCoversOut && !hasOut) {
+    throw new AppError("Cannot delete the last exit (out) gate — the building must keep at least one.", 409);
+  }
+
   await Gate.deleteOne({ _id: id });
   await writeAuditLog({
     actor: user,
@@ -84,5 +177,28 @@ const remove = async (user, buildingId, id) => {
   return { id };
 };
 
-module.exports = { list, create, update, remove };
+/**
+ * Manager đổi trạng thái cổng (active/inactive/maintenance).
+ */
+const updateStatus = async (user, buildingId, id, status) => {
+  ensureManagerOwnsBuilding(user, buildingId);
+  if (!GATE_STATUS.includes(status)) {
+    throw new AppError(`status must be one of: ${GATE_STATUS.join(", ")}`, 400);
+  }
+  const current = await Gate.findOne({ _id: id, building: buildingId });
+  if (!current) throw new AppError("Gate not found", 404);
 
+  const updated = await Gate.findByIdAndUpdate(id, { status }, { new: true });
+  await writeAuditLog({
+    actor: user,
+    action: "UPDATE_GATE_STATUS",
+    targetTable: "gates",
+    targetId: id,
+    building: buildingId,
+    previousValue: { status: current.status },
+    newValue: { status },
+  });
+  return updated;
+};
+
+module.exports = { list, ensureDefaultGates, create, update, remove, updateStatus };

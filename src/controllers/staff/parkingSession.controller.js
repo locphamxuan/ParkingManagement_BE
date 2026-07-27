@@ -33,8 +33,45 @@ const search = asyncHandler(async (req, res) => {
  * Returns whether the plate belongs to a registered user, with wallet info.
  */
 const lookupPlate = asyncHandler(async (req, res) => {
-  const data = await parkingSessionService.lookupPlate(req.user, req.params.plate);
+  const data = await parkingSessionService.lookupPlate(
+    req.user,
+    req.params.plate,
+    req.query.building || req.query.buildingId,
+  );
   sendSuccess(res, { data });
+});
+
+const listFreeSlots = asyncHandler(async (req, res) => {
+  const { items, suggestedSlotId, totalSlots, totalAvailable } = await parkingSessionService.listFreeSlots(
+    req.user,
+    req.query.building || req.query.buildingId,
+    { vehicleType: req.query.vehicleType, usageType: req.query.usageType }
+  );
+  sendSuccess(res, { data: { items, suggestedSlotId, totalSlots, totalAvailable } });
+});
+
+/**
+ * POST /api/staff/parking-sessions/scan
+ * AI camera (Camera 1): reads plate + brand from a captured frame and resolves
+ * the owner account by plate. Body: { image } (base64, data-URL prefix allowed).
+ */
+const scan = asyncHandler(async (req, res) => {
+  const data = await parkingSessionService.scanVehicle(
+    req.user,
+    req.body?.image,
+    req.body?.building || req.body?.buildingId,
+  );
+  sendSuccess(res, { data });
+});
+
+/**
+ * POST /api/staff/parking-sessions/reject
+ * Staff từ chối check-in/out; gửi thông báo cho chủ biển số.
+ * Body: { plateNumber, stage: 'check-in'|'check-out', reason, building? }
+ */
+const reject = asyncHandler(async (req, res) => {
+  const data = await parkingSessionService.rejectEntry(req.user, req.body);
+  sendSuccess(res, { message: 'Đã từ chối và gửi thông báo cho khách (nếu có tài khoản).', data });
 });
 
 /**
@@ -57,4 +94,22 @@ const verifyPayment = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, initiatePayment, verifyPayment };
+/**
+ * GET /api/staff/parking-sessions/my-checkins
+ * Lịch sử xe vào hôm nay của nhân viên cổng VÀO — có location (cổng vào, tầng, ô đỗ).
+ */
+const myCheckIns = asyncHandler(async (req, res) => {
+  const items = await parkingSessionService.listMyCheckIns(req.user, req.query);
+  sendSuccess(res, { data: { items } });
+});
+
+/**
+  * GET /api/staff/parking-sessions/my-checkouts
+  * Lịch sử xe ra hôm nay của nhân viên cổng RA — có phí thu, phương thức thanh toán, thời gian ra.
+  */
+const myCheckouts = asyncHandler(async (req, res) => {
+  const items = await parkingSessionService.listMyCheckouts(req.user, req.query);
+  sendSuccess(res, { data: { items } });
+});
+
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment, myCheckIns, myCheckouts };

@@ -1,4 +1,5 @@
 const AppError = require("../utils/AppError");
+const { parseTime } = require("../utils/businessTime");
 
 const isNonEmptyString = (value) =>
   typeof value === "string" && value.trim().length > 0;
@@ -31,7 +32,9 @@ const validateVehicleType = wrap((req) => {
 
 const validateFloor = wrap((req) => {
   if (req.method === "POST")
-    requireFields(req.body, ["code", "name", "levelNumber", "capacity"]);
+    requireFields(req.body, ["name", "capacity"]);
+  if (req.body.name !== undefined && !isNonEmptyString(req.body.name))
+    throw new AppError("name must not be empty", 400);
   if (req.body.capacity !== undefined && Number(req.body.capacity) < 0)
     throw new AppError("capacity must be >= 0", 400);
 });
@@ -50,7 +53,18 @@ const validateGate = wrap((req) => {
 const SLOT_STATUS = ["available", "occupied", "reserved", "maintenance"];
 
 const validateSlot = wrap((req) => {
-  if (req.method === "POST") requireFields(req.body, ["code", "floor"]);
+  // code không còn bắt buộc — BE tự sinh từ code zone khi thiếu.
+  if (req.method === "POST") requireFields(req.body, ["floor", "zone"]);
+  if (req.body.status !== undefined && !SLOT_STATUS.includes(req.body.status)) {
+    throw new AppError(`status must be one of: ${SLOT_STATUS.join(", ")}`, 400);
+  }
+});
+
+const validateSlotBatch = wrap((req) => {
+  requireFields(req.body, ["floor", "zone", "quantity"]);
+  const qty = Number(req.body.quantity);
+  if (!Number.isInteger(qty) || qty < 1 || qty > 50)
+    throw new AppError("quantity must be an integer between 1 and 50", 400);
   if (req.body.status !== undefined && !SLOT_STATUS.includes(req.body.status)) {
     throw new AppError(`status must be one of: ${SLOT_STATUS.join(", ")}`, 400);
   }
@@ -62,11 +76,55 @@ const validateSlotStatus = wrap((req) => {
   }
 });
 
+const ZONE_USAGE_TYPES = ["walk_in", "registered", "subscriber"];
+const ZONE_STATUS = ["active", "inactive", "maintenance"];
+
+const validateZone = wrap((req) => {
+  if (req.method === "POST")
+    requireFields(req.body, ["name", "floor", "vehicleType", "usageType", "capacity"]);
+  if (req.body.name !== undefined && !isNonEmptyString(req.body.name))
+    throw new AppError("name must not be empty", 400);
+  if (
+    req.body.usageType !== undefined &&
+    !ZONE_USAGE_TYPES.includes(req.body.usageType)
+  ) {
+    throw new AppError(
+      `usageType must be one of: ${ZONE_USAGE_TYPES.join(", ")}`,
+      400
+    );
+  }
+  if (req.body.status !== undefined && !ZONE_STATUS.includes(req.body.status)) {
+    throw new AppError(`status must be one of: ${ZONE_STATUS.join(", ")}`, 400);
+  }
+  // capacity = "ngân sách slot" của dãy → phải là số nguyên >= 1.
+  if (req.body.capacity !== undefined && Number(req.body.capacity) < 1)
+    throw new AppError("capacity must be at least 1", 400);
+});
+
+const isHHMM = (v) => typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+
 const validatePricePolicy = wrap((req) => {
   if (req.method === "POST")
     requireFields(req.body, ["name", "vehicleType", "hourlyRate"]);
   if (req.body.hourlyRate !== undefined && Number(req.body.hourlyRate) < 0)
     throw new AppError("hourlyRate must be >= 0", 400);
+  if (req.body.type !== undefined && !["regular", "peak"].includes(req.body.type))
+    throw new AppError("type must be 'regular' or 'peak'", 400);
+
+  // Giá theo KHUNG GIỜ (peak): bắt buộc có timeWindow hợp lệ để áp đúng khung.
+  if (req.body.type === "peak") {
+    const w = req.body.timeWindow || {};
+    if (!isHHMM(w.from) || !isHHMM(w.to))
+      throw new AppError("Khung giờ (timeWindow.from/to) phải có định dạng HH:MM", 400);
+    if (w.from === w.to)
+      throw new AppError("Khung giờ bắt đầu và kết thúc không được trùng nhau", 400);
+  }
+
+  // effectiveFrom/effectiveTo nếu có cả hai thì from < to.
+  if (req.body.effectiveFrom && req.body.effectiveTo) {
+    if (new Date(req.body.effectiveFrom) >= new Date(req.body.effectiveTo))
+      throw new AppError("effectiveFrom phải trước effectiveTo", 400);
+  }
 });
 
 const validatePackage = wrap((req) => {
@@ -82,8 +140,11 @@ const validatePackage = wrap((req) => {
     throw new AppError("durationDays must be >= 1", 400);
   if (req.body.price !== undefined && Number(req.body.price) < 0)
     throw new AppError("price must be >= 0", 400);
+  if (req.body.maxHoursPerDay !== undefined && Number(req.body.maxHoursPerDay) < 0)
+    throw new AppError("maxHoursPerDay must be >= 0", 400);
 });
 
+// Chính sách hoàn tiền gói (trước là reservation policy — chỉ còn refundPercent).
 const validateReservationPolicy = wrap((req) => {
   if (
     req.body.refundPercent !== undefined &&
@@ -95,18 +156,36 @@ const validateReservationPolicy = wrap((req) => {
 const validateShift = wrap((req) => {
   if (req.method === "POST")
     requireFields(req.body, ["name", "code", "startTime", "endTime"]);
+  const { startTime, endTime } = req.body;
+  if (startTime !== undefined && parseTime(startTime) === null)
+    throw new AppError("startTime must use HH:mm", 400, "INVALID_SHIFT_TIME");
+  if (endTime !== undefined && parseTime(endTime) === null)
+    throw new AppError("endTime must use HH:mm", 400, "INVALID_SHIFT_TIME");
+  if (startTime !== undefined && endTime !== undefined && startTime === endTime)
+    throw new AppError("Shift start and end time must differ", 400, "INVALID_SHIFT_TIME");
 });
 
 const validateStaffShift = wrap((req) => {
   if (req.method === "POST")
     requireFields(req.body, ["shift", "staff", "workDate"]);
+  const allowedStatuses = ["scheduled", "active", "completed", "cancelled"];
+  if (req.body.status !== undefined && !allowedStatuses.includes(req.body.status))
+    throw new AppError("Invalid staff shift status", 400, "INVALID_STAFF_SHIFT_STATUS");
+  if (req.body.workDate !== undefined && Number.isNaN(new Date(req.body.workDate).getTime()))
+    throw new AppError("Invalid workDate", 400, "INVALID_WORK_DATE");
 });
 
-const FEEDBACK_STATUS = ["open", "in_progress", "resolved", "closed"];
+const { FEEDBACK_STATUS } = require("../models/operations/Feedback");
 
 const validateFeedbackResponse = wrap((req) => {
   if (req.body.response !== undefined && !isNonEmptyString(req.body.response))
     throw new AppError("response cannot be empty", 400);
+  if (req.body.response !== undefined && req.body.response.trim().length > 1000)
+    throw new AppError("response cannot exceed 1000 characters", 400);
+  if (req.body.staffReply !== undefined && !isNonEmptyString(req.body.staffReply))
+    throw new AppError("staffReply cannot be empty", 400);
+  if (req.body.staffReply !== undefined && req.body.staffReply.trim().length > 1000)
+    throw new AppError("staffReply cannot exceed 1000 characters", 400);
   if (
     req.body.status !== undefined &&
     !FEEDBACK_STATUS.includes(req.body.status)
@@ -122,7 +201,9 @@ module.exports = {
   validateFloor,
   validateGate,
   validateSlot,
+  validateSlotBatch,
   validateSlotStatus,
+  validateZone,
   validatePricePolicy,
   validatePackage,
   validateReservationPolicy,

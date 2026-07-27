@@ -9,11 +9,7 @@ const list = asyncHandler(async (req, res) => {
 
 const create = asyncHandler(async (req, res) => {
   const item = await service.create(req.user, req.params.buildingId, req.body);
-  sendSuccess(res, {
-    statusCode: 201,
-    message: "Gate created",
-    data: { item },
-  });
+  sendSuccess(res, { statusCode: 201, message: "Gate created", data: { item } });
 });
 
 const update = asyncHandler(async (req, res) => {
@@ -31,4 +27,14 @@ const remove = asyncHandler(async (req, res) => {
   sendSuccess(res, { message: "Gate removed", data: null });
 });
 
-module.exports = { list, create, update, remove };
+const updateStatus = asyncHandler(async (req, res) => {
+  const item = await service.updateStatus(
+    req.user,
+    req.params.buildingId,
+    req.params.id,
+    req.body.status
+  );
+  sendSuccess(res, { message: "Gate status updated", data: { item } });
+});
+
+module.exports = { list, create, update, remove, updateStatus };

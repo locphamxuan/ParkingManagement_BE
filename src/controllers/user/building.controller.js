@@ -5,7 +5,7 @@ const VehicleType = require('../../models/building/VehicleType');
 const Building = require('../../models/building/Building');
 const Floor = require('../../models/building/Floor');
 const ParkingSlot = require('../../models/building/ParkingSlot');
-const Gate = require('../../models/building/Gate');
+const ViolationType = require('../../models/policy/ViolationType');
 const AppError = require('../../utils/AppError');
 
 /**
@@ -42,28 +42,37 @@ const listFloorsWithAvailability = asyncHandler(async (req, res) => {
 
   const { vehicleTypeId } = req.query;
 
-  // Lấy tầng active, filter theo loại xe nếu có
+  // Lấy tầng active, filter theo loại xe nếu có.
+  // allowedVehicleTypes rỗng/không cấu hình ⇒ tầng nhận MỌI loại xe (không giới hạn),
+  // nên vẫn phải bao gồm các tầng này — nếu không, building có tầng vẫn ra rỗng.
   const floorFilter = { building: building._id, status: 'active' };
   if (vehicleTypeId && mongoose.isValidObjectId(vehicleTypeId)) {
-    floorFilter.allowedVehicleTypes = vehicleTypeId;
+    floorFilter.$or = [
+      { allowedVehicleTypes: vehicleTypeId },
+      { allowedVehicleTypes: { $size: 0 } },
+      { allowedVehicleTypes: { $exists: false } },
+    ];
   }
 
   const floors = await Floor.find(floorFilter)
-    .select('_id code name levelNumber capacity allowedVehicleTypes pricePolicy status')
+    .select('_id code name capacity allowedVehicleTypes pricePolicy status')
     .populate('allowedVehicleTypes', 'name code')
     .populate('pricePolicy', 'name hourlyRate type')
-    .sort('levelNumber');
+    .sort('code');
 
-  // Đếm slots theo status cho mỗi tầng
+  // Đếm slots theo status cho mỗi tầng. Luồng mua gói (usage=subscriber) chỉ đếm ô
+  // thuộc dãy 'subscriber' (+ đúng loại xe nếu có) để user thấy đúng số chỗ gói còn trống.
   const floorIds = floors.map((f) => f._id);
-  const [slotCounts, gates] = await Promise.all([
-    ParkingSlot.aggregate([
-      { $match: { floor: { $in: floorIds } } },
-      { $group: { _id: { floor: '$floor', status: '$status' }, count: { $sum: 1 } } },
-    ]),
-    Gate.find({ building: building._id, status: 'active', floors: { $in: floorIds } })
-      .select('_id code name direction floors')
-      .lean(),
+  const countMatch = { floor: { $in: floorIds } };
+  if (req.query.usage === 'subscriber') {
+    countMatch.usageType = 'subscriber';
+    if (vehicleTypeId && mongoose.isValidObjectId(vehicleTypeId)) {
+      countMatch.vehicleType = new mongoose.Types.ObjectId(vehicleTypeId);
+    }
+  }
+  const slotCounts = await ParkingSlot.aggregate([
+    { $match: countMatch },
+    { $group: { _id: { floor: '$floor', status: '$status' }, count: { $sum: 1 } } },
   ]);
 
   // Build map floorId → { available, occupied, reserved, maintenance }
@@ -74,16 +83,6 @@ const listFloorsWithAvailability = asyncHandler(async (req, res) => {
     countMap[fid][_id.status] = count;
   }
 
-  // Build map floorId → gates[]
-  const gateMap = {};
-  for (const gate of gates) {
-    for (const fid of gate.floors) {
-      const key = fid.toString();
-      if (!gateMap[key]) gateMap[key] = [];
-      gateMap[key].push({ _id: gate._id, code: gate.code, name: gate.name, direction: gate.direction });
-    }
-  }
-
   const result = floors.map((f) => {
     const counts = countMap[f._id.toString()] || { available: 0, occupied: 0, reserved: 0, maintenance: 0 };
     return {
@@ -92,7 +91,6 @@ const listFloorsWithAvailability = asyncHandler(async (req, res) => {
       occupiedSlots: counts.occupied,
       reservedSlots: counts.reserved,
       totalSlots: counts.available + counts.occupied + counts.reserved + counts.maintenance,
-      gates: gateMap[f._id.toString()] || [],
     };
   });
 
@@ -113,12 +111,56 @@ const listSlotsForFloor = asyncHandler(async (req, res) => {
   const floor = await Floor.findOne({ _id: floorId, building: building._id });
   if (!floor) throw new AppError('Floor not found', 404);
 
-  const slots = await ParkingSlot.find({ floor: floorId, building: building._id })
-    .select('_id code status vehicleType reservable')
+  // Luồng MUA GÓI (usage=subscriber): chỉ hiển thị ô thuộc dãy 'subscriber' đúng loại
+  // xe của gói — các ô khác KHÔNG trả về. Luồng khác: hiển thị mọi ô (trừ ô subscriber
+  // không cho chọn).
+  const usage = req.query.usage;
+  const vehicleTypeId = req.query.vehicleTypeId;
+
+  const slotFilter = { floor: floorId };
+  if (usage === 'subscriber') {
+    slotFilter.usageType = 'subscriber';
+    if (vehicleTypeId && mongoose.isValidObjectId(vehicleTypeId)) {
+      slotFilter.vehicleType = vehicleTypeId;
+    }
+  }
+
+  // Lọc theo floor là đủ (floor đã thuộc building). KHÔNG thêm điều kiện building
+  // vào slot — nếu trường building của slot bị lệch dữ liệu, danh sách sẽ rỗng dù
+  // tầng vẫn đếm ra số ô. Loại xe + đối tượng của ô lấy theo DÃY (zone), denormalize sẵn.
+  const slots = await ParkingSlot.find(slotFilter)
+    .select('_id code status reservable vehicleType usageType')
     .populate('vehicleType', 'name code')
     .sort('code');
 
-  sendSuccess(res, { data: { floor: { _id: floor._id, name: floor.name, code: floor.code }, slots } });
+  const slotsOut = slots.map((s) => {
+    let bookable;
+    if (usage === 'subscriber') {
+      // Ô dãy gói được chọn khi còn trống (giữ chỗ cố định lúc mua gói).
+      bookable = s.usageType === 'subscriber' || !s.usageType;
+    } else if (usage === 'visitor') {
+      // Ô thuộc dãy GÓI DÀI HẠN (subscriber) KHÔNG cho khách thường đặt chỗ.
+      bookable = s.usageType !== 'subscriber';
+    } else {
+      bookable = true;
+    }
+    return {
+      _id: s._id,
+      code: s.code,
+      status: s.status,
+      reservable: Boolean(s.reservable) && bookable,
+      vehicleType: s.vehicleType
+        ? { _id: s.vehicleType._id, name: s.vehicleType.name, code: s.vehicleType.code }
+        : null,
+      usageType: s.usageType || null,
+      selectable: s.status === 'available' && Boolean(s.reservable) && bookable,
+      owner: null,
+    };
+  });
+
+  sendSuccess(res, {
+    data: { floor: { _id: floor._id, name: floor.name, code: floor.code }, slots: slotsOut },
+  });
 });
 
 /**
@@ -126,10 +168,30 @@ const listSlotsForFloor = asyncHandler(async (req, res) => {
  * Returns all active buildings for the reservation wizard.
  */
 const listBuildings = asyncHandler(async (req, res) => {
+  // operatingHours + status cho phép FE hiển thị "đang mở / đang đóng cửa".
   const buildings = await Building.find({ status: 'active' })
-    .select('_id code name address')
+    .select('_id code name address operatingHours status')
     .sort('name');
   sendSuccess(res, { data: { items: buildings } });
 });
 
-module.exports = { listBuildings, listVehicleTypes, listFloorsWithAvailability, listSlotsForFloor, resolveBuilding };
+/**
+ * GET /api/users/buildings/:buildingId/violation-types
+ * Danh sách loại vi phạm (label) để user chọn khi báo cáo sự cố có biển số vi
+ * phạm — CHỈ trả code/label, KHÔNG trả fee (phí phạt là nội bộ manager/staff,
+ * user không cần và không nên thấy trước số tiền).
+ */
+const listViolationTypes = asyncHandler(async (req, res) => {
+  const building = await resolveBuilding(req.params.buildingId);
+  if (!building) throw new AppError('Building not found', 404);
+
+  const items = await ViolationType.find({ building: building._id, isActive: true })
+    .select('_id code label')
+    .sort('label');
+
+  sendSuccess(res, { data: { items } });
+});
+
+module.exports = {
+  listBuildings, listVehicleTypes, listFloorsWithAvailability, listSlotsForFloor, listViolationTypes,
+};

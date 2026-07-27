@@ -35,13 +35,4 @@ const deactivate = asyncHandler(async (req, res) => {
   sendSuccess(res, { message: "Price policy deactivated", data: { item } });
 });
 
-const listPushLogs = asyncHandler(async (req, res) => {
-  const data = await service.listPushLogs(
-    req.user,
-    req.params.buildingId,
-    req.query
-  );
-  sendSuccess(res, { data });
-});
-
-module.exports = { list, create, update, deactivate, listPushLogs };
+module.exports = { list, create, update, deactivate };

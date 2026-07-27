@@ -1,7 +1,7 @@
 const PricePolicy = require("./PricePolicy");
-const PolicyPushLog = require("./PolicyPushLog");
 const ReservationPolicy = require("./ReservationPolicy");
 const LongTermPackage = require("./LongTermPackage");
 const LongTermSubscription = require("./LongTermSubscription");
+const ViolationType = require("./ViolationType");
 
-module.exports = { PricePolicy, PolicyPushLog, ReservationPolicy, LongTermPackage, LongTermSubscription };
+module.exports = { PricePolicy, ReservationPolicy, LongTermPackage, LongTermSubscription, ViolationType };

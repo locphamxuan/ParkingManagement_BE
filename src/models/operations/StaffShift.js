@@ -21,6 +21,12 @@ const staffShiftSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // Cổng được manager phân công cho nhân viên trong ca này (ra / vào).
+    gate: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Gate",
+      default: null,
+    },
     workDate: {
       type: Date,
       required: [true, "workDate is required"],
@@ -36,6 +42,7 @@ const staffShiftSchema = new mongoose.Schema(
 );
 
 staffShiftSchema.index({ staff: 1, workDate: 1, shift: 1 }, { unique: true });
+staffShiftSchema.index({ staff: 1, building: 1, workDate: 1 }); // checkout shift-verify query
 
 module.exports = mongoose.model("StaffShift", staffShiftSchema);
 module.exports.STAFF_SHIFT_STATUS = STAFF_SHIFT_STATUS;

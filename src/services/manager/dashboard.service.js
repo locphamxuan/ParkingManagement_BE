@@ -4,9 +4,11 @@ const Payment = require("../../models/finance/Payment");
 const Floor = require("../../models/building/Floor");
 const Gate = require("../../models/building/Gate");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
-const Feedback = require("../../models/log/Feedback");
-const ShiftRevenue = require("../../models/finance/ShiftRevenue");
+const Feedback = require("../../models/operations/Feedback");
+const mongoose = require("mongoose");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
+const { localUtcOffset } = require("../../utils/dateBucket");
+const { REVENUE_PAYMENT_TYPES } = require("../../constants/finance");
 
 const startOfDay = (date) => {
   const d = new Date(date);
@@ -50,11 +52,17 @@ const getOverview = async (user, buildingId) => {
       entryTime: { $gte: today, $lt: tomorrow },
     }),
     Payment.aggregate([
+      { $set: { effectiveAt: { $ifNull: ["$settledAt", "$createdAt"] } } },
       {
         $match: {
           building: toObjectId(buildingId),
           status: "success",
-          createdAt: { $gte: today, $lt: tomorrow },
+          // Chỉ doanh thu thật: phí gửi xe / cọc đặt chỗ / mua gói. Loại 'refund' (tiền hoàn ra)
+          // và 'topup' (manager tự nạp ví) — khớp định nghĩa của ví tòa nhà (getDailyRevenue).
+          // 'cancellation_fee' KHÔNG cộng thêm: cọc gốc đã tính qua 'reservation' lúc đặt,
+          // cộng thêm sẽ đếm trùng phần giữ lại trong chính cọc đó.
+          type: { $in: REVENUE_PAYMENT_TYPES },
+          effectiveAt: { $gte: today, $lt: tomorrow },
         },
       },
       {
@@ -68,25 +76,32 @@ const getOverview = async (user, buildingId) => {
     LongTermSubscription.countDocuments({
       building: buildingId,
       status: "active",
+      // Nhất quán với định nghĩa "gói đang hiệu lực" (active + chưa quá hạn).
+      endDate: { $gte: new Date() },
     }),
     Feedback.countDocuments({
       building: buildingId,
-      status: { $in: ["open", "in_progress"] },
+      status: "pending",
     }),
-    ShiftRevenue.aggregate([
+    // Weekly revenue trend from successful Payments (consistent with today's card).
+    Payment.aggregate([
+      { $set: { effectiveAt: { $ifNull: ["$settledAt", "$createdAt"] } } },
       {
         $match: {
           building: toObjectId(buildingId),
-          workDate: { $gte: sevenDaysAgo, $lt: tomorrow },
+          status: "success",
+          // Cùng định nghĩa doanh thu với card "hôm nay": loại refund/topup/cancellation_fee.
+          type: { $in: REVENUE_PAYMENT_TYPES },
+          effectiveAt: { $gte: sevenDaysAgo, $lt: tomorrow },
         },
       },
       {
         $group: {
           _id: {
-            $dateToString: { format: "%Y-%m-%d", date: "$workDate" },
+            $dateToString: { format: "%Y-%m-%d", date: "$effectiveAt", timezone: localUtcOffset() },
           },
-          totalRevenue: { $sum: "$totalRevenue" },
-          sessionCount: { $sum: "$sessionCount" },
+          totalRevenue: { $sum: "$amount" },
+          sessionCount: { $sum: 1 },
         },
       },
       { $sort: { _id: 1 } },
@@ -137,7 +152,6 @@ const getOverview = async (user, buildingId) => {
   };
 };
 
-const mongoose = require("mongoose");
 function toObjectId(id) {
   return new mongoose.Types.ObjectId(String(id));
 }

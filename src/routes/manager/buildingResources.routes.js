@@ -7,15 +7,22 @@ const vehicleTypeController = require("../../controllers/manager/vehicleType.con
 const floorController = require("../../controllers/manager/floor.controller");
 const gateController = require("../../controllers/manager/gate.controller");
 const slotController = require("../../controllers/manager/slot.controller");
+const zoneController = require("../../controllers/manager/zone.controller");
 const pricingController = require("../../controllers/manager/pricing.controller");
 const packageController = require("../../controllers/manager/package.controller");
 const reservationPolicyController = require("../../controllers/manager/reservationPolicy.controller");
+const violationTypeController = require("../../controllers/manager/violationType.controller");
 const shiftController = require("../../controllers/manager/shift.controller");
 const feedbackController = require("../../controllers/manager/feedback.controller");
+const incidentController = require("../../controllers/manager/incident.controller");
 const dashboardController = require("../../controllers/manager/dashboard.controller");
+const sessionController = require("../../controllers/manager/session.controller");
+const customerController = require("../../controllers/manager/customer.controller");
 const buildingWalletController = require("../../controllers/manager/buildingWallet.controller");
+const buildingController = require("../../controllers/manager/building.controller");
 
 const v = require("../../validators/manager.validator");
+const { validateResolveIncident } = require("../../validators/incident.validator");
 
 const router = express.Router({ mergeParams: true });
 
@@ -25,14 +32,30 @@ router.use(
   authorizeBuildingAccess
 );
 
-router.get("/dashboard", dashboardController.getOverview);
-
-// ── Building Wallet ────────────────────────────────────────────────────────────
+// ── Building Wallet ─ (gom doanh thu gửi xe của tòa nhà) ─────────────────────────
 router.get("/wallet", buildingWalletController.getWallet);
 router.get("/wallet/transactions", buildingWalletController.listTransactions);
 router.get("/wallet/daily-revenue", buildingWalletController.getDailyRevenue);
-// 30% revenue is auto-settled to the admin wallet daily; this lists that history.
-router.get("/wallet/settlements", buildingWalletController.listSettlements);
+// Tiền mặt chờ xác nhận + "Thu nhận" vào ví building.
+router.get("/wallet/pending-cash", buildingWalletController.listPendingCash);
+router.post("/wallet/pending-cash/:paymentId/confirm", buildingWalletController.confirmCash);
+// Toàn bộ dòng tiền của building theo phương thức.
+router.get("/payments", buildingWalletController.listPayments);
+router.get("/wallet/revenue-breakdown", buildingWalletController.getRevenueBreakdown);
+router.get("/wallet/penalty-revenue", buildingWalletController.getPenaltyRevenue);
+
+// Giờ mở/đóng cửa của tòa nhà.
+router.put("/operating-hours", buildingController.updateOperatingHours);
+// PayOS top-up for building wallet
+router.post("/wallet/topup", buildingWalletController.initiateTopup);
+router.get("/wallet/topup/:orderCode/verify", buildingWalletController.verifyTopup);
+
+router.get("/dashboard", dashboardController.getOverview);
+
+// Danh sách phiên xe đang đỗ trong tòa nhà (manager giám sát realtime).
+router.get("/sessions/active", sessionController.listParked);
+router.get("/sessions/history", sessionController.listHistory);
+router.get("/sessions/:id", sessionController.getDetail);
 
 router
   .route("/vehicle-types")
@@ -53,6 +76,7 @@ router
   .put(v.validateFloor, floorController.update)
   .delete(floorController.remove);
 
+// Manager CRUD cổng và tự đặt thể loại (ra / vào / hai chiều).
 router
   .route("/gates")
   .get(gateController.list)
@@ -61,11 +85,24 @@ router
   .route("/gates/:id")
   .put(v.validateGate, gateController.update)
   .delete(gateController.remove);
+router.patch("/gates/:id/status", gateController.updateStatus);
+
+// Dãy (Zone) — nguồn cấu hình loại xe + đối tượng sử dụng cho các slot bên trong.
+router
+  .route("/zones")
+  .get(zoneController.list)
+  .post(v.validateZone, zoneController.create);
+router
+  .route("/zones/:id")
+  .put(v.validateZone, zoneController.update)
+  .delete(zoneController.remove);
 
 router
   .route("/slots")
   .get(slotController.list)
   .post(v.validateSlot, slotController.create);
+// Tạo hàng loạt — phải khai báo trước /slots/:id để "batch" không bị nuốt làm :id.
+router.post("/slots/batch", v.validateSlotBatch, slotController.createBatch);
 router
   .route("/slots/:id")
   .put(v.validateSlot, slotController.update)
@@ -84,7 +121,6 @@ router
   .route("/price-policies/:id")
   .put(v.validatePricePolicy, pricingController.update)
   .delete(pricingController.deactivate);
-router.get("/policy-push-logs", pricingController.listPushLogs);
 
 router
   .route("/packages")
@@ -95,11 +131,28 @@ router
   .put(v.validatePackage, packageController.updatePackage)
   .delete(packageController.removePackage);
 router.get("/subscriptions", packageController.listSubscriptions);
+router.delete("/subscriptions/:id", packageController.cancelSubscription);
 
+// Khách hàng (user account) đã dùng bãi trong building này + trạng thái đăng ký gói
+// (không tính walk-in — không có account để "đăng ký gói").
+router.get("/customers", customerController.list);
+
+// Chính sách hoàn tiền khi hủy gói dài hạn (đổi từ /reservation-policy sau khi bỏ đặt chỗ).
 router
-  .route("/reservation-policy")
+  .route("/refund-policy")
   .get(reservationPolicyController.get)
   .put(v.validateReservationPolicy, reservationPolicyController.upsert);
+
+// Bảng giá phạt vi phạm — mỗi loại vi phạm 1 mức phí manager tự cấu hình (không
+// hard code), dùng khi duyệt phạt (Incident action=penalize_violator).
+router
+  .route("/violation-types")
+  .get(violationTypeController.list)
+  .post(violationTypeController.create);
+router
+  .route("/violation-types/:id")
+  .put(violationTypeController.update)
+  .delete(violationTypeController.remove);
 
 router
   .route("/shifts")
@@ -116,10 +169,9 @@ router
   .post(v.validateStaffShift, shiftController.assignStaffShift);
 router
   .route("/staff-shifts/:id")
-  .put(shiftController.updateStaffShift)
+  .put(v.validateStaffShift, shiftController.updateStaffShift)
   .delete(shiftController.removeStaffShift);
 router.get("/staff", shiftController.listAvailableStaff);
-router.get("/shift-revenues", shiftController.listShiftRevenues);
 
 router.get("/feedbacks", feedbackController.list);
 router.patch(
@@ -127,5 +179,9 @@ router.patch(
   v.validateFeedbackResponse,
   feedbackController.respond
 );
+
+// ── Incidents (sự cố do user báo cáo) ─────────────────────────────────────────
+router.get("/incidents", incidentController.list);
+router.patch("/incidents/:id", validateResolveIncident, incidentController.resolve);
 
 module.exports = router;

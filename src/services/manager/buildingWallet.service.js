@@ -1,11 +1,13 @@
 const mongoose = require('mongoose');
 const BuildingWallet = require('../../models/finance/BuildingWallet');
 const BuildingWalletTransaction = require('../../models/finance/BuildingWalletTransaction');
-const SystemWallet = require('../../models/finance/SystemWallet');
-const DailyRevenueSettlement = require('../../models/finance/DailyRevenueSettlement');
+const Payment = require('../../models/finance/Payment');
 const AppError = require('../../utils/AppError');
+const { localUtcOffset } = require('../../utils/dateBucket');
+const { REVENUE_PAYMENT_TYPES } = require('../../constants/finance');
 
-const ADMIN_SHARE_RATE = 0.3; // 30% of a building's daily revenue goes to the admin (system) wallet
+// Loại Payment tính là DOANH THU thật (loại 'topup' = manager tự nạp ví, 'refund' =
+// tiền hoàn ra). Khớp định nghĩa doanh thu ở dashboard manager/admin.
 
 // ─── Day helpers (local-server time) ───────────────────────────────────────────
 
@@ -72,16 +74,27 @@ const credit = async (buildingId, amount, reason, relatedPaymentId, mongoSession
 
 /**
  * Debit (trừ tiền) từ BuildingWallet — atomic.
+ * options.allowNegative = true → cho phép số dư âm (dùng cho refund do manager hủy gói/đặt chỗ).
  */
-const debit = async (buildingId, amount, reason, relatedPaymentId, performedById, mongoSession) => {
+const debit = async (buildingId, amount, reason, relatedPaymentId, performedById, mongoSession, options = {}) => {
   const opts = mongoSession ? { session: mongoSession } : {};
+  const { allowNegative = false } = options;
 
-  const wallet = await BuildingWallet.findOneAndUpdate(
-    { building: buildingId, balance: { $gte: amount } },
-    { $inc: { balance: -amount } },
-    { new: true, ...opts },
-  );
-  if (!wallet) throw new AppError('Insufficient building wallet balance', 400);
+  let wallet;
+  if (allowNegative) {
+    wallet = await BuildingWallet.findOneAndUpdate(
+      { building: buildingId },
+      { $inc: { balance: -amount } },
+      { new: true, upsert: true, ...opts },
+    );
+  } else {
+    wallet = await BuildingWallet.findOneAndUpdate(
+      { building: buildingId, balance: { $gte: amount } },
+      { $inc: { balance: -amount } },
+      { new: true, ...opts },
+    );
+    if (!wallet) throw new AppError('Insufficient building wallet balance', 400);
+  }
 
   await BuildingWalletTransaction.create(
     [{
@@ -100,9 +113,9 @@ const debit = async (buildingId, amount, reason, relatedPaymentId, performedById
 };
 
 /**
- * Tính doanh thu của 1 ngày (parking_fee + reservation_fee) + chỉ tiêu 30%.
+ * Daily revenue for a building (parking_fee + reservation_fee + subscription_fee credits).
  * @param {string|ObjectId} buildingId
- * @param {Date|string} [date] - Date hoặc 'YYYY-MM-DD' (mặc định: hôm nay)
+ * @param {Date|string} [date] - Date or 'YYYY-MM-DD' (defaults to today)
  */
 const getDailyRevenue = async (buildingId, date) => {
   const { start, end, key } = dayBounds(date);
@@ -112,7 +125,7 @@ const getDailyRevenue = async (buildingId, date) => {
       $match: {
         building: new mongoose.Types.ObjectId(String(buildingId)),
         type: 'credit',
-        reason: { $in: ['parking_fee', 'reservation_fee'] },
+        reason: { $in: ['parking_fee', 'reservation_fee', 'subscription_fee', 'penalty_fee'] },
         createdAt: { $gte: start, $lte: end },
       },
     },
@@ -120,113 +133,94 @@ const getDailyRevenue = async (buildingId, date) => {
   ]);
 
   const totalRevenue = result[0]?.total ?? 0;
-  const targetTransfer = Math.floor(totalRevenue * ADMIN_SHARE_RATE);
 
-  return { date: key, totalRevenue, targetTransfer };
+  return { date: key, totalRevenue };
 };
 
 /**
- * Tự động trích 30% doanh thu của 1 ngày: BuildingWallet → SystemWallet.
- * Idempotent: mỗi (building, ngày) chỉ chạy đúng 1 lần nhờ unique index +
- * kiểm tra tồn tại. An toàn để gọi lại nhiều lần (catch-up).
- *
+ * Doanh thu THEO NGÀY × PHƯƠNG THỨC + tổng doanh thu all-time cho 1 tòa.
+ * Nguồn: Payment thành công loại doanh thu (session/reservation/subscription) — nhất
+ * quán với dashboard, và tách được theo phương thức (cash/wallet/online) mà ví tòa
+ * (BuildingWalletTransaction) không lưu. `allTimeTotal` KHÔNG gồm top-up nên phản ánh
+ * đúng "tổng doanh thu gửi xe" (khác `wallet.totalReceived` vốn cộng cả top-up).
  * @param {string|ObjectId} buildingId
- * @param {Date|string} date - ngày cần trích ('YYYY-MM-DD' hoặc Date)
- * @returns {Promise<{settlement: object, alreadySettled: boolean}>}
+ * @param {{ from?: string|Date, to?: string|Date }} [range] - mặc định 14 ngày gần nhất
  */
-const settleDailyRevenue = async (buildingId, date) => {
-  const { key } = dayBounds(date);
+const getRevenueBreakdown = async (buildingId, { from, to } = {}) => {
+  const bId = new mongoose.Types.ObjectId(String(buildingId));
 
-  // Idempotent fast-path
-  const existing = await DailyRevenueSettlement.findOne({ building: buildingId, date: key });
-  if (existing) return { settlement: existing, alreadySettled: true };
+  const end = to ? new Date(to) : new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = from ? new Date(from) : new Date(end);
+  if (!from) start.setDate(start.getDate() - 13); // 14 ngày gồm hôm nay
+  start.setHours(0, 0, 0, 0);
 
-  const { totalRevenue } = await getDailyRevenue(buildingId, key);
-  const target = Math.floor(totalRevenue * ADMIN_SHARE_RATE);
+  const baseMatch = {
+    building: bId,
+    status: 'success',
+    type: { $in: [...REVENUE_PAYMENT_TYPES, 'refund'] },
+  };
+  const byMethodStage = {
+    total: { $sum: { $cond: [{ $in: ['$type', REVENUE_PAYMENT_TYPES] }, '$amount', 0] } },
+    refunds: { $sum: { $cond: [{ $eq: ['$type', 'refund'] }, '$amount', 0] } },
+    cash: { $sum: { $cond: [{ $and: [{ $in: ['$type', REVENUE_PAYMENT_TYPES] }, { $eq: ['$method', 'cash'] }] }, '$amount', 0] } },
+    wallet: { $sum: { $cond: [{ $and: [{ $in: ['$type', REVENUE_PAYMENT_TYPES] }, { $eq: ['$method', 'wallet'] }] }, '$amount', 0] } },
+    online: { $sum: { $cond: [{ $and: [{ $in: ['$type', REVENUE_PAYMENT_TYPES] }, { $in: ['$method', ['qr', 'payos', 'card']] }] }, '$amount', 0] } },
+  };
 
-  const mongoSession = await mongoose.startSession();
-  try {
-    const out = await mongoSession.withTransaction(async () => {
-      let transferred = 0;
-      let systemBalanceAfter = 0;
-      let note = '';
-
-      if (target > 0) {
-        const wallet = await BuildingWallet.findOne({ building: buildingId }).session(mongoSession);
-        const balance = wallet?.balance ?? 0;
-        transferred = Math.min(target, balance);
-
-        if (transferred > 0) {
-          await debit(buildingId, transferred, 'transfer_to_system', null, null, mongoSession);
-          const systemWallet = await SystemWallet.findOneAndUpdate(
-            {},
-            { $inc: { balance: transferred } },
-            { new: true, upsert: true, session: mongoSession },
-          );
-          systemBalanceAfter = systemWallet.balance;
-          await BuildingWallet.findOneAndUpdate(
-            { building: buildingId },
-            { $inc: { totalTransferred: transferred } },
-            { session: mongoSession },
-          );
-        } else {
-          const systemWallet = await SystemWallet.findOne({}).session(mongoSession);
-          systemBalanceAfter = systemWallet?.balance ?? 0;
-        }
-
-        if (transferred < target) {
-          note = `Shortfall: target ${target}, transferred ${transferred} (insufficient building balance)`;
-        }
-      } else {
-        const systemWallet = await SystemWallet.findOne({}).session(mongoSession);
-        systemBalanceAfter = systemWallet?.balance ?? 0;
-      }
-
-      const [settlement] = await DailyRevenueSettlement.create(
-        [{
-          building: buildingId,
-          date: key,
-          revenue: totalRevenue,
-          targetAmount: target,
-          transferredAmount: transferred,
-          systemBalanceAfter,
-          note,
-        }],
-        { session: mongoSession },
-      );
-
-      return { settlement, alreadySettled: false };
-    });
-    return out;
-  } catch (err) {
-    // Concurrent run already settled this day (unique index) → treat as no-op
-    if (err && err.code === 11000) {
-      const settled = await DailyRevenueSettlement.findOne({ building: buildingId, date: key });
-      return { settlement: settled, alreadySettled: true };
-    }
-    throw err;
-  } finally {
-    mongoSession.endSession();
-  }
-};
-
-/**
- * Lịch sử trích doanh thu tự động (phân trang).
- */
-const listSettlements = async (buildingId, query = {}) => {
-  const page = Math.max(Number(query.page) || 1, 1);
-  const limit = Math.min(Math.max(Number(query.limit) || 30, 1), 100);
-
-  const filter = { building: buildingId };
-  const [items, total] = await Promise.all([
-    DailyRevenueSettlement.find(filter)
-      .sort('-date')
-      .skip((page - 1) * limit)
-      .limit(limit),
-    DailyRevenueSettlement.countDocuments(filter),
+  const [dayRows, allTime, pendingCash] = await Promise.all([
+    Payment.aggregate([
+      { $set: { effectiveAt: { $ifNull: ['$settledAt', '$createdAt'] } } },
+      { $match: { ...baseMatch, effectiveAt: { $gte: start, $lte: end } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$effectiveAt', timezone: localUtcOffset() } }, ...byMethodStage } },
+      { $set: { net: { $subtract: ['$total', '$refunds'] } } },
+      { $sort: { _id: -1 } },
+    ]),
+    Payment.aggregate([
+      { $match: baseMatch },
+      {
+        $group: {
+          _id: null,
+          gross: { $sum: { $cond: [{ $in: ['$type', REVENUE_PAYMENT_TYPES] }, '$amount', 0] } },
+          refunds: { $sum: { $cond: [{ $eq: ['$type', 'refund'] }, '$amount', 0] } },
+        },
+      },
+    ]),
+    Payment.aggregate([
+      {
+        $match: {
+          building: bId,
+          status: 'pending',
+          method: 'cash',
+          type: { $in: REVENUE_PAYMENT_TYPES },
+        },
+      },
+      { $group: { _id: null, amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+    ]),
   ]);
 
-  return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  const allTimeGross = allTime[0]?.gross ?? 0;
+  const allTimeRefunds = allTime[0]?.refunds ?? 0;
+  return {
+    allTimeTotal: allTimeGross,
+    allTimeGross,
+    allTimeRefunds,
+    allTimeNet: allTimeGross - allTimeRefunds,
+    pendingCash: pendingCash[0] || { amount: 0, count: 0 },
+    definitions: {
+      gross: 'Successful operating revenue before refunds',
+      net: 'Gross revenue minus refunds',
+      pendingCash: 'Cash recorded by staff but not yet confirmed by the manager',
+    },
+    days: dayRows.map((r) => ({
+      date: r._id,
+      total: r.total,
+      gross: r.total,
+      refunds: r.refunds,
+      net: r.net,
+      byMethod: { cash: r.cash, wallet: r.wallet, online: r.online },
+    })),
+  };
 };
 
 /**
@@ -253,12 +247,168 @@ const listTransactions = async (buildingId, query = {}) => {
   return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
+/**
+ * Danh sách khoản TIỀN MẶT đang CHỜ XÁC NHẬN của một building (khách vãng lai/user
+ * thường trả tiền mặt lúc checkout → Payment{method:'cash', status:'pending'}).
+ */
+const listPendingCash = async (buildingId, query = {}) => {
+  const page = Math.max(Number(query.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+  const filter = {
+    building: buildingId,
+    method: 'cash',
+    status: 'pending',
+    type: { $in: ['session', 'penalty'] },
+  };
+
+  const [items, total, sumAgg] = await Promise.all([
+    Payment.find(filter)
+      .sort('-createdAt')
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('parkingSession', 'plateNumber entryTime exitTime')
+      .populate('staff', 'fullName email'),
+    Payment.countDocuments(filter),
+    Payment.aggregate([
+      { $match: { building: new mongoose.Types.ObjectId(String(buildingId)), method: 'cash', status: 'pending', type: { $in: ['session', 'penalty'] } } },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]),
+  ]);
+
+  return {
+    items,
+    pendingTotal: sumAgg[0]?.total ?? 0,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+  };
+};
+
+/**
+ * Manager "Thu nhận" một khoản tiền mặt pending → flip Payment 'pending'→'success' và
+ * cộng vào ví building (parking_fee). Atomic + chống double-confirm.
+ */
+const confirmCash = async (buildingId, paymentId, performedById) => {
+  if (!mongoose.Types.ObjectId.isValid(paymentId)) {
+    throw new AppError('paymentId không hợp lệ', 400, 'INVALID_PAYMENT_ID');
+  }
+  const mongoSession = await mongoose.startSession();
+  try {
+    let result;
+    await mongoSession.withTransaction(async () => {
+      // Guard status:'pending' để 2 request đồng thời chỉ 1 cái thành công.
+      const payment = await Payment.findOneAndUpdate(
+        { _id: paymentId, building: buildingId, method: 'cash', status: 'pending', type: { $in: ['session', 'penalty'] } },
+        { $set: { status: 'success' } },
+        { new: true, session: mongoSession },
+      );
+      if (!payment) {
+        throw new AppError('Không tìm thấy khoản tiền mặt chờ xác nhận (có thể đã được thu).', 404, 'PENDING_CASH_NOT_FOUND');
+      }
+
+      if (payment.amount > 0) {
+        const wallet = await BuildingWallet.findOneAndUpdate(
+          { building: buildingId },
+          { $inc: { balance: payment.amount, totalReceived: payment.amount } },
+          { new: true, upsert: true, session: mongoSession },
+        );
+        await BuildingWalletTransaction.create(
+          [{
+            building: buildingId,
+            type: 'credit',
+            amount: payment.amount,
+            balanceAfter: wallet.balance,
+            reason: payment.type === 'penalty' ? 'penalty_fee' : 'parking_fee',
+            relatedPayment: payment._id,
+            performedBy: performedById || null,
+            note: 'Cash receipt confirmed by manager',
+          }],
+          { session: mongoSession },
+        );
+      }
+      result = payment;
+    });
+    return result;
+  } finally {
+    mongoSession.endSession();
+  }
+};
+
+/**
+ * Danh sách TẤT CẢ dòng tiền (Payment) của building, lọc theo phương thức/trạng thái/
+ * loại/khoảng ngày — cho manager xem toàn bộ dòng tiền của khách theo phương thức.
+ */
+const listPayments = async (buildingId, query = {}) => {
+  const page = Math.max(Number(query.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+
+  const filter = { building: buildingId };
+  if (query.method) filter.method = query.method;
+  if (query.status) filter.status = query.status;
+  if (query.type) filter.type = query.type;
+  if (query.from || query.to) {
+    filter.createdAt = {};
+    if (query.from) filter.createdAt.$gte = new Date(query.from);
+    if (query.to) filter.createdAt.$lte = new Date(query.to);
+  }
+
+  const [items, total] = await Promise.all([
+    Payment.find(filter)
+      .sort('-createdAt')
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('parkingSession', 'plateNumber')
+      .populate('user', 'fullName email')
+      .populate('staff', 'fullName email'),
+    Payment.countDocuments(filter),
+  ]);
+
+  return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+};
+
+/**
+ * Thống kê doanh thu tiền phạt vi phạm (Incident Penalty Revenue).
+ * Nguồn: Payments thành công có gắn incident ID.
+ */
+const getPenaltyRevenue = async (buildingId) => {
+  const bId = new mongoose.Types.ObjectId(String(buildingId));
+
+  const startToday = new Date();
+  startToday.setHours(0, 0, 0, 0);
+
+  const [allTimeAgg, todayAgg, recentItems] = await Promise.all([
+    Payment.aggregate([
+      { $match: { building: bId, status: 'success', incident: { $ne: null } } },
+      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
+    ]),
+    Payment.aggregate([
+      { $match: { building: bId, status: 'success', incident: { $ne: null }, createdAt: { $gte: startToday } } },
+      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
+    ]),
+    Payment.find({ building: buildingId, status: 'success', incident: { $ne: null } })
+      .sort('-createdAt')
+      .limit(10)
+      .populate('incident', 'code type target penaltyFee')
+      .populate('user', 'fullName email')
+      .populate('staff', 'fullName email'),
+  ]);
+
+  return {
+    allTimePenaltyRevenue: allTimeAgg[0]?.total ?? 0,
+    allTimePenaltyCount: allTimeAgg[0]?.count ?? 0,
+    todayPenaltyRevenue: todayAgg[0]?.total ?? 0,
+    todayPenaltyCount: todayAgg[0]?.count ?? 0,
+    recentPayments: recentItems,
+  };
+};
+
 module.exports = {
   getOrCreate,
   credit,
   debit,
   getDailyRevenue,
-  settleDailyRevenue,
-  listSettlements,
+  getRevenueBreakdown,
   listTransactions,
+  listPendingCash,
+  confirmCash,
+  listPayments,
+  getPenaltyRevenue,
 };

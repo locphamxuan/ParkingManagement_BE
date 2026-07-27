@@ -32,15 +32,27 @@ docs/api-doc.md
 docs/api-doc-current.md
 docs/session-operations-test-report.md
 docs/staff-api-data-structures.md
+docs/reports/
+/docs/
+!/docs/
+!/docs/COUNCIL_DEFENSE_NOTES.md
 
 # Generated exports / reports
 postman/
 .postman/
 reports/
-tests/
+scripts/
+tools/
 
 # Source notes
 Admin API Contract Draft....txt
 Requirements.docx.txt
 Scope + database.txt
 .claude/commands/opsx/pbms-be.md
+exports/mongodb-2026-06-09T14-49-34-080Z/
+scratch_check.js
+
+# Claude Code — chi dung local, khong push len remote
+CLAUDE.md
+claude.md
+.claude.json

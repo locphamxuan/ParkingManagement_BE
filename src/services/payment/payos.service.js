@@ -7,6 +7,7 @@
  * Currency: VND (integer, no conversion needed)
  */
 
+const { randomBytes } = require('crypto');
 const { PayOS } = require('@payos/node');
 const env = require('../../config/env');
 
@@ -24,7 +25,7 @@ const payos = new PayOS({
 
 const generateOrderCode = () => {
   const ts = String(Math.floor(Date.now() / 1000)).slice(-8); // 8 digits
-  const rand = String(Math.floor(Math.random() * 100)).padStart(2, '0'); // 2 digits
+  const rand = String(Number.parseInt(randomBytes(3).toString('hex'), 16) % 1_000_000).padStart(6, '0'); // 6 digits (1M values)
   return Number(`${ts}${rand}`);
 };
 
@@ -70,6 +71,11 @@ const createPaymentLink = async ({
     qrCode: response.qrCode,
     paymentLinkId: response.paymentLinkId,
     orderCode: response.orderCode,
+    bin: response.bin,
+    accountNumber: response.accountNumber,
+    accountName: response.accountName,
+    amount: response.amount,
+    description: response.description,
   };
 };
 
@@ -100,19 +106,9 @@ const getPaymentLink = async (orderCode) => {
   return payos.paymentRequests.get(orderCode);
 };
 
-/**
- * Cancel a payment link by orderCode.
- * @param {number} orderCode
- * @param {string} [reason]
- */
-const cancelPaymentLink = async (orderCode, reason) => {
-  return payos.paymentRequests.cancel(orderCode, reason);
-};
-
 module.exports = {
   generateOrderCode,
   createPaymentLink,
   verifyWebhook,
   getPaymentLink,
-  cancelPaymentLink,
 };

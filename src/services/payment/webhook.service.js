@@ -11,58 +11,19 @@
  *  - type='session' → mark ParkingSession completed + free slot
  */
 
-const mongoose = require('mongoose');
 const payosService = require('./payos.service');
 const { Payment } = require('../../models');
-const Reservation = require('../../models/operations/Reservation');
-const buildingWalletService = require('../manager/buildingWallet.service');
 const walletService = require('../user/wallet.service');
+const buildingWalletTopupService = require('../manager/buildingWalletTopup.service');
 const parkingSessionService = require('../staff/parkingSession.service');
 const AppError = require('../../utils/AppError');
+const logger = require('../../utils/logger');
 
 /* ─────────────────────────────────────────────
    Top-up   → walletService.settleTopup
    Session  → parkingSessionService.settleSessionPayment
    Both are race-safe & idempotent and shared with their manual verify endpoints.
 ───────────────────────────────────────────── */
-
-/* ─────────────────────────────────────────────
-   Reservation fee handler (PayOS payment)
-───────────────────────────────────────────── */
-
-const handleReservationFee = async (pendingPayment, amount, mongoSession) => {
-  const reservation = await Reservation.findById(pendingPayment.reservation).session(mongoSession);
-  if (!reservation) throw new AppError('Reservation not found', 404);
-
-  if (reservation.status === 'confirmed') return; // already confirmed
-
-  // Confirm reservation
-  reservation.status = 'confirmed';
-  await reservation.save({ session: mongoSession });
-
-  // Mark slot reserved if assigned
-  if (reservation.slot) {
-    const ParkingSlotModel = require('../../models/building/ParkingSlot');
-    await ParkingSlotModel.findByIdAndUpdate(
-      reservation.slot,
-      { status: 'reserved' },
-      { session: mongoSession },
-    );
-  }
-
-  // Credit building wallet
-  if (pendingPayment.building) {
-    await buildingWalletService.credit(
-      pendingPayment.building, amount, 'reservation_fee', pendingPayment._id, mongoSession,
-    );
-  }
-
-  await Payment.findByIdAndUpdate(
-    pendingPayment._id,
-    { status: 'success' },
-    { session: mongoSession },
-  );
-};
 
 /* ─────────────────────────────────────────────
    Main dispatcher
@@ -85,7 +46,7 @@ const handle = async (body) => {
   // Only process successful payments
   if (!webhookData || webhookData.code !== '00') return;
 
-  const { orderCode, amount } = webhookData;
+  const { orderCode } = webhookData;
 
   // Look up our pending Payment record
   const pendingPayment = await Payment.findOne({
@@ -94,12 +55,20 @@ const handle = async (body) => {
   });
 
   // Unknown order or already processed → ignore (idempotent)
-  if (!pendingPayment) return;
+  if (!pendingPayment) {
+    logger.warn('[PayOS webhook] Unknown or already-processed order', { orderCode });
+    return;
+  }
 
   // Top-up & session each run their own race-safe transaction (shared with their
   // manual verify endpoints), so they're handled outside the reservation txn.
   if (pendingPayment.type === 'topup') {
-    await walletService.settleTopup(orderCode);
+    // Building wallet topup (manager) vs user wallet topup — differentiated by building field
+    if (pendingPayment.building) {
+      await buildingWalletTopupService.settleTopup(orderCode);
+    } else {
+      await walletService.settleTopup(orderCode);
+    }
     return;
   }
   if (pendingPayment.type === 'session') {
@@ -107,16 +76,13 @@ const handle = async (body) => {
     return;
   }
 
-  const mongoSession = await mongoose.startSession();
-  try {
-    await mongoSession.withTransaction(async () => {
-      if (pendingPayment.type === 'reservation') {
-        await handleReservationFee(pendingPayment, amount, mongoSession);
-      }
-    });
-  } finally {
-    mongoSession.endSession();
-  }
+  logger.warn('[PayOS webhook] Unsupported payment type', {
+    orderCode,
+    paymentId: `${pendingPayment._id}`,
+    type: pendingPayment.type,
+  });
+
+  // Các loại payment khác không xử lý qua webhook → bỏ qua (idempotent).
 };
 
 module.exports = { handle };

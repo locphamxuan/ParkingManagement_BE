@@ -7,4 +7,9 @@ const list = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { list };
+const get = asyncHandler(async (req, res) => {
+  const session = await service.getById(req.user._id, req.params.id);
+  sendSuccess(res, { data: { session } });
+});
+
+module.exports = { list, get };

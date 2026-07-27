@@ -8,4 +8,14 @@ const getReport = asyncHandler(async (req, res) => {
   sendSuccess(res, { data });
 });
 
-module.exports = { getReport };
+const listPayments = asyncHandler(async (req, res) => {
+  const data = await service.listPayments(req.query);
+  sendSuccess(res, { data });
+});
+
+const getReconciliation = asyncHandler(async (req, res) => {
+  const data = await service.getReconciliation(req.query);
+  sendSuccess(res, { data });
+});
+
+module.exports = { getReport, listPayments, getReconciliation };
