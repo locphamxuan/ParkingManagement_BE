@@ -91,4 +91,4 @@ const plateMatchRegex = (raw) => {
   return new RegExp(`^${body}$`, 'i');
 };
 
-module.exports = { normalizePlate, isValidVietnamPlate, plateMatchRegex, CANONICAL_PLATE_REGEX };
+module.exports = { normalizePlate, isValidVietnamPlate, plateMatchRegex };
