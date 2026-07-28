@@ -139,12 +139,15 @@ const createShift = (buildingId, over = {}) => {
 };
 
 const createStaffShift = (buildingId, staffId, shiftId, over = {}) => {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  // businessTime derives the business date from this instant. Keeping the
+  // current instant avoids using the test runner's local calendar date, which
+  // can differ from the configured business timezone around midnight.
+  const workDate = over.workDate ?? new Date();
   return StaffShift.create({
     building: buildingId,
     staff: staffId,
     shift: shiftId,
-    workDate: over.workDate || today,
+    workDate,
     status: over.status || 'active',
     ...(over.gate ? { gate: over.gate } : {}),
   });
