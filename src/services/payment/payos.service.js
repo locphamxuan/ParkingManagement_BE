@@ -7,7 +7,7 @@
  * Currency: VND (integer, no conversion needed)
  */
 
-const { randomBytes } = require('crypto');
+const { randomBytes } = require('node:crypto');
 const { PayOS } = require('@payos/node');
 const env = require('../../config/env');
 
@@ -59,8 +59,8 @@ const createPaymentLink = async ({
     orderCode,
     amount,
     description: (description || 'Thanh toan PBMS').slice(0, 25),
-    returnUrl: returnUrl || `${env.clientUrl}/payment/success`,
-    cancelUrl: cancelUrl || `${env.clientUrl}/payment/cancel`,
+    returnUrl: returnUrl || `${env.frontendUrl}/payment/success`,
+    cancelUrl: cancelUrl || `${env.frontendUrl}/payment/cancel`,
     buyerName: buyerName || undefined,
     buyerEmail: buyerEmail || undefined,
     expiredAt: Math.floor(Date.now() / 1000) + 3600, // expire in 1 hour

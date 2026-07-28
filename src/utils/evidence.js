@@ -36,7 +36,7 @@ const redactEvidenceForAudit = (value) => {
   for (const [key, nested] of Object.entries(value)) {
     if (/^(plateImage|portraitImage|exitPlateImage|exitPortraitImage)$/i.test(key)) {
       output[key] = nested ? '[evidence stored on parking session]' : null;
-    } else if (/password|resetPasswordToken|token$/i.test(key)) {
+    } else if (/(?:password|resetPasswordToken|token)$/i.test(key)) {
       output[key] = '[redacted]';
     } else {
       output[key] = redactEvidenceForAudit(nested);

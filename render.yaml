@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: pbms-api
+    runtime: node
+    plan: free
+    branch: main
+    autoDeploy: true
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BUSINESS_TIMEZONE
+        value: Asia/Ho_Chi_Minh
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MONGODB_URI
+        sync: false
+      - key: PAYOS_CLIENT_ID
+        sync: false
+      - key: PAYOS_API_KEY
+        sync: false
+      - key: PAYOS_CHECKSUM_KEY
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OCR_PROVIDER
+        value: gemini
+      - key: ESMS_API_KEY
+        sync: false
+      - key: ESMS_SECRET_KEY
+        sync: false
+      - key: ESMS_BRANDNAME
+        sync: false
+      - key: KIOSK_DEVICE_TOKEN
+        generateValue: true

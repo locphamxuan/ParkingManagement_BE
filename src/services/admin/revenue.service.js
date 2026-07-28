@@ -10,6 +10,24 @@ const {
   ONLINE_PAYMENT_METHODS,
 } = require('../../constants/finance');
 
+const { PAYMENT_TYPES, PAYMENT_METHODS, PAYMENT_STATUS } = Payment;
+
+const optionalEnum = (value, allowed, field) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !allowed.includes(value)) {
+    throw new AppError(`Invalid ${field}`, 400);
+  }
+  return value;
+};
+
+const optionalDate = (value, field) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') throw new AppError(`Invalid ${field} date`, 400);
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new AppError(`Invalid ${field} date`, 400);
+  return parsed;
+};
+
 const parseRange = ({ from, to }) => {
   if (!from || !to) throw new AppError('from and to date are required', 400);
   const dateFrom = new Date(from);
@@ -186,15 +204,25 @@ const listPayments = async (query = {}) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(query.limit) || 30, 1), 200);
   const filter = {};
-  if (query.buildingId) filter.building = query.buildingId;
-  if (query.type) filter.type = query.type;
-  if (query.method) filter.method = query.method;
-  if (query.status) filter.status = query.status;
+  if (query.buildingId) {
+    if (typeof query.buildingId !== 'string' || !mongoose.isValidObjectId(query.buildingId)) {
+      throw new AppError('Invalid buildingId', 400);
+    }
+    filter.building = new mongoose.Types.ObjectId(query.buildingId);
+  }
+  const type = optionalEnum(query.type, PAYMENT_TYPES, 'type');
+  const method = optionalEnum(query.method, PAYMENT_METHODS, 'method');
+  const status = optionalEnum(query.status, PAYMENT_STATUS, 'status');
+  if (type) filter.type = type;
+  if (method) filter.method = method;
+  if (status) filter.status = status;
   if (query.from || query.to) {
     const effectiveRange = {};
-    if (query.from) effectiveRange.$gte = new Date(query.from);
-    if (query.to) {
-      const end = new Date(query.to);
+    const from = optionalDate(query.from, 'from');
+    const to = optionalDate(query.to, 'to');
+    if (from) effectiveRange.$gte = from;
+    if (to) {
+      const end = new Date(to);
       end.setHours(23, 59, 59, 999);
       effectiveRange.$lte = end;
     }

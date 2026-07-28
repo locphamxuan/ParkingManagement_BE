@@ -83,3 +83,41 @@ describe('getReport', () => {
     expect(settled.settledAt).toBeInstanceOf(Date);
   });
 });
+
+describe('listPayments', () => {
+  test.each([
+    [{ buildingId: 'not-an-object-id' }, 'buildingId'],
+    [{ type: { $ne: 'session' } }, 'type'],
+    [{ method: 'crypto' }, 'method'],
+    [{ status: 'approved' }, 'status'],
+    [{ from: 'not-a-date' }, 'from'],
+    [{ to: ['2026-01-01'] }, 'to'],
+  ])('rejects an unsafe or invalid filter: %p', async (query, field) => {
+    await expect(svc.listPayments(query)).rejects.toMatchObject({
+      statusCode: 400,
+      message: expect.stringContaining(field),
+    });
+  });
+
+  test('accepts only normalized allowlisted filters', async () => {
+    await Payment.create({
+      building: building._id,
+      type: 'session',
+      method: 'cash',
+      amount: 20000,
+      status: 'success',
+    });
+
+    const result = await svc.listPayments({
+      buildingId: String(building._id),
+      type: 'session',
+      method: 'cash',
+      status: 'success',
+      from,
+      to,
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.pagination.total).toBe(1);
+  });
+});

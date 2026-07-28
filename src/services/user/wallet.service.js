@@ -30,8 +30,8 @@ const topup = async (userId, amount) => {
   const user = await User.findById(userId).select('_id email fullName');
   if (!user) throw new AppError('User not found', 404);
 
-  const returnUrl = `${env.clientUrl}/wallet/topup/success`;
-  const cancelUrl = `${env.clientUrl}/wallet/topup/cancel`;
+  const returnUrl = `${env.frontendUrl}/wallet/topup/success`;
+  const cancelUrl = `${env.frontendUrl}/wallet/topup/cancel`;
 
   const {
     checkoutUrl,

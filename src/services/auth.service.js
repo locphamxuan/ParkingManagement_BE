@@ -7,12 +7,13 @@ const { signToken } = require('../utils/token');
 const { ROLES } = require('../constants/roles');
 const { sendResetPasswordEmail, sendOtpEmail } = require('../utils/email');
 const { sendOtpSms } = require('../utils/sms');
+const env = require('../config/env');
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 phút
 const OTP_RESEND_COOLDOWN_MS = 60 * 1000; // không gửi lại SMS trong 60s
 const MAX_OTP_ATTEMPTS = 5;
 
-const generateNumericOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+const generateNumericOtp = () => String(crypto.randomInt(100000, 1000000));
 const hashOtp = (otp) => crypto.createHash('sha256').update(otp).digest('hex');
 
 const toPublicUser = (user) => user.toJSON();
@@ -92,7 +93,7 @@ const getProfile = async (userId) => {
   return toPublicUser(user);
 };
 
-const forgotPassword = async (email, frontendUrlFromRequest, clientType) => {
+const forgotPassword = async (email, clientType) => {
   const user = await User.findOne({ email: email.trim().toLowerCase() });
   // Always respond the same to prevent email enumeration
   if (!user || !user.isActive) return;
@@ -108,8 +109,7 @@ const forgotPassword = async (email, frontendUrlFromRequest, clientType) => {
   if (clientType === 'mobile') {
     resetUrl = `pbms://reset-password?token=${plainToken}`;
   } else {
-    const frontendUrl = frontendUrlFromRequest || process.env.FRONTEND_URL || 'http://localhost:5173';
-    resetUrl = `${frontendUrl}/auth/reset-password?token=${plainToken}`;
+    resetUrl = `${env.frontendUrl}/auth/reset-password?token=${plainToken}`;
   }
 
   await sendResetPasswordEmail({ to: user.email, resetUrl, fullName: user.fullName });
@@ -148,7 +148,7 @@ const requestRegistration = async (body) => {
     throw new AppError('Số điện thoại đã được đăng ký', 409, 'PHONE_TAKEN');
   }
 
-  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  const otp = generateNumericOtp();
 
   await OtpVerification.deleteOne({ email });
   await OtpVerification.create({ email, otp, password, fullName, phone });

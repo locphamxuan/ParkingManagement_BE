@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const env = require('./config/env');
@@ -7,19 +8,27 @@ const webhookRoutes = require('./routes/payment/webhook.routes');
 const { notFound, errorHandler } = require('./middlewares/error.middleware');
 const { sanitizeInputs } = require('./middlewares/sanitize.middleware');
 const { setupSwagger } = require('./config/swagger');
+const AppError = require('./utils/AppError');
 
 const app = express();
 
+if (env.nodeEnv === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Explicit origin allowlist (not '*') + credentials:true — required for the
 // httpOnly auth cookie (see utils/authCookie.js) to be accepted cross-origin.
-const allowedOrigins = env.clientUrl.split(',').map((origin) => origin.trim()).filter(Boolean);
+const allowedOrigins = new Set(env.clientOrigins);
 app.use(cors({
   origin: (origin, callback) => {
     // No Origin header (curl/Postman/server-to-server, e.g. PayOS webhook) — allow.
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
     // Allow any localhost / 127.0.0.1 port (e.g. Expo Web on 8081, Vite on 5173, etc.)
-    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
+    if (
+      env.nodeEnv !== 'production' &&
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+    ) return callback(null, true);
+    return callback(new AppError('Origin is not allowed by CORS', 403, 'CORS_ORIGIN_DENIED'));
   },
   credentials: true,
 }));
@@ -35,6 +44,15 @@ app.get('/', (_req, res) => {
     success: true,
     message: 'PBMS API — xem README.md để biết danh sách endpoint',
     apiPrefix: '/api',
+  });
+});
+
+app.get('/health', (_req, res) => {
+  const databaseReady = mongoose.connection.readyState === 1;
+  res.status(databaseReady ? 200 : 503).json({
+    success: databaseReady,
+    service: 'pbms-api',
+    database: databaseReady ? 'connected' : 'unavailable',
   });
 });
 

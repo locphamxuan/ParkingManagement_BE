@@ -18,8 +18,8 @@ const topup = async (buildingId, managerId, amount) => {
   if (!Number.isInteger(amount)) throw new AppError('amount must be an integer (VND)', 400);
   if (amount < MIN_TOPUP) throw new AppError(`Minimum top-up is ${MIN_TOPUP.toLocaleString('en-US')} ₫`, 400);
 
-  const returnUrl = `${env.clientUrl}/manager/wallet?topup=success`;
-  const cancelUrl = `${env.clientUrl}/manager/wallet?topup=cancel`;
+  const returnUrl = `${env.frontendUrl}/manager/wallet?topup=success`;
+  const cancelUrl = `${env.frontendUrl}/manager/wallet?topup=cancel`;
 
   const intent = await createPayosIntent({
     paymentData: {

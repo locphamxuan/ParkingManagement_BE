@@ -84,8 +84,13 @@ describe('login', () => {
 describe('forgotPassword + resetPassword', () => {
   test('forgotPassword đặt token + gửi email; email lạ → không throw, không gửi', async () => {
     await reg();
-    await authService.forgotPassword('a@test.com', 'http://fe');
+    await authService.forgotPassword('a@test.com');
     expect(email.sendResetPasswordEmail).toHaveBeenCalledTimes(1);
+    expect(email.sendResetPasswordEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resetUrl: expect.stringMatching(/^http:\/\/localhost:5173\/auth\/reset-password\?token=/),
+      }),
+    );
     const u = await User.findOne({ email: 'a@test.com' }).select('+resetPasswordToken');
     expect(u.resetPasswordToken).toBeTruthy();
 
