@@ -4,8 +4,22 @@ const AppError = require('../../utils/AppError');
 const asyncHandler = require('../../utils/asyncHandler');
 const { sendSuccess } = require('../../utils/response');
 
+const optionalImageUrl = (value, field) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') throw new AppError(`${field} must be a URL`, 400);
+
+  const url = value.trim();
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported protocol');
+  } catch {
+    throw new AppError(`${field} must be a valid HTTP(S) URL`, 400);
+  }
+  return url;
+};
+
 const createFeedback = asyncHandler(async (req, res) => {
-  const { parkingSession, rating, comment, building } = req.body;
+  const { parkingSession, rating, comment, building, portraitImageUrl, plateImageUrl } = req.body;
   if (!parkingSession) throw new AppError('parkingSession is required', 400);
   if (!rating) throw new AppError('rating is required', 400);
   if (!comment) throw new AppError('comment is required', 400);
@@ -19,6 +33,8 @@ const createFeedback = asyncHandler(async (req, res) => {
     rating: Number(rating),
     comment: String(comment).trim(),
     building: building || null,
+    portraitImageUrl: optionalImageUrl(portraitImageUrl, 'portraitImageUrl'),
+    plateImageUrl: optionalImageUrl(plateImageUrl, 'plateImageUrl'),
   });
 
   sendSuccess(res, { message: 'Feedback submitted', data: { feedback } }, 201);
