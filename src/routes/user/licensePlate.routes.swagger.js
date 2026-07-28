@@ -1,6 +1,6 @@
 ﻿/**
  * @swagger
- * /api/user/license-plates:
+ * /api/users/license-plates:
  *   get:
  *     tags: [User - License Plates]
  *     summary: Lấy danh sách biển số của user
@@ -30,7 +30,7 @@
  *       201:
  *         description: Thêm thành công
  *
- * /api/user/license-plates/{plateId}:
+ * /api/users/license-plates/{plateId}:
  *   put:
  *     tags: [User - License Plates]
  *     summary: Cập nhật biển số
@@ -70,7 +70,7 @@
  *       200:
  *         description: Xóa thành công
  *
- * /api/user/license-plates/{plateId}/default:
+ * /api/users/license-plates/{plateId}/default:
  *   patch:
  *     tags: [User - License Plates]
  *     summary: Đặt biển số mặc định

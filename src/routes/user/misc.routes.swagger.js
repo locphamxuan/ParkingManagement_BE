@@ -1,6 +1,6 @@
 ﻿/**
  * @swagger
- * /api/user/parking-history:
+ * /api/users/parking-history:
  *   get:
  *     tags: [User - Parking History]
  *     summary: List parking history for the authenticated user
@@ -15,7 +15,7 @@
  *       - { in: query, name: buildingId, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Parking history returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ParkingSession' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
- * /api/user/parking-history/{id}:
+ * /api/users/parking-history/{id}:
  *   get:
  *     tags: [User - Parking History]
  *     summary: Get one parking session's detail from the authenticated user's history
@@ -25,14 +25,14 @@
  *     responses:
  *       200: { description: Session returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { session: { $ref: '#/components/schemas/ParkingSession' } } } } } ] } } } }
  *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
- * /api/user/wallet:
+ * /api/users/wallet:
  *   get:
  *     tags: [User - Wallet]
  *     summary: Get authenticated user wallet balance
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200: { description: Wallet balance returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { walletBalance: { type: number, example: 150000 } } } } } ] } } } }
- * /api/user/wallet/topup:
+ * /api/users/wallet/topup:
  *   post:
  *     tags: [User - Wallet]
  *     summary: Initiate PayOS top-up for the user wallet
@@ -41,7 +41,7 @@
  *     responses:
  *       200: { description: PayOS checkout session created successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Checkout session created. Redirect user to checkoutUrl to complete payment. }, data: { type: object, properties: { checkoutUrl: { type: string, example: https://pay.payos.vn/web/example }, qrCode: { type: string, example: data:image/png;base64,iVBORw0KGgo }, orderCode: { type: number, example: 123456789 }, bin: { type: string, example: '970422' }, accountNumber: { type: string, example: '1234567890' }, accountName: { type: string, example: PBMS PAYMENT }, description: { type: string, example: Wallet top-up }, amount: { type: number, example: 100000 } } } } } ] } } } }
  *       400: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
- * /api/user/wallet/topup/{orderCode}/status:
+ * /api/users/wallet/topup/{orderCode}/status:
  *   get:
  *     tags: [User - Wallet]
  *     summary: Verify PayOS user wallet top-up status
@@ -51,7 +51,7 @@
  *     responses:
  *       200: { description: Top-up status returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { status: { type: string, example: success }, credited: { type: boolean, example: true }, balance: { type: number, example: 250000 } } } } } ] } } } }
  *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
- * /api/user/wallet/transactions:
+ * /api/users/wallet/transactions:
  *   get:
  *     tags: [User - Wallet]
  *     summary: List user wallet transactions
@@ -62,7 +62,7 @@
  *       - { in: query, name: type, schema: { type: string, enum: [debit, credit, refund] } }
  *     responses:
  *       200: { description: Wallet transactions returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/WalletTransaction' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
- * /api/user/long-term/packages:
+ * /api/users/long-term/packages:
  *   get:
  *     tags: [User - Long-term]
  *     summary: List active long-term parking packages
@@ -71,7 +71,7 @@
  *       - { in: query, name: buildingId, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Long-term packages returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { packages: { type: array, items: { $ref: '#/components/schemas/LongTermPackage' } } } } } } ] } } } }
- * /api/user/long-term/packages/{id}:
+ * /api/users/long-term/packages/{id}:
  *   get:
  *     tags: [User - Long-term]
  *     summary: Get one long-term package's detail
@@ -81,7 +81,7 @@
  *     responses:
  *       200: { description: Package returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { package: { $ref: '#/components/schemas/LongTermPackage' } } } } } ] } } } }
  *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
- * /api/user/long-term/subscriptions:
+ * /api/users/long-term/subscriptions:
  *   get:
  *     tags: [User - Long-term]
  *     summary: List user long-term subscriptions
@@ -105,7 +105,7 @@
  */
 /**
  * @swagger
- * /api/user/long-term/subscriptions/{id}:
+ * /api/users/long-term/subscriptions/{id}:
  *   get:
  *     tags: [User - Long-term]
  *     summary: Get one of the authenticated user's long-term subscriptions
@@ -115,7 +115,7 @@
  *     responses:
  *       200: { description: Subscription returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { subscription: { type: object, additionalProperties: true } } } } } ] } } } }
  *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
- * /api/user/long-term/subscriptions/{id}/refund-preview:
+ * /api/users/long-term/subscriptions/{id}/refund-preview:
  *   get:
  *     tags: [User - Long-term]
  *     summary: Preview the refund percent/amount the user would receive if they cancel this subscription now
@@ -126,7 +126,7 @@
  *       200: { description: Refund preview returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { refundPercent: { type: number, example: 80 }, refundAmount: { type: number, example: 400000 }, packagePrice: { type: number, example: 500000 } } } } } ] } } } }
  *       400: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
  *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
- * /api/user/long-term/subscriptions/{id}/cancel:
+ * /api/users/long-term/subscriptions/{id}/cancel:
  *   post:
  *     tags: [User - Long-term]
  *     summary: Cancel a long-term parking subscription
@@ -136,7 +136,7 @@
  *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [cancelReason], properties: { cancelReason: { type: string, enum: [change_slot, change_vehicle, no_longer_needed, pricing_issue, other], example: no_longer_needed }, cancelNote: { type: string, example: I no longer need monthly parking. } } } } } }
  *     responses:
  *       200: { description: Subscription cancelled successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Subscription cancelled successfully }, data: { type: object, properties: { subscription: { type: object } } } } } ] } } } }
- * /api/user/long-term/subscriptions/{id}/renew:
+ * /api/users/long-term/subscriptions/{id}/renew:
  *   post:
  *     tags: [User - Long-term]
  *     summary: Renew a long-term parking subscription
@@ -145,21 +145,21 @@
  *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Subscription renewed successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Subscription renewed successfully }, data: { type: object, properties: { subscription: { type: object } } } } } ] } } } }
- * /api/user/notifications:
+ * /api/users/notifications:
  *   get:
  *     tags: [User - Notifications]
  *     summary: List latest notifications for the authenticated user
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200: { description: Notifications returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Notification' } }, unread: { type: integer, example: 3 } } } } } ] } } } }
- * /api/user/notifications/read-all:
+ * /api/users/notifications/read-all:
  *   patch:
  *     tags: [User - Notifications]
  *     summary: Mark all user notifications as read
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200: { description: Notifications marked as read., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { ok: { type: boolean, example: true } } } } } ] } } } }
- * /api/user/notifications/{id}/read:
+ * /api/users/notifications/{id}/read:
  *   patch:
  *     tags: [User - Notifications]
  *     summary: Mark one notification as read
@@ -169,14 +169,14 @@
  *     responses:
  *       200: { description: Notification marked as read., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { $ref: '#/components/schemas/Notification' } } } ] } } } }
  *       404: { content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
- * /api/user/buildings:
+ * /api/users/buildings:
  *   get:
  *     tags: [User - Buildings]
  *     summary: List active buildings for reservation browsing
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200: { description: Buildings returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Building' } } } } } } ] } } } }
- * /api/user/buildings/{buildingId}/vehicle-types:
+ * /api/users/buildings/{buildingId}/vehicle-types:
  *   get:
  *     tags: [User - Buildings]
  *     summary: List active vehicle types for a building
@@ -185,7 +185,7 @@
  *       - { in: path, name: buildingId, required: true, schema: { type: string } }
  *     responses:
  *       200: { description: Vehicle types returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { building: { type: object, properties: { _id: { $ref: '#/components/schemas/ObjectId' }, code: { type: string, example: CT01 }, name: { type: string, example: Central Tower Parking } } }, items: { type: array, items: { $ref: '#/components/schemas/VehicleType' } } } } } } ] } } } }
- * /api/user/buildings/{buildingId}/floors:
+ * /api/users/buildings/{buildingId}/floors:
  *   get:
  *     tags: [User - Buildings]
  *     summary: List active floors with slot availability
@@ -195,7 +195,7 @@
  *       - { in: query, name: vehicleTypeId, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Floors returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { building: { type: object }, floors: { type: array, items: { allOf: [ { $ref: '#/components/schemas/Floor' }, { type: object, properties: { availableSlots: { type: integer, example: 50 }, occupiedSlots: { type: integer, example: 30 }, reservedSlots: { type: integer, example: 10 }, totalSlots: { type: integer, example: 90 } } } ] } } } } } } ] } } } }
- * /api/user/buildings/{buildingId}/floors/{floorId}/slots:
+ * /api/users/buildings/{buildingId}/floors/{floorId}/slots:
  *   get:
  *     tags: [User - Buildings]
  *     summary: List slots for one floor
@@ -205,7 +205,7 @@
  *       - { in: path, name: floorId, required: true, schema: { type: string, format: objectId } }
  *     responses:
  *       200: { description: Slots returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { floor: { type: object, properties: { _id: { $ref: '#/components/schemas/ObjectId' }, name: { type: string, example: Floor 1 }, code: { type: string, example: F1 } } }, slots: { type: array, items: { allOf: [ { $ref: '#/components/schemas/ParkingSlot' }, { type: object, properties: { selectable: { type: boolean, example: true }, owner: { type: object, nullable: true, properties: { plateNumber: { type: string, example: 59G2-038.80 }, accountName: { type: string, example: John Doe } } } } } ] } } } } } } ] } } } }
- * /api/user/buildings/{buildingId}/violation-types:
+ * /api/users/buildings/{buildingId}/violation-types:
  *   get:
  *     tags: [User - Buildings]
  *     summary: List violation types available for reporting an incident at this building
@@ -217,7 +217,7 @@
  *       - { in: path, name: buildingId, required: true, schema: { type: string } }
  *     responses:
  *       200: { description: Violation types returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { type: object, properties: { _id: { type: string }, code: { type: string, example: wrong_spot }, label: { type: string, example: Wrong spot / wrong vehicle type } } } } } } } } ] } } } }
- * /api/user/feedbacks:
+ * /api/users/feedbacks:
  *   post:
  *     tags: [User - Feedback]
  *     summary: Submit feedback for a completed parking session
@@ -239,7 +239,7 @@
  *       - { in: query, name: rating, schema: { type: integer, minimum: 1, maximum: 5 } }
  *     responses:
  *       200: { description: Feedback returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Feedback' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
- * /api/user/feedbacks/me:
+ * /api/users/feedbacks/me:
  *   get:
  *     tags: [User - Feedback]
  *     summary: List feedback submitted by the authenticated user
@@ -251,7 +251,7 @@
  *       - { in: query, name: rating, schema: { type: integer, minimum: 1, maximum: 5 } }
  *     responses:
  *       200: { description: Feedback returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Feedback' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
- * /api/user/feedbacks/{id}:
+ * /api/users/feedbacks/{id}:
  *   delete:
  *     tags: [User - Feedback]
  *     summary: Delete a feedback the authenticated user submitted

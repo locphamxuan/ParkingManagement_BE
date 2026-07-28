@@ -1,6 +1,6 @@
 ﻿/**
  * @swagger
- * /api/user/profile:
+ * /api/users/profile:
  *   put:
  *     tags: [User - Profile]
  *     summary: Update the authenticated user's profile
@@ -129,7 +129,7 @@
  *               success: false
  *               message: User not found
  *
- * /api/user/profile/password:
+ * /api/users/profile/password:
  *   put:
  *     tags: [User - Profile]
  *     summary: Change the authenticated user's password
