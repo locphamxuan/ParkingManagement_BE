@@ -1,6 +1,7 @@
 const express = require("express");
 const parkingSessionController = require("../../controllers/staff/parkingSession.controller");
 const { authorizeBuildingAccess } = require("../../middlewares/rbac.middleware");
+const { scanLimiter } = require("../../middlewares/rateLimiter");
 
 const router = express.Router();
 
@@ -19,8 +20,17 @@ router.get("/my-checkins", authorizeBuildingAccess, parkingSessionController.myC
 // Lịch sử xe ra hôm nay của nhân viên cổng ra — có phí thu, phương thức thanh toán
 router.get("/my-checkouts", authorizeBuildingAccess, parkingSessionController.myCheckouts);
 
-// AI camera (Camera 1) — recognize plate + brand from an image, resolve account
-router.post("/scan", authorizeBuildingAccess, parkingSessionController.scan);
+// AI camera (Camera 1) — recognize plate + brand from an image, resolve account.
+// Order matters: the limiter answers 429 before the body is read, and this
+// route's own 4mb parser replaces the global 1mb one (base64 camera frame)
+// without reopening the old 15mb hole anywhere else.
+router.post(
+  "/scan",
+  scanLimiter,
+  express.json({ limit: "4mb" }),
+  authorizeBuildingAccess,
+  parkingSessionController.scan,
+);
 
 // Staff rejects a check-in/check-out → notify the plate owner
 router.post("/reject", authorizeBuildingAccess, parkingSessionController.reject);

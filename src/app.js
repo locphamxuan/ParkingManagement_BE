@@ -7,6 +7,7 @@ const routes = require('./routes');
 const webhookRoutes = require('./routes/payment/webhook.routes');
 const { notFound, errorHandler } = require('./middlewares/error.middleware');
 const { sanitizeInputs } = require('./middlewares/sanitize.middleware');
+const { enforceCsrfOrigin, requireJsonForCookieWrites } = require('./middlewares/csrf.middleware');
 const { setupSwagger } = require('./config/swagger');
 const AppError = require('./utils/AppError');
 
@@ -27,6 +28,16 @@ if (env.nodeEnv === 'production') {
   app.set('trust proxy', 1);
 }
 
+app.use(cookieParser());
+
+// CSRF guards run BEFORE cors() and before body parsing, so they are the
+// authoritative answer for a forged cross-site write (CORS also happens to
+// reject unknown origins today, but that is a transport concern and a config
+// change there must not silently reopen this hole). Bearer callers (native
+// mobile) and unauthenticated requests pass through untouched.
+app.use(enforceCsrfOrigin);
+app.use(requireJsonForCookieWrites);
+
 // Explicit origin allowlist (not '*') + credentials:true — required for the
 // httpOnly auth cookie (see utils/authCookie.js) to be accepted cross-origin.
 const allowedOrigins = new Set(env.clientOrigins);
@@ -43,10 +54,16 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(cookieParser());
-// Larger limit so base64 camera frames (AI plate/brand scan) fit in the body.
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+// JSON only, and small: no route accepts form-urlencoded bodies, and leaving
+// that parser enabled would keep a no-preflight cross-origin write channel open.
+// The staff AI scan (base64 camera frame) is the one endpoint that needs more,
+// so it is skipped here and mounts its own 4mb parser behind its rate limiter.
+const SCAN_PATH = '/api/staff/parking-sessions/scan';
+const globalJsonParser = express.json({ limit: '1mb' });
+app.use((req, res, next) => {
+  if (req.path === SCAN_PATH) return next();
+  return globalJsonParser(req, res, next);
+});
 // Strip Mongo operator keys from body/query/params before any route/controller runs.
 app.use(sanitizeInputs);
 
@@ -71,7 +88,9 @@ app.use('/api', routes);
 setupSwagger(app);
 
 // PayOS webhook — registered after express.json() since PayOS sends JSON body
-// (unlike Stripe which required raw bytes for signature verification)
+// (unlike Stripe which required raw bytes for signature verification).
+// Server-to-server: no auth cookie, so the CSRF guard above is a no-op for it.
+// Its own authentication is the PayOS payload validation in webhook.service.
 app.use('/api/payments/webhook', webhookRoutes);
 
 app.use(notFound);
