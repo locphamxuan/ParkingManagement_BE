@@ -3,89 +3,41 @@
  * /api/users/auth/register:
  *   post:
  *     tags: [Auth]
- *     summary: Register a new user account
+ *     summary: '[REMOVED] Direct registration'
+ *     deprecated: true
  *     description: >
- *       Creates a new user with the `user` role and immediately returns a JWT token plus
- *       the public user profile. Also sets the httpOnly `pbms_token` auth cookie (see
- *       POST /auth/login for details).
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/RegisterRequest'
- *           examples:
- *             validRequest:
- *               summary: Valid registration request
- *               value:
- *                 email: user@example.com
- *                 password: Password123!
- *                 fullName: John Doe
- *                 phone: '+84901234567'
+ *       Removed. This endpoint created accounts without verifying the email
+ *       address, bypassing the OTP flow entirely. Use POST /api/users/auth/register-request
+ *       followed by POST /api/users/auth/register-verify. Always returns 410.
  *     responses:
- *       201:
- *         description: Registration completed successfully.
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/AuthSuccessResponse'
- *             example:
- *               success: true
- *               message: Registration successful
- *               data:
- *                 token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example.signature
- *                 user:
- *                   _id: 665f1d2c7b0d1b0012a34567
- *                   email: user@example.com
- *                   fullName: John Doe
- *                   phone: '+84901234567'
- *                   role: user
- *                   avatar: null
- *                   licensePlates: []
- *                   assignedBuildings: []
- *                   isActive: true
- *                   lastLoginAt: null
- *                   walletBalance: 0
- *                   createdAt: '2026-06-12T04:00:00.000Z'
- *                   updatedAt: '2026-06-12T04:00:00.000Z'
- *       400:
- *         description: Invalid request body.
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *             examples:
- *               invalidEmail:
- *                 value:
- *                   success: false
- *                   message: Valid email is required
- *               shortPassword:
- *                 value:
- *                   success: false
- *                   message: Password must be at least 6 characters
- *               missingName:
- *                 value:
- *                   success: false
- *                   message: Full name is required
- *               invalidPhone:
- *                 value:
- *                   success: false
- *                   message: Invalid phone number
- *       409:
- *         description: Email is already registered.
+ *       410:
+ *         description: Endpoint removed; use the OTP registration flow.
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *             example:
  *               success: false
- *               message: Email already registered
+ *               message: Direct registration has been removed. Use POST /api/users/auth/register-request then /register-verify.
+ *               errorCode: REGISTRATION_ENDPOINT_REMOVED
  *
  * /api/users/auth/register-request:
  *   post:
  *     tags: [Auth]
  *     summary: Request an OTP for email-based registration
- *     description: Stores a temporary registration record and sends a 6-digit OTP to the provided email. The OTP record expires after 5 minutes.
+ *     description: >
+ *       Stores a pending registration record (email, full name, phone, plus a
+ *       SHA-256 hash of the OTP) and emails a 6-digit OTP. Expires after 5
+ *       minutes; a resend replaces the previous record so the old code stops
+ *       working. No password is accepted or stored at this step.
+ *
+ *
+ *       Always returns the same 200 response whether or not an OTP was actually
+ *       sent. If the email is already registered, or the phone number belongs to
+ *       another account, no record is created and no email is sent — but the
+ *       response is byte-for-byte identical, so this endpoint cannot be used to
+ *       discover which addresses have accounts. Duplicates are rejected at
+ *       /register-verify instead.
  *     requestBody:
  *       required: true
  *       content:
@@ -97,12 +49,13 @@
  *               summary: Valid OTP registration request
  *               value:
  *                 email: user@example.com
- *                 password: Password123!
  *                 fullName: John Doe
  *                 phone: '+84901234567'
  *     responses:
  *       200:
- *         description: OTP email was queued successfully.
+ *         description: >
+ *           Request accepted. Returned identically for a new email, an
+ *           already-registered email, and a phone number already in use.
  *         content:
  *           application/json:
  *             schema:
@@ -110,7 +63,7 @@
  *                 - $ref: '#/components/schemas/SuccessResponse'
  *             example:
  *               success: true
- *               message: OTP has been sent to your email. Please verify to complete registration.
+ *               message: If that email can be registered, a verification code has been sent to it.
  *       400:
  *         description: Invalid request body.
  *         content:
@@ -122,10 +75,6 @@
  *                 value:
  *                   success: false
  *                   message: Valid email is required
- *               shortPassword:
- *                 value:
- *                   success: false
- *                   message: Password must be at least 6 characters
  *               missingName:
  *                 value:
  *                   success: false
@@ -134,24 +83,23 @@
  *                 value:
  *                   success: false
  *                   message: Invalid phone number
- *       409:
- *         description: Email is already registered.
+ *       429:
+ *         description: Too many registration OTP requests (5 per hour).
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- *             example:
- *               success: false
- *               message: Email already registered
  *
  * /api/users/auth/register-verify:
  *   post:
  *     tags: [Auth]
  *     summary: Verify the registration OTP and create the account
  *     description: >
- *       Validates the 6-digit OTP sent by `/register-request`, creates the user, removes
- *       the OTP record, and returns a JWT token. Also sets the httpOnly `pbms_token` auth
- *       cookie (see POST /auth/login for details).
+ *       Validates the 6-digit OTP sent by `/register-request` (constant-time hash
+ *       comparison, max 5 failed attempts before the record is destroyed), creates
+ *       the user, removes the OTP record, and returns a JWT token. Also sets the
+ *       httpOnly `pbms_token` auth cookie (see POST /auth/login for details).
+ *       The password is supplied here for the first time and goes straight to bcrypt.
  *     requestBody:
  *       required: true
  *       content:
@@ -164,6 +112,7 @@
  *               value:
  *                 email: user@example.com
  *                 otp: '123456'
+ *                 password: correct-horse-battery
  *     responses:
  *       201:
  *         description: Registration completed successfully after OTP verification.
@@ -209,6 +158,16 @@
  *                 value:
  *                   success: false
  *                   message: Invalid OTP code
+ *               attemptsExceeded:
+ *                 value:
+ *                   success: false
+ *                   message: Too many incorrect codes. Please request a new one.
+ *                   errorCode: OTP_ATTEMPTS_EXCEEDED
+ *               weakPassword:
+ *                 value:
+ *                   success: false
+ *                   message: Password must be at least 12 characters
+ *                   errorCode: WEAK_PASSWORD
  *       409:
  *         description: Email is already registered.
  *         content:
@@ -470,7 +429,7 @@
  *               shortPassword:
  *                 value:
  *                   success: false
- *                   message: Password must be at least 6 characters
+ *                   message: Password must be at least 12 characters
  *               invalidOrExpiredToken:
  *                 value:
  *                   success: false

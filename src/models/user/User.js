@@ -127,6 +127,15 @@ const userSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+    // Bumped on logout and on every credential reset/change. Every JWT carries
+    // the version it was signed with; auth.middleware rejects any mismatch, so
+    // a stolen token dies immediately instead of living out its 7-day expiry.
+    // Existing documents predate the field — Mongoose applies default 0 on
+    // hydration, and the middleware treats a missing stored value as 0.
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,
@@ -137,6 +146,7 @@ const userSchema = new mongoose.Schema(
         delete ret.resetPasswordExpires;
         delete ret.failedLoginAttempts;
         delete ret.lockUntil;
+        delete ret.tokenVersion;
         delete ret.__v;
         return ret;
       },

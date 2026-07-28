@@ -1,5 +1,6 @@
 const User = require('../../models/user/User');
 const AppError = require('../../utils/AppError');
+const { assertStrongPassword } = require('../../utils/passwordPolicy');
 
 const update = async (userId, payload) => {
   const setUpdates = {};
@@ -39,7 +40,11 @@ const changePassword = async (userId, { currentPassword, newPassword }) => {
   const match = await user.comparePassword(currentPassword);
   if (!match) throw new AppError('Mật khẩu hiện tại không đúng', 400);
 
+  assertStrongPassword(newPassword);
+
   user.password = newPassword;
+  // Changing the password evicts every other session immediately.
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
   // Chỉ validate field vừa đổi (password) — tránh việc dữ liệu cũ không hợp lệ
   // (vd phone rỗng, biển số định dạng cũ) làm save() báo lỗi oan khi đổi mật khẩu.
   await user.save({ validateModifiedOnly: true });

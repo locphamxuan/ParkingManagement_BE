@@ -3,23 +3,16 @@ const asyncHandler = require('../utils/asyncHandler');
 const { sendSuccess } = require('../utils/response');
 const { setAuthCookie, clearAuthCookie } = require('../utils/authCookie');
 
-const register = asyncHandler(async (req, res) => {
-  const data = await authService.register(req.body);
-  setAuthCookie(res, data.token);
-  sendSuccess(res, {
-    statusCode: 201,
-    message: 'Registration successful',
-    data,
-  });
-});
-
 const login = asyncHandler(async (req, res) => {
   const data = await authService.login(req.body);
   setAuthCookie(res, data.token);
   sendSuccess(res, { message: 'Login successful', data });
 });
 
-const logout = asyncHandler(async (_req, res) => {
+// The route authenticates first so we know WHICH account to revoke; the cookie
+// is cleared either way (see routes/user/auth.routes.js for the 401 path).
+const logout = asyncHandler(async (req, res) => {
+  await authService.revokeSessions(req.user._id);
   clearAuthCookie(res);
   sendSuccess(res, { message: 'Logged out successfully' });
 });
@@ -42,10 +35,13 @@ const resetPassword = asyncHandler(async (req, res) => {
   sendSuccess(res, { message: 'Password has been reset successfully', data });
 });
 
+// Always the same 200 + message, whether or not an OTP was actually sent —
+// see requestRegistration: revealing "email already registered" here let anyone
+// enumerate accounts.
 const registerRequest = asyncHandler(async (req, res) => {
   await authService.requestRegistration(req.body);
   sendSuccess(res, {
-    message: 'OTP has been sent to your email. Please verify to complete registration.',
+    message: 'If that email can be registered, a verification code has been sent to it.',
   });
 });
 
@@ -73,7 +69,6 @@ const resetPasswordSms = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  register,
   login,
   logout,
   getMe,
