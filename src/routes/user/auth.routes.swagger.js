@@ -1,6 +1,6 @@
 ﻿/**
  * @swagger
- * /api/user/auth/register:
+ * /api/users/auth/register:
  *   post:
  *     tags: [Auth]
  *     summary: Register a new user account
@@ -81,7 +81,7 @@
  *               success: false
  *               message: Email already registered
  *
- * /api/user/auth/register-request:
+ * /api/users/auth/register-request:
  *   post:
  *     tags: [Auth]
  *     summary: Request an OTP for email-based registration
@@ -144,7 +144,7 @@
  *               success: false
  *               message: Email already registered
  *
- * /api/user/auth/register-verify:
+ * /api/users/auth/register-verify:
  *   post:
  *     tags: [Auth]
  *     summary: Verify the registration OTP and create the account
@@ -219,7 +219,7 @@
  *               success: false
  *               message: Email already registered
  *
- * /api/user/auth/login:
+ * /api/users/auth/login:
  *   post:
  *     tags: [Auth]
  *     summary: Log in with email and password
@@ -301,7 +301,7 @@
  *               success: false
  *               message: Account is deactivated
  *
- * /api/user/auth/logout:
+ * /api/users/auth/logout:
  *   post:
  *     tags: [Auth]
  *     summary: Log out and clear the httpOnly auth cookie
@@ -317,7 +317,7 @@
  *             schema:
  *               $ref: '#/components/schemas/SuccessResponse'
  *
- * /api/user/auth/me:
+ * /api/users/auth/me:
  *   get:
  *     tags: [Auth]
  *     summary: Get the current authenticated user profile
@@ -377,7 +377,7 @@
  *               success: false
  *               message: User not found
  *
- * /api/user/auth/forgot-password:
+ * /api/users/auth/forgot-password:
  *   post:
  *     tags: [Auth]
  *     summary: Request a password reset email
@@ -413,7 +413,7 @@
  *               success: false
  *               message: Valid email is required
  *
- * /api/user/auth/reset-password:
+ * /api/users/auth/reset-password:
  *   post:
  *     tags: [Auth]
  *     summary: Reset password using a reset token
@@ -476,7 +476,7 @@
  *                   success: false
  *                   message: Reset token is invalid or has expired
  *
- * /api/user/auth/forgot-password-sms:
+ * /api/users/auth/forgot-password-sms:
  *   post:
  *     tags: [Auth]
  *     summary: Request a password reset OTP via SMS
@@ -527,7 +527,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *
- * /api/user/auth/reset-password-sms:
+ * /api/users/auth/reset-password-sms:
  *   post:
  *     tags: [Auth]
  *     summary: Verify SMS OTP and reset password

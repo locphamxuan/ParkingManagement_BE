@@ -8,7 +8,7 @@
  *       `type` is either one of the fixed self-issue categories (vehicle_damaged,
  *       facility_issue, wrong_scan, payment_dispute, security, other) OR the `code`
  *       of one of the building's configured violation types (see
- *       GET /api/user/buildings/{buildingId}/violation-types) — e.g. `wrong_spot`,
+ *       GET /api/users/buildings/{buildingId}/violation-types) — e.g. `wrong_spot`,
  *       `slot_occupied`. When reporting a violation type and `violatorPlate` is given,
  *       the system checks whether the plate has a registered account (active
  *       subscription or a session linked to a user) in that building. If NOT found,

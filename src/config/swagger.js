@@ -1,5 +1,6 @@
 ﻿const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
+const { normalizeSwaggerSpec } = require('./swaggerDocumentation');
 
 const options = {
   definition: {
@@ -26,7 +27,7 @@ const options = {
           type: 'http',
           scheme: 'bearer',
           bearerFormat: 'JWT',
-          description: 'JWT token obtained from /api/user/auth/login or /api/user/auth/register',
+          description: 'JWT token obtained from /api/users/auth/login or /api/users/auth/register',
         },
       },
       responses: {
@@ -89,6 +90,7 @@ const options = {
       },
     },
     tags: [
+      { name: 'System', description: 'Service health and operational status' },
       { name: 'Auth', description: 'User authentication and registration' },
       { name: 'User - Profile', description: 'User profile management' },
       { name: 'User - License Plates', description: 'Vehicle license plate management' },
@@ -125,6 +127,7 @@ const options = {
       { name: 'Manager - Customers', description: 'Registered users of a building and their package-registration status' },
       { name: 'Admin - Buildings', description: 'System-wide building management' },
       { name: 'Admin - Users', description: 'System-wide user management' },
+      { name: 'Admin - Governance', description: 'System role and permission reference' },
       { name: 'Admin - Audit Logs', description: 'System audit trail' },
       { name: 'Admin - Dashboard', description: 'System-wide dashboard' },
       { name: 'Admin - Revenue', description: 'System revenue and transfers' },
@@ -149,7 +152,7 @@ try {
   if (rawSpec.tags) {
     rawSpec.tags = rawSpec.tags.filter(tag => tag && tag.name);
   }
-  swaggerSpec = rawSpec;
+  swaggerSpec = normalizeSwaggerSpec(rawSpec);
 } catch (error) {
   console.error('[Swagger Config Error] Safe-mode fallback activated due to formatting error:', error.message);
   // Tạo fallback spec trống để tránh làm sập server, giúp Bảo vẫn chạy được dự án
