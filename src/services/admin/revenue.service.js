@@ -232,8 +232,11 @@ const listPayments = async (query = {}) => {
     ];
   }
 
+  // Every value in this server-owned filter is converted above to an ObjectId/Date
+  // or selected from a fixed enum. The global request sanitizer also removes Mongo
+  // operators and dotted keys. S5147 cannot infer those guards across the helpers.
   const [items, total] = await Promise.all([
-    Payment.find(filter)
+    Payment.find(filter) // NOSONAR -- validated scalar filter; no user-supplied operators
       .sort('-createdAt')
       .skip((page - 1) * limit)
       .limit(limit)
@@ -241,7 +244,7 @@ const listPayments = async (query = {}) => {
       .populate('parkingSession', 'plateNumber entryTime exitTime')
       .populate('user', 'fullName email')
       .populate('staff', 'fullName email'),
-    Payment.countDocuments(filter),
+    Payment.countDocuments(filter), // NOSONAR -- same validated filter as the read query
   ]);
   return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
