@@ -15,7 +15,11 @@ async function resolveBuilding(buildingRef) {
   const query = mongoose.isValidObjectId(buildingRef)
     ? { _id: buildingRef }
     : { code: buildingRef.toString().toUpperCase() };
-  return Building.findOne(query).select('_id code name');
+  return Building.findOne({
+    ...query,
+    status: 'active',
+    isActive: { $ne: false },
+  }).select('_id code name');
 }
 
 /**
@@ -169,7 +173,7 @@ const listSlotsForFloor = asyncHandler(async (req, res) => {
  */
 const listBuildings = asyncHandler(async (req, res) => {
   // operatingHours + status cho phép FE hiển thị "đang mở / đang đóng cửa".
-  const buildings = await Building.find({ status: 'active' })
+  const buildings = await Building.find({ status: 'active', isActive: { $ne: false } })
     .select('_id code name address operatingHours status')
     .sort('name');
   sendSuccess(res, { data: { items: buildings } });

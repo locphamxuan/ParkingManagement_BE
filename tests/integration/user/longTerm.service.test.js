@@ -5,6 +5,7 @@ const svc = require('../../../src/services/user/longTerm.service');
 const User = require('../../../src/models/user/User');
 const LongTermSubscription = require('../../../src/models/policy/LongTermSubscription');
 const ReservationPolicy = require('../../../src/models/policy/ReservationPolicy');
+const Building = require('../../../src/models/building/Building');
 
 let building, vt, user, pkg;
 
@@ -110,6 +111,30 @@ describe('listPackages + listSubscriptions', () => {
   test('list gói active của building', async () => {
     const list = await svc.listPackages(building._id);
     expect(list).toHaveLength(1);
+  });
+  test('ẩn package khi building đã ngưng hoạt động', async () => {
+    await Building.findByIdAndUpdate(building._id, {
+      status: 'inactive',
+      isActive: false,
+    });
+
+    await expect(svc.listPackages()).resolves.toEqual([]);
+    await expect(svc.listPackages(building._id)).resolves.toEqual([]);
+  });
+  test('không trừ ví khi package thuộc building đã ngưng hoạt động', async () => {
+    await Building.findByIdAndUpdate(building._id, {
+      status: 'inactive',
+      isActive: false,
+    });
+
+    await expect(
+      svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      errorCode: 'BUILDING_UNAVAILABLE',
+    });
+    const fresh = await User.findById(user._id);
+    expect(fresh.walletBalance).toBe(1000000);
   });
   test('list subscription của user', async () => {
     await svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' });

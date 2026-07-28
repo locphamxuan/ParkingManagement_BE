@@ -3,6 +3,7 @@ const db = require('../../helpers/db');
 const f = require('../../helpers/fixtures');
 const svc = require('../../../src/services/admin/revenue.service');
 const Payment = require('../../../src/models/finance/Payment');
+const mongoose = require('mongoose');
 
 let building;
 
@@ -63,6 +64,55 @@ describe('getReport', () => {
       parking: 100000,
       penalty: 25000,
     });
+  });
+
+  test('source totals partition gross revenue without counting incident metadata twice', async () => {
+    const incidentId = new mongoose.Types.ObjectId();
+    await Payment.create([
+      {
+        building: building._id,
+        type: 'session',
+        method: 'wallet',
+        amount: 100000,
+        status: 'success',
+        incident: incidentId,
+      },
+      {
+        building: building._id,
+        type: 'reservation',
+        method: 'wallet',
+        amount: 50000,
+        status: 'success',
+        incident: incidentId,
+      },
+      {
+        building: building._id,
+        type: 'subscription',
+        method: 'wallet',
+        amount: 300000,
+        status: 'success',
+      },
+      {
+        building: building._id,
+        type: 'penalty',
+        method: 'cash',
+        amount: 25000,
+        status: 'success',
+        incident: incidentId,
+      },
+    ]);
+
+    const report = await svc.getReport({ from, to, buildingId: building._id });
+    const sources = report.items[0].bySource;
+
+    expect(sources).toEqual({
+      parking: 100000,
+      reservation: 50000,
+      subscription: 300000,
+      penalty: 25000,
+    });
+    expect(Object.values(sources).reduce((sum, amount) => sum + amount, 0))
+      .toBe(report.summary.grossRevenue);
   });
 
   test('a pending payment receives settledAt when it is confirmed', async () => {

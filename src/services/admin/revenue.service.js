@@ -82,15 +82,11 @@ const getReport = async ({ from, to, buildingId } = {}) => {
   const funded = {
     $and: [{ $eq: ['$status', 'success'] }, { $eq: ['$type', 'topup'] }],
   };
+  // Revenue sources must be a mutually exclusive partition of gross revenue.
+  // An incident reference is metadata and must not turn another payment type
+  // (for example a parking session) into penalty revenue.
   const earnedType = (type) => ({
-    $and: [
-      earned,
-      type === 'penalty'
-        ? { $or: [{ $eq: ['$type', 'penalty'] }, { $ne: ['$incident', null] }] }
-        : type === 'session'
-          ? { $and: [{ $eq: ['$type', 'session'] }, { $eq: ['$incident', null] }] }
-          : { $eq: ['$type', type] },
-    ],
+    $and: [earned, { $eq: ['$type', type] }],
   });
 
   const rows = await Payment.aggregate([

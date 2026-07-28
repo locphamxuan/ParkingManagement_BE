@@ -11,6 +11,17 @@ const { setupSwagger } = require('./config/swagger');
 const AppError = require('./utils/AppError');
 
 const app = express();
+app.disable('x-powered-by');
+
+// Baseline API hardening. These headers are deliberately framework-agnostic
+// and safe for JSON, Swagger and cross-origin frontend/mobile clients.
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
 
 if (env.nodeEnv === 'production') {
   app.set('trust proxy', 1);

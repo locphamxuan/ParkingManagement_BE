@@ -18,12 +18,23 @@ const {
 const Building = require('../../models/building/Building');
 
 const listPackages = async (buildingId) => {
-  // Nếu có buildingId → trả gói của building đó
-  // Nếu không → trả tất cả gói đang active của tất cả buildings (để user browse)
-  const filter = { isActive: true };
-  if (buildingId) filter.building = buildingId;
+  const buildingFilter = { status: 'active', isActive: { $ne: false } };
+  if (buildingId) {
+    if (!mongoose.isValidObjectId(buildingId)) {
+      throw new AppError('Invalid buildingId', 400, 'INVALID_BUILDING');
+    }
+    buildingFilter._id = buildingId;
+  }
 
-  const packages = await LongTermPackage.find(filter)
+  // A package is purchasable only while its building is operational. Query
+  // active building ids first so stale references never become "Unknown Building".
+  const activeBuildingIds = await Building.find(buildingFilter).distinct('_id');
+  if (activeBuildingIds.length === 0) return [];
+
+  const packages = await LongTermPackage.find({
+    isActive: true,
+    building: { $in: activeBuildingIds },
+  })
     .populate('vehicleType', 'name code')
     .populate('building', 'name code address')
     .sort('-createdAt');
@@ -62,6 +73,18 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
 
   const pkg = await LongTermPackage.findById(packageId);
   if (!pkg || !pkg.isActive) throw new AppError('Package not found or inactive', 404);
+  const activeBuilding = await Building.exists({
+    _id: pkg.building,
+    status: 'active',
+    isActive: { $ne: false },
+  });
+  if (!activeBuilding) {
+    throw new AppError(
+      'This package is unavailable because its building is not operational',
+      409,
+      'BUILDING_UNAVAILABLE',
+    );
+  }
 
   // ── Start/end dates: gói luôn bắt đầu NGAY tại thời điểm mua (không cho chọn
   // ngày tương lai) — tránh trạng thái "active" nhưng chưa tới hạn dùng được. ──
@@ -489,10 +512,16 @@ const listSubscriptions = async (userId, query = {}) => {
 };
 
 const getPackage = async (id) => {
-  const pkg = await LongTermPackage.findById(id)
+  const pkg = await LongTermPackage.findOne({ _id: id, isActive: true })
     .populate('vehicleType', 'name code')
-    .populate('building', 'name code address');
-  if (!pkg) throw new AppError('Package not found', 404, 'PACKAGE_NOT_FOUND');
+    .populate({
+      path: 'building',
+      select: 'name code address status isActive',
+      match: { status: 'active', isActive: { $ne: false } },
+    });
+  if (!pkg || !pkg.building) {
+    throw new AppError('Package not found or unavailable', 404, 'PACKAGE_NOT_FOUND');
+  }
   return pkg;
 };
 
