@@ -19,8 +19,6 @@ jobs:
     name: Test backend
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      MONGOMS_DOWNLOAD_DIR: ${{ runner.temp }}/mongodb-binaries
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -35,4 +33,6 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Run tests
+        env:
+          MONGOMS_DOWNLOAD_DIR: ${{ runner.temp }}/mongodb-binaries
         run: npm test -- --ci
