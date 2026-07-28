@@ -3,6 +3,11 @@ const Feedback = require('../../models/operations/Feedback');
 const AppError = require('../../utils/AppError');
 const asyncHandler = require('../../utils/asyncHandler');
 const { sendSuccess } = require('../../utils/response');
+const {
+  toPublicFeedback,
+  PUBLIC_FEEDBACK_PROJECTION,
+  PUBLIC_FEEDBACK_STATUS,
+} = require('../../dtos/publicFeedback.dto');
 
 const createFeedback = asyncHandler(async (req, res) => {
   const { parkingSession, rating, comment, building } = req.body;
@@ -57,26 +62,40 @@ const deleteFeedback = asyncHandler(async (req, res) => {
   sendSuccess(res, { message: 'Feedback deleted' });
 });
 
+/**
+ * Public reviews feed — no authentication. Everything it returns goes through
+ * publicFeedback.dto; see that file for what must never be exposed here.
+ */
 const listAllFeedbacks = asyncHandler(async (req, res) => {
   const page = Math.max(Number(req.query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
-  const filter = {};
-  if (req.query.building) filter.building = req.query.building;
+
+  const filter = { status: PUBLIC_FEEDBACK_STATUS };
+  const building = req.query.building || req.query.buildingId;
+  if (building) {
+    if (!mongoose.Types.ObjectId.isValid(building)) {
+      throw new AppError('Invalid building id', 400);
+    }
+    filter.building = building;
+  }
   if (req.query.rating) filter.rating = Number(req.query.rating);
 
-  const [items, total] = await Promise.all([
+  const [docs, total] = await Promise.all([
     Feedback.find(filter)
-      .populate('user', 'fullName')
+      .select(PUBLIC_FEEDBACK_PROJECTION)
       .populate('building', 'name code')
-      .populate('parkingSession', 'plateNumber entryTime')
       .sort('-createdAt')
       .skip((page - 1) * limit)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     Feedback.countDocuments(filter),
   ]);
 
   sendSuccess(res, {
-    data: { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } },
+    data: {
+      items: docs.map(toPublicFeedback),
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    },
   });
 });
 

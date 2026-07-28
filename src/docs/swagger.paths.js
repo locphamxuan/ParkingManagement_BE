@@ -160,16 +160,16 @@
  *
  *     RegisterRequest:
  *       type: object
- *       required: [email, password, fullName]
+ *       description: >
+ *         Step 1 of email-OTP registration. Deliberately takes NO password —
+ *         the password is sent only with RegisterVerifyRequest, so it is never
+ *         stored before the address is verified.
+ *       required: [email, fullName]
  *       properties:
  *         email:
  *           type: string
  *           format: email
  *           example: user@example.com
- *         password:
- *           type: string
- *           minLength: 6
- *           example: Password123!
  *         fullName:
  *           type: string
  *           minLength: 1
@@ -217,7 +217,10 @@
  *
  *     RegisterVerifyRequest:
  *       type: object
- *       required: [email, otp]
+ *       description: >
+ *         Step 2 of email-OTP registration. The password travels only here, in
+ *         the already-verified request, and is passed straight to bcrypt.
+ *       required: [email, otp, password]
  *       properties:
  *         email:
  *           type: string
@@ -227,6 +230,13 @@
  *           type: string
  *           pattern: '^\\d{6}$'
  *           example: '123456'
+ *         password:
+ *           type: string
+ *           minLength: 12
+ *           description: >
+ *             At least 12 characters; common/predictable values are rejected
+ *             server-side (see utils/passwordPolicy.js).
+ *           example: correct-horse-battery
  *
  *     Address:
  *       type: object
@@ -451,6 +461,11 @@
  *
  *     Feedback:
  *       type: object
+ *       description: >
+ *         Full feedback record. Only returned by AUTHENTICATED, building-scoped
+ *         endpoints (manager feedback list/respond) and by the owner's own
+ *         GET /api/users/feedbacks/me. The unauthenticated public reviews feed
+ *         returns PublicFeedback instead.
  *       properties:
  *         _id: { $ref: '#/components/schemas/ObjectId' }
  *         user: { $ref: '#/components/schemas/ObjectId' }
@@ -464,6 +479,30 @@
  *         repliedAt: { type: string, format: date-time, nullable: true, example: null }
  *         portraitImageUrl: { type: string, nullable: true, example: null }
  *         plateImageUrl: { type: string, nullable: true, example: null }
+ *         createdAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
+ *         updatedAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
+ *
+ *     PublicFeedback:
+ *       type: object
+ *       description: >
+ *         Public reviews DTO for the unauthenticated GET /api/users/feedbacks feed.
+ *         Deliberately carries no reviewer identity, no parking-session or plate
+ *         data, no image URLs and no internal ids beyond the feedback and building.
+ *         Only `resolved` feedback is published.
+ *       properties:
+ *         id: { $ref: '#/components/schemas/ObjectId' }
+ *         rating: { type: integer, minimum: 1, maximum: 5, example: 5 }
+ *         comment: { type: string, example: Fast check-out and clean parking area }
+ *         building:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             id: { $ref: '#/components/schemas/ObjectId' }
+ *             name: { type: string, example: Sunrise Tower }
+ *             code: { type: string, example: SRT }
+ *         staffReply: { type: string, nullable: true, example: Thank you for your feedback }
+ *         repliedAt: { type: string, format: date-time, nullable: true, example: null }
+ *         status: { type: string, enum: [resolved], example: resolved }
  *         createdAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
  *         updatedAt: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
  *
