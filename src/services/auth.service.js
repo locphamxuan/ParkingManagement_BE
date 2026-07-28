@@ -4,6 +4,7 @@ const OtpVerification = require('../models/user/OtpVerification');
 const PhoneOtp = require('../models/user/PhoneOtp');
 const AppError = require('../utils/AppError');
 const { signToken } = require('../utils/token');
+const { assertStrongPassword } = require('../utils/passwordPolicy');
 const { ROLES } = require('../constants/roles');
 const { sendResetPasswordEmail, sendOtpEmail } = require('../utils/email');
 const { sendOtpSms } = require('../utils/sms');
@@ -14,34 +15,29 @@ const OTP_RESEND_COOLDOWN_MS = 60 * 1000; // không gửi lại SMS trong 60s
 const MAX_OTP_ATTEMPTS = 5;
 
 const generateNumericOtp = () => String(crypto.randomInt(100000, 1000000));
-const hashOtp = (otp) => crypto.createHash('sha256').update(otp).digest('hex');
+const hashOtp = (otp) => crypto.createHash('sha256').update(String(otp)).digest('hex');
+
+// Both sides are fixed-length sha256 hex, so this never throws on length.
+const otpHashMatches = (candidateHash, storedHash) =>
+  candidateHash.length === storedHash.length &&
+  crypto.timingSafeEqual(Buffer.from(candidateHash), Buffer.from(storedHash));
 
 const toPublicUser = (user) => user.toJSON();
 
 const buildAuthResponse = (user) => ({
-  token: signToken(user._id),
+  token: signToken(user),
   user: toPublicUser(user),
 });
+
+// Invalidates every JWT already issued for this account. The caller is
+// responsible for persisting the user afterwards.
+const bumpTokenVersion = (user) => {
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
+};
 
 // Brute-force lockout: khóa tài khoản sau MAX_FAILED lần sai liên tiếp.
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MINUTES = 5;
-
-const register = async (body) => {
-  const { email, password, fullName, phone } = body;
-
-  const exists = await User.exists({ email });
-  if (exists) throw new AppError('Email already registered', 409);
-
-  if (phone && (await User.exists({ phone: String(phone).trim() }))) {
-    throw new AppError('Số điện thoại đã được đăng ký', 409, 'PHONE_TAKEN');
-  }
-
-  const user = await User.create({ email, password, fullName, phone, role: ROLES.USER });
-
-  const fresh = await User.findById(user._id);
-  return buildAuthResponse(fresh);
-};
 
 const login = async ({ email, password }) => {
   const user = await User.findOne({ email: String(email).trim().toLowerCase() })
@@ -117,9 +113,7 @@ const forgotPassword = async (email, clientType) => {
 
 const resetPassword = async (token, newPassword) => {
   if (!token) throw new AppError('Token is required', 400);
-  if (!newPassword || newPassword.length < 6) {
-    throw new AppError('Password must be at least 6 characters', 400);
-  }
+  assertStrongPassword(newPassword);
 
   const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
@@ -133,36 +127,76 @@ const resetPassword = async (token, newPassword) => {
   user.password = newPassword;
   user.resetPasswordToken = null;
   user.resetPasswordExpires = null;
+  bumpTokenVersion(user);
   await user.save({ validateModifiedOnly: true });
 
   return buildAuthResponse(user);
 };
 
+/**
+ * Step 1 — send the OTP. Stores only the OTP hash plus non-secret registration
+ * metadata; the password is NOT accepted here and never touches the database
+ * before bcrypt. A resend replaces the previous record (new hash, attempts
+ * reset), so the old code stops working immediately.
+ *
+ * Resolves silently — and identically — when the email is already registered or
+ * the phone belongs to someone else. Returning 409 here told an unauthenticated
+ * caller exactly which addresses have accounts. The controller sends the same
+ * generic message either way, and the duplicate checks in verifyOtpAndRegister
+ * remain as the real (race-safe) guard.
+ */
 const requestRegistration = async (body) => {
-  const { email, password, fullName, phone } = body;
+  const { email, fullName, phone } = body;
 
   const emailExists = await User.exists({ email });
-  if (emailExists) throw new AppError('Email already registered', 409);
+  if (emailExists) return;
 
-  if (phone && (await User.exists({ phone: String(phone).trim() }))) {
-    throw new AppError('Số điện thoại đã được đăng ký', 409, 'PHONE_TAKEN');
-  }
+  if (phone && (await User.exists({ phone: String(phone).trim() }))) return;
 
   const otp = generateNumericOtp();
 
-  await OtpVerification.deleteOne({ email });
-  await OtpVerification.create({ email, otp, password, fullName, phone });
+  await OtpVerification.findOneAndUpdate(
+    { email },
+    {
+      email,
+      otpHash: hashOtp(otp),
+      attempts: 0,
+      fullName,
+      phone: phone || null,
+      expiresAt: new Date(Date.now() + OTP_TTL_MS),
+      createdAt: new Date(),
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
 
   await sendOtpEmail({ to: email, otp, fullName });
 };
 
-const verifyOtpAndRegister = async ({ email, otp }) => {
-  const otpRecord = await OtpVerification.findOne({ email });
+/**
+ * Step 2 — verify the OTP and create the account. The password arrives here for
+ * the first time, over HTTPS, and goes straight into User.create() (the schema
+ * pre-save hook bcrypts it). It is never written anywhere else.
+ */
+const verifyOtpAndRegister = async ({ email, otp, password }) => {
+  assertStrongPassword(password);
 
-  if (!otpRecord) {
-    throw new AppError('OTP has expired or does not exist. Please request a new one.', 400);
-  }
-  if (otpRecord.otp !== otp) {
+  const otpRecord = await OtpVerification.findOne({ email, expiresAt: { $gt: new Date() } });
+  const expiredMessage = 'OTP has expired or does not exist. Please request a new one.';
+
+  if (!otpRecord) throw new AppError(expiredMessage, 400);
+
+  if (!otpHashMatches(hashOtp(otp), otpRecord.otpHash)) {
+    otpRecord.attempts += 1;
+    if (otpRecord.attempts >= MAX_OTP_ATTEMPTS) {
+      // Burn the record so brute-forcing costs a fresh emailed OTP each time.
+      await OtpVerification.deleteOne({ _id: otpRecord._id });
+      throw new AppError(
+        'Too many incorrect codes. Please request a new one.',
+        400,
+        'OTP_ATTEMPTS_EXCEEDED',
+      );
+    }
+    await otpRecord.save();
     throw new AppError('Invalid OTP code', 400);
   }
 
@@ -175,13 +209,13 @@ const verifyOtpAndRegister = async ({ email, otp }) => {
 
   const user = await User.create({
     email: otpRecord.email,
-    password: otpRecord.password,
+    password,
     fullName: otpRecord.fullName,
     phone: otpRecord.phone,
     role: ROLES.USER,
   });
 
-  await OtpVerification.deleteOne({ email });
+  await OtpVerification.deleteOne({ _id: otpRecord._id });
 
   const fresh = await User.findById(user._id);
   return buildAuthResponse(fresh);
@@ -215,9 +249,7 @@ const requestPasswordResetSms = async (phone) => {
 };
 
 const resetPasswordSms = async ({ phone, otp, newPassword }) => {
-  if (!newPassword || newPassword.length < 6) {
-    throw new AppError('Password must be at least 6 characters', 400);
-  }
+  assertStrongPassword(newPassword);
 
   const normalizedPhone = String(phone).trim();
 
@@ -248,6 +280,7 @@ const resetPasswordSms = async ({ phone, otp, newPassword }) => {
   }
 
   user.password = newPassword;
+  bumpTokenVersion(user);
   await user.save({ validateModifiedOnly: true });
 
   otpRecord.consumedAt = new Date();
@@ -256,8 +289,15 @@ const resetPasswordSms = async ({ phone, otp, newPassword }) => {
   return buildAuthResponse(user);
 };
 
+/** Logout — revoke every JWT issued for this account. */
+const revokeSessions = async (userId) => {
+  const user = await User.findById(userId);
+  if (!user) throw new AppError('User not found', 404);
+  bumpTokenVersion(user);
+  await user.save({ validateModifiedOnly: true });
+};
+
 module.exports = {
-  register,
   login,
   getProfile,
   forgotPassword,
@@ -266,5 +306,6 @@ module.exports = {
   verifyOtpAndRegister,
   requestPasswordResetSms,
   resetPasswordSms,
+  revokeSessions,
 };
 

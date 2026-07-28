@@ -133,7 +133,7 @@
  *   put:
  *     tags: [User - Profile]
  *     summary: Change the authenticated user's password
- *     description: Changes the password for the currently authenticated user. The current password must be correct and the new password must contain at least 6 characters.
+ *     description: Changes the password for the currently authenticated user. The current password must be correct and the new password must satisfy the server password policy (at least 12 characters, no common/predictable values).
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -190,7 +190,7 @@
  *                 summary: New password is too short
  *                 value:
  *                   success: false
- *                   message: newPassword must be at least 6 characters
+ *                   message: Password must be at least 12 characters
  *               incorrectCurrentPassword:
  *                 summary: Current password is incorrect
  *                 value:
