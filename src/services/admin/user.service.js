@@ -8,6 +8,10 @@ const AppError = require("../../utils/AppError");
 const { ROLES, ROLE_LIST } = require("../../constants/roles");
 const { writeAuditLog } = require("../../utils/audit");
 const { revokeStaffFromBuilding, revokeManagerFromBuilding } = require('../buildingManager.service');
+const { assertStrongPassword } = require('../../utils/passwordPolicy');
+
+const ADMIN_PROVISIONING_MESSAGE =
+  'Admin accounts are provisioned through the deployment/bootstrap process, not the user-management screen.';
 
 const buildFilter = (query = {}) => {
   const filter = {};
@@ -62,12 +66,9 @@ const create = async (actor, payload) => {
     );
   }
   if (payload.role === ROLES.ADMIN) {
-    throw new AppError(
-      'Admin accounts are provisioned through the deployment/bootstrap process, not the user-management screen.',
-      403,
-      'ADMIN_PROVISIONING_FORBIDDEN',
-    );
+    throw new AppError(ADMIN_PROVISIONING_MESSAGE, 403, 'ADMIN_PROVISIONING_FORBIDDEN');
   }
+  assertStrongPassword(payload.password);
 
   const exists = await User.exists({ email: payload.email });
   if (exists) throw new AppError("Email already registered", 409);
@@ -109,6 +110,12 @@ const update = async (actor, id, payload) => {
   if (payload.role !== undefined) {
     if (!ROLE_LIST.includes(payload.role))
       throw new AppError(`role must be one of: ${ROLE_LIST.join(", ")}`, 400);
+    // Privilege escalation: nothing reachable from the UI may mint an admin.
+    // Note the existing ADMIN_ROLE_IMMUTABLE guard below only protects accounts
+    // that are ALREADY admin — it does not stop promoting a plain user.
+    if (payload.role === ROLES.ADMIN) {
+      throw new AppError(ADMIN_PROVISIONING_MESSAGE, 403, 'ADMIN_PROVISIONING_FORBIDDEN');
+    }
     // Không cho phép gán/tháo role staff hoặc manager trực tiếp.
     // Phải dùng đúng endpoint:
     //   POST /admin/buildings/:buildingId/assign-staff   → role staff
