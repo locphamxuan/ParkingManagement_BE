@@ -33,15 +33,5 @@ services:
         sync: false
       - key: EMAIL_PASS
         sync: false
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: OCR_PROVIDER
-        value: gemini
-      - key: ESMS_API_KEY
-        sync: false
-      - key: ESMS_SECRET_KEY
-        sync: false
-      - key: ESMS_BRANDNAME
-        sync: false
       - key: KIOSK_DEVICE_TOKEN
         generateValue: true
