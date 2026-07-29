@@ -396,10 +396,17 @@
  *   patch:
  *     tags: [Staff - Parking Sessions]
  *     summary: Check out a parking session
+ *     description: >-
+ *       Closes an active session and settles what is due. The parking fee and an approved pending
+ *       penalty are separate receivables and may use different methods. When paymentMethod is
+ *       `payos` (the parking fee was already paid through the PayOS QR) and the plate has a penalty
+ *       that was approved after the QR was created, `penaltyPaymentMethod` (cash or wallet) is
+ *       required so the penalty is still collected at the gate — otherwise the request fails with
+ *       `PENALTY_PAYMENT_METHOD_REQUIRED` and nothing is committed.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { exitGate: { type: string, format: objectId }, paymentMethod: { type: string, enum: [cash, wallet, qr, card, payos, long_term] }, exitPlateImage: { type: string }, exitPortraitImage: { type: string }, note: { type: string, example: Paid by cash } } } } } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { exitGate: { type: string, format: objectId }, paymentMethod: { type: string, enum: [cash, wallet, qr, card, payos, long_term] }, penaltyPaymentMethod: { type: string, enum: [cash, wallet], description: 'Method used to collect an approved pending penalty. Required when paymentMethod is payos and a penalty is pending; defaults to paymentMethod otherwise.' }, exitPlateImage: { type: string }, exitPortraitImage: { type: string }, note: { type: string, example: Paid by cash } } } } } }
  *     responses:
  *       200: { description: Session checked out successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { $ref: '#/components/schemas/ParkingSession' } } } ] } } } }
  * /api/staff/parking-sessions/{id}/initiate-payment:

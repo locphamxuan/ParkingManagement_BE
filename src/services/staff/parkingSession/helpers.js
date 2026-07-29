@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const AppError = require('../../../utils/AppError');
 const {
   ParkingSession,
   ParkingSlot,
@@ -31,6 +32,38 @@ const vehicleKindFromType = (vt) => {
   const s = `${vt?.code || ''} ${vt?.name || ''}`.toLowerCase();
   if (/motor|xe m|máy|bike|moto/.test(s)) return 'motorcycle';
   return 'car';
+};
+
+/**
+ * Nhóm loại xe của một VehicleType chỉ có reference (slot/dãy lưu ObjectId).
+ * null = không gắn loại xe (slot "vạn năng") → hợp với mọi loại.
+ */
+const loadVehicleKind = async (vehicleTypeId, session = null) => {
+  if (!vehicleTypeId) return null;
+  const vt = await VehicleType.findById(vehicleTypeId).session(session);
+  return vt ? vehicleKindFromType(vt) : null;
+};
+
+/**
+ * Loại xe CHÍNH THỨC của một lượt vào bãi theo gói dài hạn: luôn là loại xe của
+ * GÓI (`subscription.package.vehicleType`, đã populate). Loại xe camera nhận diện
+ * hoặc staff/client gửi lên chỉ là dữ liệu hỗ trợ — không được ghi đè ràng buộc
+ * của gói (gói xe máy không được cấp ô ô tô và ngược lại).
+ */
+const packageVehicleOf = (subscription) => {
+  const vt = subscription?.package?.vehicleType || null;
+  const isPopulated = Boolean(vt?.code || vt?.name);
+  return {
+    id: vt?._id || vt || null,
+    kind: isPopulated ? vehicleKindFromType(vt) : null,
+  };
+};
+
+/** Ràng buộc loại xe của gói — dùng chung cho check-in staff và kiosk. */
+const assertPackageVehicleKind = (packageKind, candidateKind, message) => {
+  if (packageKind && candidateKind && packageKind !== candidateKind) {
+    throw new AppError(message, 409, 'PACKAGE_VEHICLE_TYPE_MISMATCH');
+  }
 };
 
 const asObjectId = (value) =>
@@ -68,6 +101,13 @@ const activeSubscriptionMatch = (now = new Date()) => {
   };
 };
 
+/** Populate loại xe của gói — nguồn sự thật cho ràng buộc slot lúc vào bãi. */
+const POPULATE_PACKAGE_VEHICLE_TYPE = {
+  path: 'package',
+  select: 'vehicleType maxHoursPerDay',
+  populate: { path: 'vehicleType', select: 'code name' },
+};
+
 const resolveLongTermSubscription = async (plateNumber, allowedBuildings, mongoSession = null) => {
   const now = new Date();
   const query = LongTermSubscription.findOne({
@@ -76,6 +116,7 @@ const resolveLongTermSubscription = async (plateNumber, allowedBuildings, mongoS
     building: { $in: allowedBuildings },
   })
     .populate('slot')
+    .populate(POPULATE_PACKAGE_VEHICLE_TYPE)
     .sort({ updatedAt: -1 });
   if (mongoSession) query.session(mongoSession);
   const subscription = await query;
@@ -242,6 +283,10 @@ const calculateFee = async (parkingSession, preloadedPolicies) => {
 module.exports = {
   resolveVehicleTypeId,
   vehicleKindFromType,
+  loadVehicleKind,
+  packageVehicleOf,
+  assertPackageVehicleKind,
+  POPULATE_PACKAGE_VEHICLE_TYPE,
   asObjectId,
   findDuplicateActiveSession,
   activeSubscriptionMatch,
