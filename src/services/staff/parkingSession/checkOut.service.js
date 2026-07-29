@@ -24,7 +24,56 @@ const { finalizeSlotAfterCheckout } = require('../../shared/slotLifecycle.servic
 const { resolveOperationalGate } = require('../../shared/gateAuthorization.service');
 const { assertEvidenceImage } = require('../../../utils/evidence');
 
+// Phí phạt luôn do STAFF thu tại cổng lúc xe ra — chỉ chấp nhận các phương thức
+// staff thực thu được (PayOS QR chỉ chứa phí gửi xe, không gộp phí phạt).
+const STAFFED_PENALTY_METHODS = ['cash', 'wallet'];
+
 // ── Helpers (module-private) ─────────────────────────────────────────────────
+
+async function _findPendingPenalty(parkingSession, mongoSession) {
+  return Incident.exists({
+    building: parkingSession.building,
+    violatorPlate: plateMatchRegex(parkingSession.plateNumber) || parkingSession.plateNumber,
+    status: 'penalty_pending',
+  }).session(mongoSession);
+}
+
+/**
+ * Phí gửi xe và phí phạt là HAI khoản thu riêng, được phép khác phương thức.
+ *
+ * QR PayOS chỉ chứa phí gửi xe và được tạo TRƯỚC khi manager duyệt phạt (tạo QR
+ * lúc đã có phạt vẫn bị chặn ở `payment.service`). Nếu phạt được duyệt SAU khi
+ * khách đã quét QR trả tiền, khoản phí gửi xe đã thu xong không thể thu lại —
+ * staff phải chỉ định `penaltyPaymentMethod` để thu nốt phần phạt tại cổng, nếu
+ * không xe sẽ kẹt trong bãi dù tiền đã vào tài khoản.
+ *
+ * Các luồng cũ (cash/wallet/...) giữ nguyên: phạt theo đúng phương thức của lượt
+ * check-out khi staff không chỉ định riêng.
+ */
+function _resolvePenaltyPaymentMethod(payload, feeMethod, pendingPenalty) {
+  const requested = payload.penaltyPaymentMethod;
+  if (requested !== undefined && requested !== null && requested !== '') {
+    if (!STAFFED_PENALTY_METHODS.includes(requested)) {
+      throw new AppError(
+        `penaltyPaymentMethod must be one of: ${STAFFED_PENALTY_METHODS.join(', ')}`,
+        400,
+        'INVALID_PENALTY_PAYMENT_METHOD',
+      );
+    }
+    return requested;
+  }
+
+  if (pendingPenalty && feeMethod === 'payos') {
+    throw new AppError(
+      'This vehicle has an approved pending penalty that the PayOS QR did not cover. '
+      + `Provide penaltyPaymentMethod (${STAFFED_PENALTY_METHODS.join(' or ')}) to collect it at the gate.`,
+      400,
+      'PENALTY_PAYMENT_METHOD_REQUIRED',
+    );
+  }
+
+  return feeMethod || 'cash';
+}
 
 async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
   if (!sessionId) {
@@ -322,22 +371,10 @@ async function _computeRegularFee(parkingSession, payload, mongoSession) {
   return { fee, feeMethod };
 }
 
+// Phí gửi xe đã thu qua PayOS thì không được thu lại bằng tiền mặt/ví.
+// (Chiều ngược lại — PayOS + phạt duyệt muộn — xử lý bằng `penaltyPaymentMethod`.)
 async function _assertPayosCheckoutCanComplete(parkingSession, feeMethod, mongoSession) {
-  if (feeMethod === 'payos') {
-    const pendingPenalty = await Incident.exists({
-      building: parkingSession.building,
-      violatorPlate: plateMatchRegex(parkingSession.plateNumber) || parkingSession.plateNumber,
-      status: 'penalty_pending',
-    }).session(mongoSession);
-    if (pendingPenalty) {
-      throw new AppError(
-        'A pending penalty must be settled before this PayOS checkout can be completed',
-        409,
-        'PENDING_PENALTY_REQUIRES_MANUAL_PAYMENT',
-      );
-    }
-    return;
-  }
+  if (feeMethod === 'payos') return;
 
   const paidPayosIntent = await Payment.exists({
     parkingSession: parkingSession._id,
@@ -442,6 +479,7 @@ async function _finalizeSession(
   payload,
   fee,
   feeMethod,
+  penaltyPaymentMethod,
   exitPlateImage,
   exitPortraitImage,
   activeStaffShift,
@@ -493,6 +531,7 @@ async function _finalizeSession(
     after: parkingSession.toObject(),
     metadata: {
       paymentMethod: feeMethod,
+      penaltyPaymentMethod: penaltyPaymentMethod || null,
       adjustedFee: payload.adjustedFee ?? null,
       adjustmentReason: payload.adjustmentReason || null,
       forceCheckoutReason: payload.forceCheckoutReason || null,
@@ -516,6 +555,15 @@ const checkOut = async (user, sessionId, payload = {}) => {
     const result = await mongoSession.withTransaction(async () => {
       const { parkingSession, payload: checkoutPayload, exitPlateImage, exitPortraitImage, activeStaffShift, exitGate } =
         await _verifyAndLoadSession(user, sessionId, payload, mongoSession);
+
+      // Xác định phương thức thu phí phạt TRƯỚC khi ghi bất kỳ khoản tiền nào —
+      // thiếu/sai thì lượt check-out phải hỏng sạch, không thu nửa vời.
+      const pendingPenalty = await _findPendingPenalty(parkingSession, mongoSession);
+      const penaltyPaymentMethod = _resolvePenaltyPaymentMethod(
+        checkoutPayload,
+        checkoutPayload.paymentMethod,
+        pendingPenalty,
+      );
 
       // Long-term subscription → separate flow with overage billing.
       if (parkingSession.paymentMethod === 'long_term') {
@@ -543,7 +591,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
         }
 
         await _finalizeSession(
-          user, parkingSession, checkoutPayload, fee, feeMethod,
+          user, parkingSession, checkoutPayload, fee, feeMethod, penaltyPaymentMethod,
           exitPlateImage, exitPortraitImage, activeStaffShift, exitGate, mongoSession,
         );
       }
@@ -551,7 +599,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
       // Biển số này có đang bị 1 incident 'penalty_pending' (manager đã duyệt phí phạt)
       // chờ thu không? Nếu có → tạo Payment riêng cho phí phạt + resolve incident, ngay
       // trong transaction check-out này (staff là người thực thu tại cổng, không phải manager).
-      await settlePendingPenaltyAtCheckout(user, parkingSession, checkoutPayload.paymentMethod || 'cash', mongoSession);
+      await settlePendingPenaltyAtCheckout(user, parkingSession, penaltyPaymentMethod, mongoSession);
 
       return parkingSession;
     });
