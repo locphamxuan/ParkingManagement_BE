@@ -111,6 +111,70 @@ describe('Public feedback DTO', () => {
   });
 });
 
+describe('Feedback submission invariants', () => {
+  const createCompletedSession = (user, building) => ParkingSession.create({
+    building: building._id,
+    user: user._id,
+    plateNumber: '51F-456.78',
+    status: 'completed',
+    entryTime: new Date(Date.now() - 3600_000),
+    exitTime: new Date(),
+  });
+
+  test('derives the building from the completed session instead of the client payload', async () => {
+    const building = await f.createBuilding();
+    const clientBuilding = await f.createBuilding();
+    const user = await f.createUser();
+    const session = await createCompletedSession(user, building);
+
+    const res = await request(app)
+      .post('/api/users/feedbacks')
+      .set('Authorization', `Bearer ${signToken(user)}`)
+      .send({ parkingSession: session._id, building: clientBuilding._id, rating: 5, comment: 'Accurate building' });
+
+    expect(res.status).toBe(200);
+    const feedback = await Feedback.findOne({ parkingSession: session._id });
+    expect(`${feedback.building}`).toBe(`${building._id}`);
+  });
+
+  test('rejects an active or another user\'s session', async () => {
+    const building = await f.createBuilding();
+    const user = await f.createUser();
+    const otherUser = await f.createUser();
+    const active = await ParkingSession.create({ building: building._id, user: user._id, plateNumber: '51F-456.79', status: 'active' });
+    const completed = await createCompletedSession(otherUser, building);
+
+    const activeRes = await request(app)
+      .post('/api/users/feedbacks')
+      .set('Authorization', `Bearer ${signToken(user)}`)
+      .send({ parkingSession: active._id, rating: 5, comment: 'Too early' });
+    expect(activeRes.status).toBe(409);
+    expect(activeRes.body.errorCode).toBe('PARKING_SESSION_NOT_COMPLETED');
+
+    const otherRes = await request(app)
+      .post('/api/users/feedbacks')
+      .set('Authorization', `Bearer ${signToken(user)}`)
+      .send({ parkingSession: completed._id, rating: 5, comment: 'Not mine' });
+    expect(otherRes.status).toBe(404);
+    expect(otherRes.body.errorCode).toBe('PARKING_SESSION_NOT_FOUND');
+  });
+
+  test('parallel submissions for one session create exactly one feedback', async () => {
+    const building = await f.createBuilding();
+    const user = await f.createUser();
+    const session = await createCompletedSession(user, building);
+    const post = () => request(app)
+      .post('/api/users/feedbacks')
+      .set('Authorization', `Bearer ${signToken(user)}`)
+      .send({ parkingSession: session._id, rating: 5, comment: 'One review only' });
+
+    const [first, second] = await Promise.all([post(), post()]);
+    expect([first.status, second.status].sort()).toEqual([200, 409]);
+    expect([first.body.errorCode, second.body.errorCode]).toContain('FEEDBACK_ALREADY_EXISTS');
+    expect(await Feedback.countDocuments({ user: user._id, parkingSession: session._id })).toBe(1);
+  });
+});
+
 describe('Full feedback detail requires authentication and building scope', () => {
   test('manager feedback list rejects unauthenticated callers', async () => {
     const { building } = await seedFeedback();

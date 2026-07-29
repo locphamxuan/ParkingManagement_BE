@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Feedback = require('../../models/operations/Feedback');
+const ParkingSession = require('../../models/operations/ParkingSession');
 const AppError = require('../../utils/AppError');
 const asyncHandler = require('../../utils/asyncHandler');
 const { sendSuccess } = require('../../utils/response');
@@ -9,24 +10,68 @@ const {
   PUBLIC_FEEDBACK_STATUS,
 } = require('../../dtos/publicFeedback.dto');
 
+const isFeedbackConflict = (error) => {
+  if (error?.code !== 11000) return false;
+  if (`${error?.message || ''}`.includes('uniq_feedback_per_user_session')) return true;
+
+  const keys = Object.keys(error?.keyPattern || {}).sort();
+  return keys.length === 2 && keys[0] === 'parkingSession' && keys[1] === 'user';
+};
+
+/**
+ * Đánh giá chỉ được viết cho phiên gửi xe CỦA CHÍNH người dùng và đã HOÀN TẤT.
+ * `building` client gửi lên bị bỏ qua hoàn toàn — building luôn suy từ phiên đã
+ * xác thực ở server, nếu không client có thể gắn review vào tòa nhà bất kỳ.
+ */
 const createFeedback = asyncHandler(async (req, res) => {
-  const { parkingSession, rating, comment, building } = req.body;
+  const { parkingSession, rating, comment } = req.body;
   if (!parkingSession) throw new AppError('parkingSession is required', 400);
+  if (!mongoose.Types.ObjectId.isValid(parkingSession)) {
+    throw new AppError('Invalid parkingSession id', 400, 'INVALID_PARKING_SESSION');
+  }
   if (!rating) throw new AppError('rating is required', 400);
   if (!comment) throw new AppError('comment is required', 400);
 
-  const existing = await Feedback.findOne({ parkingSession, user: req.user._id });
-  if (existing) throw new AppError('You have already submitted feedback for this session', 409);
-
-  const feedback = await Feedback.create({
+  const session = await ParkingSession.findOne({
+    _id: parkingSession,
     user: req.user._id,
-    parkingSession,
-    rating: Number(rating),
-    comment: String(comment).trim(),
-    building: building || null,
-  });
+  }).select('_id building status');
+  if (!session) {
+    throw new AppError(
+      'Parking session not found for this account',
+      404,
+      'PARKING_SESSION_NOT_FOUND',
+    );
+  }
+  if (session.status !== 'completed') {
+    throw new AppError(
+      'You can only review a completed parking session',
+      409,
+      'PARKING_SESSION_NOT_COMPLETED',
+    );
+  }
 
-  sendSuccess(res, { message: 'Feedback submitted', data: { feedback } }, 201);
+  try {
+    const feedback = await Feedback.create({
+      user: req.user._id,
+      parkingSession: session._id,
+      rating: Number(rating),
+      comment: String(comment).trim(),
+      building: session.building || null,
+    });
+    sendSuccess(res, { message: 'Feedback submitted', data: { feedback } }, 201);
+  } catch (error) {
+    // Unique index {user, parkingSession}: hai request song song cùng qua được bước
+    // kiểm tra "đã đánh giá chưa" → DB chặn cái thứ hai.
+    if (isFeedbackConflict(error)) {
+      throw new AppError(
+        'You have already submitted feedback for this session',
+        409,
+        'FEEDBACK_ALREADY_EXISTS',
+      );
+    }
+    throw error;
+  }
 });
 
 const listMyFeedbacks = asyncHandler(async (req, res) => {
