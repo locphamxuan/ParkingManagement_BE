@@ -49,6 +49,22 @@ describe('subscribe', () => {
     await expect(svc.subscribe(user._id, { packageId: pkg._id, plateNumber: 'XX' }))
       .rejects.toMatchObject({ statusCode: 400 });
   });
+
+  test('biển xe máy không thể mua gói ô tô, không trừ tiền', async () => {
+    await User.findByIdAndUpdate(user._id, {
+      'licensePlates.0.vehicleType': 'motorcycle',
+    });
+
+    await expect(svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' }))
+      .rejects.toMatchObject({
+        statusCode: 409,
+        errorCode: 'PACKAGE_VEHICLE_TYPE_MISMATCH',
+      });
+
+    const fresh = await User.findById(user._id);
+    expect(fresh.walletBalance).toBe(1000000);
+    expect(await LongTermSubscription.countDocuments()).toBe(0);
+  });
 });
 
 describe('cancelSubscription', () => {
