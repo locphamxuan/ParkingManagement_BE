@@ -115,6 +115,7 @@ const resolveLongTermSubscription = async (plateNumber, allowedBuildings, mongoS
     ...activeSubscriptionMatch(now),
     building: { $in: allowedBuildings },
   })
+    .populate('user', 'isActive')
     .populate('slot')
     .populate(POPULATE_PACKAGE_VEHICLE_TYPE)
     .sort({ updatedAt: -1 });
@@ -126,6 +127,13 @@ const resolveLongTermSubscription = async (plateNumber, allowedBuildings, mongoS
       { plateNumber, buildingIds: allowedBuildings, now },
       mongoSession,
     );
+    return null;
+  }
+
+  // A long-term entitlement must always have a live owner account. This is
+  // normally guaranteed by the account-deletion guard, but checking again at
+  // the gate prevents legacy/corrupt records from granting a free entry.
+  if (!subscription.user || subscription.user.isActive === false) {
     return null;
   }
 
