@@ -432,8 +432,8 @@
  *     tags: [Manager - Wallet]
  *     summary: Revenue broken down by day and payment method
  *     description: >
- *       Source is successful revenue-type Payments only (parking_fee/reservation_fee/
- *       subscription_fee — top-ups excluded), so `allTimeTotal` differs from the wallet's
+ *       Source is successful revenue-type Payments only (parking_fee/subscription_fee/
+ *       penalty_fee — top-ups excluded), so `allTimeTotal` differs from the wallet's
  *       `totalReceived`. Days are bucketed in the server's local timezone, not UTC.
  *     security:
  *       - bearerAuth: []

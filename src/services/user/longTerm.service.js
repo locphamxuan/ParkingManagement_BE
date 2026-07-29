@@ -131,7 +131,7 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
 
   // ── Thu tiền + ghi doanh thu (atomic) ────────────────────────────────────
   // Mua gói = doanh thu của TÒA NHÀ: trừ ví user → tạo Payment(subscription) →
-  // credit BuildingWallet, giống luồng reservation/checkout.
+  // credit BuildingWallet, giống luồng thu phí lúc check-out.
   const mongoSession = await mongoose.startSession();
   let subscription;
   try {
@@ -338,7 +338,7 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
 
       const packagePrice = subscription.package.price;
       // % hoàn tiền do MANAGER cấu hình — helper chung (default 80, clamp 0–100),
-      // nhất quán với hủy reservation và endpoint public /users/reservations/policy.
+      // nhất quán với mọi đường hủy gói (manager huỷ, job hết hạn).
       const refundPercent = await getRefundPercent(subscription.building, mongoSession);
       const refundAmount = Math.round((packagePrice * refundPercent) / 100);
 

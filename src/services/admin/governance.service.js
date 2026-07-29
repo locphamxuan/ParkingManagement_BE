@@ -61,7 +61,7 @@ const getRoleCatalog = () => ({
       purpose: 'Uses the service and manages their own parking activity.',
       capabilities: [
         'Manage vehicles and personal wallet',
-        'Purchase long-term packages and reservations',
+        'Purchase long-term packages',
         'View parking history, payments, refunds and notifications',
         'Submit reviews and report incidents',
       ],
