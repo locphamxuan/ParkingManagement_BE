@@ -36,6 +36,8 @@ postman/
 .postman/
 reports/
 scripts/
+!src/scripts/
+!src/scripts/auditLegacyReservationPayments.js
 tools/
 
 # Source notes
