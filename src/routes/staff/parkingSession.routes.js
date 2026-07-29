@@ -42,6 +42,7 @@ router.patch("/:id/check-out", parkingSessionController.checkOut);
 
 // PayOS payment — tạo QR + checkoutUrl để thu phí gửi xe tại chỗ
 router.post("/:id/initiate-payment", parkingSessionController.initiatePayment);
+router.get("/:id/payment-intent", parkingSessionController.getPaymentIntent);
 
 // Reconcile a bank-transfer (PayOS) payment when the webhook didn't arrive
 router.get("/payment/:orderCode/status", parkingSessionController.verifyPayment);

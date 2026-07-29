@@ -144,8 +144,8 @@ describe('webhook.service.handle', () => {
     await webhookService.handle({});
 
     const ps = await ParkingSession.findById(session._id);
-    expect(ps.status).toBe('completed');
-    expect(ps.paymentMethod).toBe('payos');
+    expect(ps.status).toBe('active');
+    expect(ps.exitTime).toBeNull();
     expect((await Payment.findOne({ payosOrderCode: 999004 })).status).toBe('success');
   });
 

@@ -80,14 +80,19 @@ const reject = asyncHandler(async (req, res) => {
  * Staff hiển thị QR cho khách quét bằng app ngân hàng.
  */
 const initiatePayment = asyncHandler(async (req, res) => {
-  const data = await parkingSessionService.initiatePayment(req.user, req.params.id);
+  const data = await parkingSessionService.initiatePayment(req.user, req.params.id, req.body);
   sendSuccess(res, { message: 'PayOS payment link created', data });
+});
+
+const getPaymentIntent = asyncHandler(async (req, res) => {
+  const data = await parkingSessionService.getSessionPaymentIntent(req.user, req.params.id);
+  sendSuccess(res, { data });
 });
 
 /**
  * GET /api/staff/parking-sessions/payment/:orderCode/status
  * Reconcile a bank-transfer (PayOS) session payment — fallback when the webhook
- * did not arrive. Completes the session + credits the manager wallet if PAID.
+ * did not arrive. Records PayOS settlement if PAID; staff checkout still releases the vehicle.
  */
 const verifyPayment = asyncHandler(async (req, res) => {
   const data = await parkingSessionService.verifySessionPayment(req.user, req.params.orderCode);
@@ -112,4 +117,4 @@ const myCheckouts = asyncHandler(async (req, res) => {
   sendSuccess(res, { data: { items } });
 });
 
-module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, verifyPayment, myCheckIns, myCheckouts };
+module.exports = { checkIn, checkOut, listActive, getById, search, lookupPlate, listFreeSlots, scan, reject, initiatePayment, getPaymentIntent, verifyPayment, myCheckIns, myCheckouts };
