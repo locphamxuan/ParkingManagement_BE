@@ -36,6 +36,25 @@ const longTermSubscriptionSchema = new mongoose.Schema(
       ref: "ParkingSlot",
       default: null,
     },
+    // ĐIỀU KHOẢN ĐÃ MUA — snapshot BẤT BIẾN tại thời điểm mua/gia hạn gần nhất.
+    // Manager sửa giá/thời hạn/giờ-ngày/loại xe của LongTermPackage KHÔNG được hồi tố
+    // lên gói đã bán: hoàn tiền, xem trước hoàn tiền, tính phí vượt giờ và lịch sử đều
+    // đọc từ đây. `package` vẫn giữ để truy vết nguồn gốc, không dùng để tính tiền.
+    purchasedTerms: {
+      packageId: { type: mongoose.Schema.Types.ObjectId, ref: 'LongTermPackage', default: null },
+      packageCode: { type: String, default: null },
+      packageName: { type: String, default: null },
+      price: { type: Number, default: null, min: 0 },
+      durationDays: { type: Number, default: null, min: 1 },
+      maxHoursPerDay: { type: Number, default: null, min: 0 },
+      vehicleType: { type: mongoose.Schema.Types.ObjectId, ref: 'VehicleType', default: null },
+      vehicleClass: { type: String, default: null },
+      // Kỳ gần nhất đã trả tiền (mua mới hoặc gia hạn) — để đối soát lịch sử.
+      purchasedAt: { type: Date, default: null },
+      // true = backfill từ package đang sống (dữ liệu cũ trước khi có snapshot),
+      // không phải điều khoản đọc được từ chứng từ gốc.
+      backfilled: { type: Boolean, default: false },
+    },
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
     status: {

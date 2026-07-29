@@ -154,6 +154,22 @@ const userSchema = new mongoose.Schema(
   }
 );
 
+// Một biển số chỉ thuộc về DUY NHẤT một tài khoản (toàn hệ thống). Multikey unique
+// index: giá trị đã được normalize trước khi ghi (licensePlate.service) nên so sánh
+// bằng chuỗi là đủ. `partialFilterExpression` loại các user CHƯA có biển số nào —
+// nếu không, mọi user không có biển đều index `null` và đụng nhau.
+// Index này cũng chặn 2 biển trùng trong CÙNG một tài khoản.
+userSchema.index(
+  { 'licensePlates.plateNumber': 1 },
+  {
+    unique: true,
+    name: 'uniq_license_plate_owner',
+    // Created only by the audited index CLI; other model indexes still auto-build.
+    _autoIndex: false,
+    partialFilterExpression: { 'licensePlates.plateNumber': { $exists: true } },
+  },
+);
+
 userSchema.pre('save', async function hashPassword(next) {
   if (!this.isModified('password')) {
     return next();

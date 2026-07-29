@@ -14,6 +14,14 @@ async function connect() {
   // Đăng ký TẤT CẢ model để populate cross-ref (vd ParkingSession→Slot→Floor) không
   // lỗi MissingSchemaError khi test file chỉ require một service lẻ.
   require('../../src/models');
+  // Chờ index build XONG trước khi test chạy: các bất biến nghiệp vụ (1 phiên active
+  // /biển/tòa, 1 ý định PayOS/phiên, 1 review/phiên, 1 chủ sở hữu/biển số) do unique
+  // index bảo đảm — nếu không await, test song song có thể chạy trước khi index tồn tại.
+  const models = Object.values(mongoose.models);
+  await Promise.all(models.map((model) => model.init()));
+  // The four rollout-gated unique indexes opt out of automatic builds. Tests create
+  // all declared indexes explicitly so concurrency tests exercise real DB guards.
+  await Promise.all(models.map((model) => model.createIndexes()));
 }
 
 async function clear() {

@@ -27,6 +27,21 @@ describe('add', () => {
       .rejects.toMatchObject({ statusCode: 409 });
   });
 
+  test('hai tài khoản thêm cùng biển song song → chỉ một tài khoản sở hữu biển', async () => {
+    const otherUser = await f.createUser();
+    const results = await Promise.allSettled([
+      svc.add(user._id, { plateNumber: '51F-123.45' }),
+      svc.add(otherUser._id, { plateNumber: '51F-123.45' }),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    expect(rejected.reason).toMatchObject({
+      statusCode: 409,
+      errorCode: 'PLATE_OWNED_BY_ANOTHER_USER',
+    });
+  });
+
   test('vượt giới hạn 5 biển → 400', async () => {
     const plates = ['51F-123.45', '51F-123.46', '51F-123.47', '51F-123.48', '51F-123.49'];
     for (const p of plates) await svc.add(user._id, { plateNumber: p });

@@ -8,6 +8,11 @@ const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../
 
 const MAX_PLATES_PER_USER = 5;
 
+const isPlateOwnershipConflict = (error) =>
+  error?.code === 11000
+  && (`${error?.message || ''}`.includes('uniq_license_plate_owner')
+    || error?.keyPattern?.['licensePlates.plateNumber'] !== undefined);
+
 const list = async (userId) => {
   const user = await User.findById(userId).select('licensePlates');
   if (!user) throw new AppError('User not found', 404);
@@ -52,13 +57,27 @@ const add = async (userId, { plateNumber, vehicleType, brand }) => {
     );
   }
 
-  const updated = await User.findByIdAndUpdate(
-    userId,
-    { $push: { licensePlates: { plateNumber: normalized, vehicleType: vehicleType || 'car', brand: brand || null, isDefault: false, qrCode: generatePlateQrCode() } } },
-    { new: true, runValidators: true }
-  ).select('licensePlates');
+  try {
+    const updated = await User.findByIdAndUpdate(
+      userId,
+      { $push: { licensePlates: { plateNumber: normalized, vehicleType: vehicleType || 'car', brand: brand || null, isDefault: false, qrCode: generatePlateQrCode() } } },
+      { new: true, runValidators: true }
+    ).select('licensePlates');
 
-  return updated.licensePlates;
+    return updated.licensePlates;
+  } catch (error) {
+    // Unique index `uniq_license_plate_owner`: hai tài khoản thêm CÙNG một biển số
+    // song song đều qua được bước kiểm tra `otherOwner` ở trên → DB chặn cái thứ hai.
+    // Biển số đã được normalize trước khi ghi nên so sánh chuỗi là chính xác.
+    if (isPlateOwnershipConflict(error)) {
+      throw new AppError(
+        'This license plate is already linked to another account. Please contact parking support if ownership changed.',
+        409,
+        'PLATE_OWNED_BY_ANOTHER_USER',
+      );
+    }
+    throw error;
+  }
 };
 
 const update = async (userId, plateId, { vehicleType }) => {

@@ -29,6 +29,10 @@ const main = async () => {
       'db.longtermsubscriptions.dropIndex("uniq_active_fixed_slot")',
       'db.payments.dropIndex("uniq_payos_order_code")',
       'db.payments.dropIndex("uniq_pending_payos_session")',
+      'db.payments.dropIndex("uniq_live_payos_session_intent")',
+      'db.parkingsessions.dropIndex("uniq_active_session_per_plate_building")',
+      'db.feedbacks.dropIndex("uniq_feedback_per_user_session")',
+      'db.users.dropIndex("uniq_license_plate_owner")',
     ];
   } else {
     output.nextStep = 'Resolve every conflict, then rerun with --apply-indexes.';

@@ -66,6 +66,7 @@ const MAGIC_BYTE_CHECKS = {
 };
 
 const BASE64_REGEX = /^[A-Za-z0-9+/]+={0,2}$/;
+const MAX_ENCODED_BYTES = Math.ceil(MAX_DECODED_BYTES / 3) * 4;
 
 /**
  * Parses and fully validates the inbound frame. Every rejection here is a 4xx
@@ -96,6 +97,16 @@ const parseImage = (image) => {
   }
 
   const data = dataUrl[2].trim();
+  // Reject by encoded length before the regex or Buffer allocation. A multi-megabyte
+  // payload can otherwise overflow the regex engine before reaching the decoded-size
+  // guard below.
+  if (data.length > MAX_ENCODED_BYTES) {
+    throw new AppError(
+      `Image is too large. Maximum is ${MAX_DECODED_BYTES / 1024 / 1024}MB.`,
+      413,
+      'IMAGE_TOO_LARGE',
+    );
+  }
   if (!data || !BASE64_REGEX.test(data) || data.length % 4 !== 0) {
     throw new AppError('image is not valid base64.', 400, 'IMAGE_BASE64_INVALID');
   }
