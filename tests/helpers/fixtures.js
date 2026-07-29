@@ -45,12 +45,16 @@ const createBuilding = (over = {}) => {
   });
 };
 
+// vehicleClass = canonical class dùng cho điều kiện mua gói (constants/vehicleClass).
+// Mặc định 'car' để các fixture cũ vẫn mua được gói; test nào cần kiểm tra ràng buộc
+// loại xe thì truyền tường minh ('suv', 'motorcycle', null = chưa map, ...).
 const createVehicleType = (buildingId, over = {}) => {
   const n = next();
   return VehicleType.create({
     building: buildingId,
     code: over.code || `VT${n}`,
     name: over.name || `Vehicle ${n}`,
+    vehicleClass: over.vehicleClass !== undefined ? over.vehicleClass : 'car',
     isActive: over.isActive ?? true,
   });
 };

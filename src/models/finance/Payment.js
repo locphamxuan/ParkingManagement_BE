@@ -99,6 +99,26 @@ paymentSchema.index(
   },
 );
 
+// MỘT phiên gửi xe chỉ có TỐI ĐA MỘT ý định thanh toán PayOS còn sống (pending) hoặc
+// đã thu (success). Hai request tạo QR song song đều thấy "chưa có pending" rồi cùng
+// tạo link → khách quét cả hai → ví tòa được cộng 2 lần. Unique index này là chốt
+// chặn ở tầng DB (check-rồi-tạo ở service KHÔNG đủ). Bản ghi failed/refunded/
+// reconciliation_required không nằm trong index nên QR hỏng vẫn thay thế được.
+paymentSchema.index(
+  { parkingSession: 1 },
+  {
+    unique: true,
+    name: 'uniq_live_payos_session_intent',
+    // Created only by the audited index CLI; other model indexes still auto-build.
+    _autoIndex: false,
+    partialFilterExpression: {
+      type: 'session',
+      method: 'payos',
+      status: { $in: ['pending', 'success'] },
+    },
+  },
+);
+
 paymentSchema.pre("findOneAndUpdate", function setSettlementTimeOnUpdate(next) {
   const update = this.getUpdate() || {};
   const nextStatus = update.$set?.status ?? update.status;
