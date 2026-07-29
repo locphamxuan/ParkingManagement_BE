@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const AppError = require('../../utils/AppError');
-const { Incident } = require('../../models');
+const { Incident, ParkingSession } = require('../../models');
 const { assertBuildingScope, logAudit } = require('../../utils/staffScope');
 const generateBookingCode = require('../../utils/generateBookingCode');
 const { applyIncidentAction } = require('../shared/incidentResolve.service');
@@ -32,9 +32,41 @@ const createIncident = async (staffUser, payload = {}) => {
     throw new AppError('type is required', 400, 'INCIDENT_TYPE_REQUIRED');
   }
 
-  const buildingId = payload.buildingId || null;
+  let buildingId = payload.buildingId || null;
   if (buildingId) {
     assertBuildingScope(staffUser, buildingId);
+  }
+
+  // Phiên gửi xe gắn kèm phải THUỘC ĐÚNG tòa nhà của phiếu sự cố — nếu chỉ load theo
+  // `_id`, staff tòa A gắn được phiên của tòa B vào sự cố tòa A. Building/slot lấy từ
+  // chính phiên đã xác thực (server-derived) thay vì tin dữ liệu client gửi lên.
+  let parkingSessionId = null;
+  let slotId = null;
+  if (payload.parkingSessionId) {
+    if (!mongoose.Types.ObjectId.isValid(payload.parkingSessionId)) {
+      throw new AppError('parkingSessionId is not a valid id', 400, 'INVALID_PARKING_SESSION');
+    }
+    if (!buildingId) {
+      throw new AppError(
+        'buildingId is required when a parking session is attached',
+        400,
+        'BUILDING_REQUIRED',
+      );
+    }
+    const parkingSession = await ParkingSession.findOne({
+      _id: payload.parkingSessionId,
+      building: buildingId,
+    }).select('_id building slot');
+    if (!parkingSession) {
+      throw new AppError(
+        'Parking session not found in this building',
+        409,
+        'PARKING_SESSION_BUILDING_MISMATCH',
+      );
+    }
+    parkingSessionId = parkingSession._id;
+    buildingId = parkingSession.building;
+    slotId = parkingSession.slot || null;
   }
 
   // ── Tạo sự cố thông thường ───────────────────────────────────────────────
@@ -52,7 +84,8 @@ const createIncident = async (staffUser, payload = {}) => {
     resolvedBy:     payload.status === 'resolved' ? staffUser._id : null,
     resolvedAt:     payload.status === 'resolved' ? new Date() : null,
     resolutionNote: payload.status === 'resolved' ? String(payload.resolutionNote || payload.note || '').trim() : undefined,
-    parkingSession: payload.parkingSessionId || null,
+    parkingSession: parkingSessionId,
+    slot: slotId,
   });
 
   // Fix #5: chụp snapshot TRƯỚC populate để audit log lưu ID thuần
