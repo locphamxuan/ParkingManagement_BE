@@ -17,6 +17,25 @@ const {
 
 const Building = require('../../models/building/Building');
 
+const MOTORCYCLE_LICENSE_PLATE_TYPES = new Set(['motorcycle', 'ebike', 'emotorbike']);
+
+const vehicleKindFromLicensePlate = (vehicleType) => (
+  MOTORCYCLE_LICENSE_PLATE_TYPES.has(`${vehicleType || ''}`.toLowerCase())
+    ? 'motorcycle'
+    : 'car'
+);
+
+const vehicleKindFromPackage = (vehicleType) => {
+  const label = `${vehicleType?.code || ''} ${vehicleType?.name || ''}`.toLowerCase();
+  return /motor|xe m|máy|bike|moto/.test(label) ? 'motorcycle' : 'car';
+};
+
+const compatibleLicensePlateTypes = (vehicleKind) => (
+  vehicleKind === 'motorcycle'
+    ? [...MOTORCYCLE_LICENSE_PLATE_TYPES]
+    : ['car', 'suv', 'truck', 'other']
+);
+
 const listPackages = async (buildingId) => {
   const buildingFilter = { status: 'active', isActive: { $ne: false } };
   if (buildingId) {
@@ -48,11 +67,15 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
   if (!normalizedPlate) {
     throw new AppError('Biển số xe không hợp lệ', 400);
   }
-  const ownedPlate = await User.exists({
+  const plateQuery = plateMatchRegex(normalizedPlate) || normalizedPlate;
+  const plateOwner = await User.findOne({
     _id: userId,
-    'licensePlates.plateNumber': plateMatchRegex(normalizedPlate) || normalizedPlate,
-  });
-  if (!ownedPlate) {
+    'licensePlates.plateNumber': plateQuery,
+  }).select('licensePlates');
+  const registeredPlates = (plateOwner?.licensePlates || []).filter(
+    (plate) => normalizePlate(plate.plateNumber) === normalizedPlate,
+  );
+  if (registeredPlates.length === 0) {
     throw new AppError(
       'Biển số không thuộc tài khoản hiện tại',
       403,
@@ -71,8 +94,21 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
     throw new AppError('Biển số xe này đã đăng ký một gói dài hạn khác đang hoạt động hoặc chờ thanh toán', 400);
   }
 
-  const pkg = await LongTermPackage.findById(packageId);
+  const pkg = await LongTermPackage.findById(packageId).populate('vehicleType', 'name code');
   if (!pkg || !pkg.isActive) throw new AppError('Package not found or inactive', 404);
+  const packageVehicleTypeId = pkg.vehicleType?._id || pkg.vehicleType;
+  const packageVehicleKind = vehicleKindFromPackage(pkg.vehicleType);
+  const compatiblePlateTypes = compatibleLicensePlateTypes(packageVehicleKind);
+  const hasCompatiblePlate = registeredPlates.some(
+    (plate) => vehicleKindFromLicensePlate(plate.vehicleType) === packageVehicleKind,
+  );
+  if (!hasCompatiblePlate) {
+    throw new AppError(
+      'Biển số xe không đúng loại xe của gói dài hạn đã chọn',
+      409,
+      'PACKAGE_VEHICLE_TYPE_MISMATCH',
+    );
+  }
   const activeBuilding = await Building.exists({
     _id: pkg.building,
     status: 'active',
@@ -104,7 +140,12 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
         {
           _id: userId,
           walletBalance: { $gte: pkg.price },
-          'licensePlates.plateNumber': plateMatchRegex(normalizedPlate) || normalizedPlate,
+          licensePlates: {
+            $elemMatch: {
+              plateNumber: plateQuery,
+              vehicleType: { $in: compatiblePlateTypes },
+            },
+          },
         },
         { $inc: { walletBalance: -pkg.price } },
         { new: true, session: mongoSession },
@@ -112,13 +153,29 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
       if (!updatedUser) {
         const stillOwnsPlate = await User.exists({
           _id: userId,
-          'licensePlates.plateNumber': plateMatchRegex(normalizedPlate) || normalizedPlate,
+          'licensePlates.plateNumber': plateQuery,
         }).session(mongoSession);
         if (!stillOwnsPlate) {
           throw new AppError(
             'Biển số không còn thuộc tài khoản hiện tại',
             403,
             'PLATE_OWNERSHIP_REQUIRED',
+          );
+        }
+        const stillHasCompatiblePlate = await User.exists({
+          _id: userId,
+          licensePlates: {
+            $elemMatch: {
+              plateNumber: plateQuery,
+              vehicleType: { $in: compatiblePlateTypes },
+            },
+          },
+        }).session(mongoSession);
+        if (!stillHasCompatiblePlate) {
+          throw new AppError(
+            'Biển số xe không đúng loại xe của gói dài hạn đã chọn',
+            409,
+            'PACKAGE_VEHICLE_TYPE_MISMATCH',
           );
         }
         throw new AppError('Số dư ví không đủ', 400);
@@ -136,7 +193,7 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
         if (slot.usageType !== 'subscriber') {
           throw new AppError('Ô đỗ không thuộc dãy dành cho gói dài hạn', 409, 'SLOT_USAGE_MISMATCH');
         }
-        if (slot.vehicleType && `${slot.vehicleType}` !== `${pkg.vehicleType}`) {
+        if (slot.vehicleType && `${slot.vehicleType}` !== `${packageVehicleTypeId}`) {
           throw new AppError('Ô đỗ không đúng loại xe của gói', 409, 'SLOT_VEHICLE_TYPE_MISMATCH');
         }
         if (slot.reservable === false) {
