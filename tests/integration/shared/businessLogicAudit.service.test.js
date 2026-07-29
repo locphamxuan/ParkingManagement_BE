@@ -41,6 +41,7 @@ test('dirty and ambiguous dataset reports categories with sample IDs', async () 
   const vehicleType = await f.createVehicleType(building._id);
   const floor = await f.createFloor(building._id);
   const slot = await f.createSlot(building._id, floor._id, { status: 'reserved' });
+  const inactiveReservedSlot = await f.createSlot(building._id, floor._id, { status: 'reserved' });
   const availableSlot = await f.createSlot(building._id, floor._id, { status: 'available' });
   const pkg = await f.createPackage(building._id, vehicleType._id);
   const owner = await f.createUser({
@@ -75,7 +76,7 @@ test('dirty and ambiguous dataset reports categories with sample IDs', async () 
     package: pkg._id,
     building: building._id,
     plateNumber: '51F-333.33',
-    slot: slot._id,
+    slot: inactiveReservedSlot._id,
     startDate: new Date(now - 86_400_000),
     endDate: new Date(now - 60_000),
     status: 'expired',
@@ -142,14 +143,14 @@ test('dirty and ambiguous dataset reports categories with sample IDs', async () 
   expect(report.categories.activeLongTermSessionSlotNotOccupied.total).toBe(1);
   expect(report.categories.duplicatePayosOrderCode.total).toBe(1);
   expect(report.categories.multiplePendingSessionPayments.total).toBe(1);
-  expect(report.categories.subscriptionPlateMissingFromOwner.total).toBe(3);
+  expect(report.categories.subscriptionPlateMissingFromOwner.total).toBe(2);
   expect(report.categories.invalidStaffShiftReference.total).toBe(1);
   expect(report.categories.duplicateActiveFixedSlot.sampleIds).toHaveLength(1);
 
   // Mỗi dòng phải nêu rõ cách xử lý: gói mồ côi vs biển rời account.
   const ownerMismatch = report.categories.subscriptionPlateMissingFromOwner.details;
   expect(ownerMismatch.filter((row) => row.reason === 'owner_user_missing')).toHaveLength(1);
-  expect(ownerMismatch.filter((row) => row.reason === 'plate_not_in_owner_account')).toHaveLength(2);
+  expect(ownerMismatch.filter((row) => row.reason === 'plate_not_in_owner_account')).toHaveLength(1);
   expect(ownerMismatch.every((row) => row.plateNumber && row.subscriptionId)).toBe(true);
 
   await expect(applyUniqueIndexes(report)).rejects.toMatchObject({

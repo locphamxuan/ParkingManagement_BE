@@ -65,8 +65,11 @@ const auditBusinessLogicInvariants = async () => {
       { $group: { _id: '$parkingSession', count: { $sum: 1 }, payments: { $push: '$_id' } } },
       { $match: { count: { $gt: 1 } } },
     ]),
-    LongTermSubscription.find({ user: { $ne: null } })
-      .select('_id user plateNumber')
+    // Ownership must be valid for an entitlement that can still be used.
+    // Cancelled/expired subscriptions are immutable financial history and may
+    // legitimately outlive a deleted account.
+    LongTermSubscription.find({ status: 'active', user: { $ne: null } })
+      .select('_id user plateNumber status')
       .lean(),
     StaffShift.find({})
       .select('_id building shift staff')
@@ -185,7 +188,14 @@ const auditBusinessLogicInvariants = async () => {
   const slotStatus = new Map(slots.map((slot) => [`${slot._id}`, slot.status]));
 
   const inactiveReserved = inactiveFixedSubscriptions.filter(
-    (subscription) => slotStatus.get(`${subscription.slot}`) === 'reserved',
+    // A historical cancelled/expired subscription can retain its original
+    // fixed-slot reference. That is valid when a newer active subscription
+    // now owns the same reserved slot. Report only slots that are reserved
+    // without an active subscription holding them.
+    (subscription) => (
+      slotStatus.get(`${subscription.slot}`) === 'reserved' &&
+      !activeFixedSubscriptions.some((active) => `${active.slot}` === `${subscription.slot}`)
+    ),
   );
   const activeAvailable = activeFixedSubscriptions.filter(
     (subscription) => slotStatus.get(`${subscription.slot}`) === 'available',
@@ -212,6 +222,7 @@ const auditBusinessLogicInvariants = async () => {
     subscriptionId: `${subscription._id}`,
     plateNumber: subscription.plateNumber,
     userId: `${subscription.user}`,
+    status: subscription.status,
     reason: platesByOwner.has(`${subscription.user}`)
       ? 'plate_not_in_owner_account'
       : 'owner_user_missing',
