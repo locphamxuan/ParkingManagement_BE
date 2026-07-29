@@ -28,6 +28,8 @@ const {
   assertPackageVehicleKind,
   asObjectId,
   findDuplicateActiveSession,
+  isDuplicateActiveSessionError,
+  duplicateActiveSessionError,
   resolveLongTermSubscription,
   resolveCustomerUsageType,
   acceptableUsageTypes,
@@ -147,9 +149,13 @@ const checkIn = async (user, payload) => {
         throw new AppError('Building is at capacity', 409);
       }
 
-      const duplicate = await findDuplicateActiveSession(plateNumber, buildingId);
-      if (duplicate && !forceCheckIn) {
-        throw new AppError('Duplicate active plate detected', 400, 'DUPLICATE_PLATE_WARNING');
+      // Một biển số chỉ được có MỘT phiên active trong tòa này — bất biến vật lý
+      // (xe không thể ở trong bãi 2 lần). `forceCheckIn` KHÔNG bỏ qua được: nó chỉ
+      // dùng cho các cảnh báo mềm khác (dãy slot/loại xe). Muốn cho xe vào lại thì
+      // phải cho phiên cũ ra trước.
+      const duplicate = await findDuplicateActiveSession(plateNumber, buildingId, session);
+      if (duplicate) {
+        throw duplicateActiveSessionError();
       }
 
       if (longTerm) {
@@ -431,7 +437,7 @@ const checkIn = async (user, payload) => {
           plateImage,
           portraitImage,
           entryGate: entryGate?._id || null,
-          note: duplicate && forceCheckIn ? 'duplicate_bypassed' : '',
+          note: '',
         }],
         { session },
       );
@@ -454,18 +460,13 @@ const checkIn = async (user, payload) => {
 
       await logAudit(session, {
         actor: user._id,
-        action: walkInSlotUsageBypassed
-          ? 'FORCE_SLOT_USAGE_BYPASS'
-          : duplicate && forceCheckIn
-            ? 'DUPLICATE_PLATE_BYPASS'
-            : 'PARKING_SESSION_CHECK_IN',
+        action: walkInSlotUsageBypassed ? 'FORCE_SLOT_USAGE_BYPASS' : 'PARKING_SESSION_CHECK_IN',
         entityType: 'ParkingSession',
         entityId: `${created[0]._id}`,
         building: buildingId,
         after: created[0].toObject(),
         metadata: {
           plateNumber,
-          duplicatePlateWarning: Boolean(duplicate),
           forceCheckIn,
           overrideReason: forceCheckIn ? `${payload?.overrideReason || ''}`.trim() || null : null,
           slotUsageBypassed: walkInSlotUsageBypassed,
@@ -483,6 +484,12 @@ const checkIn = async (user, payload) => {
     });
 
     return result;
+  } catch (error) {
+    // Hai lượt check-in song song (2 staff, hoặc staff + kiosk) cùng lọt qua bước
+    // kiểm tra trùng → unique index chặn ở tầng DB. Đổi sang lỗi nghiệp vụ để staff
+    // hiểu phải làm gì, thay vì trả lỗi Mongo thô.
+    if (isDuplicateActiveSessionError(error)) throw duplicateActiveSessionError();
+    throw error;
   } finally {
     session.endSession();
   }

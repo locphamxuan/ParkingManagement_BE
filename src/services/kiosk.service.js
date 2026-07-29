@@ -12,6 +12,8 @@ const { normalizePlate, plateMatchRegex } = require('../utils/plate.util');
 const {
   activeSubscriptionMatch,
   findCompatibleSlots,
+  isDuplicateActiveSessionError,
+  duplicateActiveSessionError,
   loadVehicleKind,
   packageVehicleOf,
   assertPackageVehicleKind,
@@ -193,6 +195,10 @@ const selfCheckInByQr = async (payload = {}) => {
     });
 
     return result;
+  } catch (error) {
+    // Cùng bất biến với staff check-in: 1 biển = 1 phiên active / tòa (unique index).
+    if (isDuplicateActiveSessionError(error)) throw duplicateActiveSessionError();
+    throw error;
   } finally {
     session.endSession();
   }

@@ -70,12 +70,34 @@ const asObjectId = (value) =>
   mongoose.Types.ObjectId.isValid(value) ? value : null;
 
 // Trùng biển CHỈ xét trong CÙNG tòa nhà — phiên active ở tòa khác không chặn check-in
-// ở tòa này (mỗi tòa vận hành độc lập; vẫn có forceCheckIn để bỏ qua nếu cần).
-const findDuplicateActiveSession = async (plateNumber, buildingId) => {
+// ở tòa này (mỗi tòa vận hành độc lập). Bất biến này được chốt ở tầng DB bằng unique
+// partial index `uniq_active_session_per_plate_building`; hàm này chỉ để báo lỗi đẹp
+// TRƯỚC khi ghi, KHÔNG phải cơ chế bảo vệ duy nhất.
+const findDuplicateActiveSession = async (plateNumber, buildingId, mongoSession = null) => {
   const filter = { plateNumber, status: 'active' };
   if (buildingId) filter.building = buildingId;
-  return ParkingSession.findOne(filter);
+  const query = ParkingSession.findOne(filter);
+  if (mongoSession) query.session(mongoSession);
+  return query;
 };
+
+/**
+ * Lỗi 11000 của unique index phiên-active → lỗi nghiệp vụ ổn định, dùng CHUNG cho
+ * staff check-in và kiosk để hai đường vào bãi không lệch thông điệp/mã lỗi.
+ */
+const isDuplicateActiveSessionError = (error) => {
+  if (error?.code !== 11000) return false;
+  if (`${error?.message || ''}`.includes('uniq_active_session_per_plate_building')) return true;
+
+  const keys = Object.keys(error?.keyPattern || {}).sort();
+  return keys.length === 2 && keys[0] === 'building' && keys[1] === 'plateNumber';
+};
+
+const duplicateActiveSessionError = () => new AppError(
+  'This plate already has an active parking session in this building. Check the vehicle out before checking it in again.',
+  409,
+  'DUPLICATE_ACTIVE_SESSION',
+);
 
 /**
  * ĐỊNH NGHĨA DUY NHẤT của "gói dài hạn đang hiệu lực" — dùng chung cho cả check-in
@@ -289,6 +311,8 @@ module.exports = {
   POPULATE_PACKAGE_VEHICLE_TYPE,
   asObjectId,
   findDuplicateActiveSession,
+  isDuplicateActiveSessionError,
+  duplicateActiveSessionError,
   activeSubscriptionMatch,
   resolveLongTermSubscription,
   resolveCustomerUsageType,

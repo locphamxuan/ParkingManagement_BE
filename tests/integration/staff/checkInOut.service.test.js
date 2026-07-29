@@ -46,13 +46,23 @@ describe('checkIn (walk-in)', () => {
     })).rejects.toMatchObject({ errorCode: 'PORTRAIT_REQUIRED' });
   });
 
-  test('trùng biển đang đỗ (không forceCheckIn) → 400 DUPLICATE_PLATE_WARNING', async () => {
+  // Một biển = một phiên active/tòa là bất biến VẬT LÝ (xe không ở trong bãi 2 lần),
+  // được chốt bằng unique index. forceCheckIn KHÔNG bỏ qua được nữa.
+  test('trùng biển đang đỗ → 409 DUPLICATE_ACTIVE_SESSION, kể cả khi forceCheckIn', async () => {
     // Thêm slot thứ 2 để không chạm giới hạn sức chứa trước khi tới nhánh trùng biển.
     await f.createSlot(building._id, floor._id, { zone: zone._id, vehicleType: vt._id, usageType: 'walk_in' });
     await checkIn(staff, { building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG });
+
     await expect(checkIn(staff, {
       building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG,
-    })).rejects.toMatchObject({ errorCode: 'DUPLICATE_PLATE_WARNING' });
+    })).rejects.toMatchObject({ statusCode: 409, errorCode: 'DUPLICATE_ACTIVE_SESSION' });
+
+    await expect(checkIn(staff, {
+      building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG,
+      forceCheckIn: true, overrideReason: 'khách nói xe đã ra',
+    })).rejects.toMatchObject({ statusCode: 409, errorCode: 'DUPLICATE_ACTIVE_SESSION' });
+
+    expect(await ParkingSession.countDocuments({ plateNumber: '51F-123.45', status: 'active' })).toBe(1);
   });
 
   test('không có ca hôm nay → 403 NO_SHIFT_ASSIGNED', async () => {
