@@ -1,5 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const compression = require('compression');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const env = require('./config/env');
@@ -23,6 +24,10 @@ app.use((_req, res, next) => {
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   next();
 });
+
+// Most dashboard, audit and ledger responses are JSON. Compressing responses
+// over 1 KB lowers transfer time without changing any business payloads.
+app.use(compression({ threshold: 1024 }));
 
 if (env.nodeEnv === 'production') {
   app.set('trust proxy', 1);
