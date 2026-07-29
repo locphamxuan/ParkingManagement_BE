@@ -23,6 +23,9 @@ const { assertEvidenceImage } = require('../../../utils/evidence');
 const {
   resolveVehicleTypeId,
   vehicleKindFromType,
+  loadVehicleKind,
+  packageVehicleOf,
+  assertPackageVehicleKind,
   asObjectId,
   findDuplicateActiveSession,
   resolveLongTermSubscription,
@@ -42,6 +45,18 @@ const isSlotUsageCompatible = (slot, usageType) => {
     if (chain.length && !chain.includes(slot.usageType)) return false;
   }
   return true;
+};
+
+// Loại xe của GÓI là ràng buộc cứng: ô dành cho ô tô không nhận xe của gói xe máy
+// và ngược lại. Slot "vạn năng" (vehicleType = null) hợp với mọi gói.
+const assertSlotMatchesPackageVehicle = async (slot, packageVehicleKind, mongoSession) => {
+  if (!slot || !packageVehicleKind) return;
+  const slotKind = await loadVehicleKind(slot.vehicleType, mongoSession);
+  assertPackageVehicleKind(
+    packageVehicleKind,
+    slotKind,
+    `This slot is configured for ${slotKind} vehicles but the long-term package covers ${packageVehicleKind} vehicles`,
+  );
 };
 
 const resolveSelectedZone = async ({ zoneId, buildingId, vehicleType, usageType, mongoSession, forceCheckIn }) => {
@@ -142,6 +157,18 @@ const checkIn = async (user, payload) => {
         let ltSlotId;
         let ltSlotUsageBypassed = false;
 
+        // Gói dài hạn gắn với 1 loại xe — đó mới là nguồn sự thật lúc vào bãi.
+        // Camera nhận diện sai / client gửi sai loại xe KHÔNG được đẩy xe của gói
+        // xe máy vào ô ô tô (và ngược lại); forceCheckIn cũng không bỏ qua được.
+        const { id: packageVehicleTypeId, kind: packageVehicleKind } = packageVehicleOf(longTerm);
+        assertPackageVehicleKind(
+          packageVehicleKind,
+          vehicleTypeRecord ? vehicleKindFromType(vehicleTypeRecord) : null,
+          'The requested vehicle type does not match the long-term package vehicle type',
+        );
+        const ltVehicleType = packageVehicleTypeId || vehicleType;
+        const ltIsMotorcycle = packageVehicleKind ? packageVehicleKind === 'motorcycle' : isMotorcycle;
+
         // Ưu tiên SLOT CỐ ĐỊNH của gói (nếu user đã chọn lúc mua): ô đang giữ chỗ
         // 'reserved' → chuyển 'occupied'. Nếu bị chiếm ('occupied') thì báo lỗi để
         // staff xử lý (user có thể báo sự cố).
@@ -149,19 +176,32 @@ const checkIn = async (user, payload) => {
         if (fixedSlotId) {
           ltSlot = await occupyFixedSlotForCheckIn(longTerm, buildingId, session);
           ltSlotId = ltSlot._id;
+          // Dữ liệu cũ/hỏng: slot cố định gắn loại xe khác gói → dừng lại thay vì
+          // tạo phiên lệch loại xe (kéo theo tính phí vượt giờ sai).
+          await assertSlotMatchesPackageVehicle(ltSlot, packageVehicleKind, session);
         } else {
           const selectedZone = await resolveSelectedZone({
             zoneId: requestedZoneId,
             buildingId,
-            vehicleType,
+            vehicleType: ltVehicleType,
             usageType: 'subscriber',
             mongoSession: session,
             forceCheckIn,
           });
-          // Gói floating: gán 1 slot trống thuộc dãy "subscriber" + đúng loại xe.
+          // Gói floating: gán 1 slot trống thuộc dãy "subscriber" + đúng loại xe CỦA GÓI.
           // Staff chọn → validate tương thích; không chọn → tự gợi ý slot phù hợp.
-          ltSlotId = isMotorcycle ? null : asObjectId(payload?.slot || payload?.slotId);
-          if (selectedZone && !isMotorcycle && !ltSlotId) {
+          const requestedSlotId = asObjectId(payload?.slot || payload?.slotId);
+          // Xe máy chỉ chọn DÃY (hệ thống tự gán ô), nhưng slot gửi kèm vẫn phải
+          // đúng loại xe của gói — báo lỗi thay vì bỏ qua âm thầm.
+          if (requestedSlotId && ltIsMotorcycle) {
+            await assertSlotMatchesPackageVehicle(
+              await ParkingSlot.findById(requestedSlotId).session(session),
+              packageVehicleKind,
+              session,
+            );
+          }
+          ltSlotId = ltIsMotorcycle ? null : requestedSlotId;
+          if (selectedZone && !ltIsMotorcycle && !ltSlotId) {
             throw new AppError('Please select a parking slot in the selected zone', 400, 'SLOT_REQUIRED');
           }
           if (ltSlotId) {
@@ -169,6 +209,7 @@ const checkIn = async (user, payload) => {
             if (!ltSlot || (ltSlot.building && String(ltSlot.building) !== String(buildingId))) {
               throw new AppError('Invalid slot', 400, 'INVALID_SLOT');
             }
+            await assertSlotMatchesPackageVehicle(ltSlot, packageVehicleKind, session);
             if (ltSlot.status !== 'available') {
               throw new AppError('The slot is occupied or unavailable', 409, 'SLOT_NOT_AVAILABLE');
             }
@@ -183,7 +224,7 @@ const checkIn = async (user, payload) => {
             }
           } else {
             const [suggested] = await findCompatibleSlots(
-              buildingId, vehicleType, 'subscriber', session, selectedZone?._id || null,
+              buildingId, ltVehicleType, 'subscriber', session, selectedZone?._id || null,
             );
             if (!suggested) {
               throw new AppError(
@@ -209,8 +250,9 @@ const checkIn = async (user, payload) => {
             user: longTerm.user,
             fee: 0,
             paymentMethod: 'long_term',
-            // Loại xe của phiên lấy theo slot/dãy (manager cấu hình); camera chỉ là fallback.
-            vehicleType: ltSlot.vehicleType || vehicleType,
+            // Loại xe của phiên theo GÓI (đã đối chiếu với slot ở trên); slot/camera
+            // chỉ là fallback khi gói không còn loại xe hợp lệ.
+            vehicleType: ltVehicleType || ltSlot.vehicleType,
             vehicleBrand,
             plateImage,
             portraitImage,
