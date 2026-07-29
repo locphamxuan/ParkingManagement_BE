@@ -87,26 +87,35 @@ test('an expired PayOS link is retired before a new QR is created', async () => 
   })).toBe(1);
 });
 
-test('a second paid order for a completed session requires reconciliation', async () => {
+// Khách quét QR CŨ sau khi xe đã ra bằng đường khác (vd staff thu tiền mặt lúc QR
+// còn pending): tiền có thật nhưng phiên không còn active → phải chuyển
+// 'reconciliation_required' để đối soát, KHÔNG âm thầm cộng ví toà.
+test('a paid order for a session that is no longer active requires reconciliation', async () => {
   const { staff, parkingSession } = await seedSession();
   await paymentService.initiatePayment(staff, parkingSession._id, EXIT_EVIDENCE);
-  await paymentService.settleSessionPayment(730001);
   await ParkingSession.updateOne({ _id: parkingSession._id }, { $set: { status: 'completed' } });
-  await Payment.create({
+
+  const settlement = await paymentService.settleSessionPayment(730001);
+
+  expect(settlement).toEqual({ settled: false, status: 'reconciliation_required' });
+  expect((await Payment.findOne({ payosOrderCode: 730001 })).status)
+    .toBe('reconciliation_required');
+});
+
+// Chốt chặn DB: không thể tồn tại 2 ý định PayOS còn sống/đã thu trên cùng 1 phiên.
+test('the database rejects a second live PayOS intent for one session', async () => {
+  const { staff, parkingSession } = await seedSession();
+  await paymentService.initiatePayment(staff, parkingSession._id, EXIT_EVIDENCE);
+
+  await expect(Payment.create({
     building: parkingSession.building,
     parkingSession: parkingSession._id,
     type: 'session',
     method: 'payos',
     amount: 30000,
     status: 'pending',
-    payosOrderCode: 730002,
-  });
-
-  const second = await paymentService.settleSessionPayment(730002);
-
-  expect(second).toEqual({ settled: false, status: 'reconciliation_required' });
-  expect((await Payment.findOne({ payosOrderCode: 730002 })).status)
-    .toBe('reconciliation_required');
+    payosOrderCode: 730099,
+  })).rejects.toMatchObject({ code: 11000 });
 });
 
 test('PayOS checkout restores an active fixed slot to reserved', async () => {

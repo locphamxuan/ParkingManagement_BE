@@ -83,6 +83,55 @@ const getSessionPaymentIntent = async (staffUser, sessionId) => {
   };
 };
 
+// Unique index `uniq_live_payos_session_intent` (Payment) cho phép TỐI ĐA 1 ý định
+// PayOS còn sống/đã thu trên mỗi phiên. Nên lỗi 11000 ở đây KHÔNG phải lỗi hệ thống
+// mà là "một request song song vừa tạo trước" → phải trả về đúng intent đó, tuyệt đối
+// không sinh QR thứ hai (khách quét cả 2 = thu tiền 2 lần).
+const isLiveSessionIntentConflict = (error) => {
+  if (error?.code !== 11000) return false;
+  if (`${error?.message || ''}`.includes('uniq_live_payos_session_intent')) return true;
+  return Object.keys(error?.keyPattern || {}).length === 1
+    && error.keyPattern.parkingSession !== undefined;
+};
+
+const acquireSessionIntent = async (parkingSession, paymentData) => {
+  const existing = await getPendingSessionIntent(parkingSession._id);
+  if (existing) return existing;
+
+  try {
+    return await createPayosIntent({
+      paymentData,
+      linkData: { amount: paymentData.amount, description: 'Phi giu xe PBMS' },
+    });
+  } catch (error) {
+    if (!isLiveSessionIntentConflict(error)) throw error;
+
+    // Request song song đã thắng. Nếu nó đã được THU luôn thì đây là checkout, không
+    // phải tạo QR mới.
+    const settled = await Payment.exists({
+      parkingSession: parkingSession._id,
+      type: 'session',
+      method: 'payos',
+      status: 'success',
+    });
+    if (settled) {
+      throw new AppError(
+        'This PayOS payment has already been received. Complete the verified checkout instead of creating another QR.',
+        409,
+        'PAYOS_PAYMENT_ALREADY_RECEIVED',
+      );
+    }
+
+    const recovered = await getPendingSessionIntent(parkingSession._id).catch(() => null);
+    if (recovered) return recovered;
+    throw new AppError(
+      'A PayOS QR for this session is already being created. Retry in a moment.',
+      409,
+      'PAYOS_INTENT_IN_PROGRESS',
+    );
+  }
+};
+
 const initiatePayment = async (staffUser, sessionId, payload = {}) => {
   if (!sessionId) throw new AppError('sessionId is required', 400);
 
@@ -134,31 +183,16 @@ const initiatePayment = async (staffUser, sessionId, payload = {}) => {
     );
   }
 
-  let intent = await getPendingSessionIntent(parkingSession._id);
-  if (!intent) {
-    try {
-      intent = await createPayosIntent({
-        paymentData: {
-          building: parkingSession.building,
-          parkingSession: parkingSession._id,
-          type: 'session',
-          amount: fee,
-          user: parkingSession.user || null,
-          staff: staffUser._id,
-          note: 'Parking fee via PayOS QR',
-          checkoutDraft,
-        },
-        linkData: {
-          amount: fee,
-          description: 'Phi giu xe PBMS',
-        },
-      });
-    } catch (error) {
-      if (error?.code !== 11000 || !error?.keyPattern?.parkingSession) throw error;
-      intent = await getPendingSessionIntent(parkingSession._id);
-      if (!intent) throw error;
-    }
-  }
+  const intent = await acquireSessionIntent(parkingSession, {
+    building: parkingSession.building,
+    parkingSession: parkingSession._id,
+    type: 'session',
+    amount: fee,
+    user: parkingSession.user || null,
+    staff: staffUser._id,
+    note: 'Parking fee via PayOS QR',
+    checkoutDraft,
+  });
 
   if (!intent.payment.checkoutDraft?.verifiedAt) {
     await Payment.updateOne(
