@@ -19,9 +19,9 @@ const from = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 10);
 const to = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
 
 describe('getReport', () => {
-  test('loại cancellation_fee khỏi doanh thu — cọc gốc đã tính qua type reservation, tránh đếm trùng', async () => {
+  test('loại cancellation_fee khỏi doanh thu — khoản gốc đã được ghi nhận, tránh đếm trùng', async () => {
     await Payment.create([
-      { building: building._id, type: 'reservation', method: 'wallet', amount: 100000, status: 'success' },
+      { building: building._id, type: 'subscription', method: 'wallet', amount: 100000, status: 'success' },
       { building: building._id, type: 'cancellation_fee', method: 'wallet', amount: 15000, status: 'success' },
     ]);
 
@@ -66,6 +66,23 @@ describe('getReport', () => {
     });
   });
 
+  // Đặt chỗ theo giờ đã bị gỡ khỏi sản phẩm: report KHÔNG được có nhóm doanh thu
+  // 'reservation' nữa, nhưng tiền của các bản ghi CŨ vẫn phải nằm trong grossRevenue
+  // (rơi vào 'other') — không được im lặng làm hụt doanh thu kỳ cũ.
+  test('legacy reservation payments stay in gross revenue but are not a product source', async () => {
+    await Payment.create([
+      { building: building._id, type: 'session', method: 'wallet', amount: 100000, status: 'success' },
+      { building: building._id, type: 'reservation', method: 'wallet', amount: 50000, status: 'success' },
+    ]);
+
+    const report = await svc.getReport({ from, to, buildingId: building._id });
+    const sources = report.items[0].bySource;
+
+    expect(report.summary.grossRevenue).toBe(150000);
+    expect(sources).not.toHaveProperty('reservation');
+    expect(sources).toEqual({ parking: 100000, subscription: 0, penalty: 0, other: 50000 });
+  });
+
   test('source totals partition gross revenue without counting incident metadata twice', async () => {
     const incidentId = new mongoose.Types.ObjectId();
     await Payment.create([
@@ -74,14 +91,6 @@ describe('getReport', () => {
         type: 'session',
         method: 'wallet',
         amount: 100000,
-        status: 'success',
-        incident: incidentId,
-      },
-      {
-        building: building._id,
-        type: 'reservation',
-        method: 'wallet',
-        amount: 50000,
         status: 'success',
         incident: incidentId,
       },
@@ -107,9 +116,9 @@ describe('getReport', () => {
 
     expect(sources).toEqual({
       parking: 100000,
-      reservation: 50000,
       subscription: 300000,
       penalty: 25000,
+      other: 0,
     });
     expect(Object.values(sources).reduce((sum, amount) => sum + amount, 0))
       .toBe(report.summary.grossRevenue);

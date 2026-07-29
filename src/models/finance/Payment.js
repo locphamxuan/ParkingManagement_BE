@@ -7,6 +7,10 @@ const PAYMENT_STATUS = [
   "refunded",
   "reconciliation_required",
 ];
+// "reservation" là loại LỊCH SỬ: tính năng đặt chỗ theo giờ đã bị gỡ khỏi hệ thống
+// và không còn code path nào tạo Payment loại này. Giữ trong enum để các bản ghi tài
+// chính CŨ vẫn đọc/aggregate được (xoá enum sẽ làm validate + report dữ liệu cũ hỏng).
+// Muốn gỡ hẳn: xem src/scripts/auditLegacyReservationPayments.js.
 const PAYMENT_TYPES = ["session", "reservation", "subscription", "penalty", "refund", "topup", "cancellation_fee"];
 const PAYMENT_METHODS = ["cash", "wallet", "qr", "card", "payos"];
 

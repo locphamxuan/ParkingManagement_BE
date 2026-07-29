@@ -86,6 +86,20 @@ tính năng này như đang sống dù đã xoá 6 ngày trước đó — đã 
 `ReservationsPage`/`StaffReservationsPage`/`userApi.reservations.*`) và Mobile
 (xoá chế độ `bookingType:'hourly'` khỏi `useReservations`, giữ lại mua gói).
 
+Đợt dọn 2026-07-29 gỡ nốt phần "trôi" còn lại trên cả 3 repo: swagger tag
+`User/Staff - Reservations` + `Manager - Reservation Policy` (không route nào
+dùng), nhóm doanh thu `bySource.reservation` (thay bằng `bySource.other`), các
+field FE đã chết (`activeReservation`/`isReservation`/`reservationRemainingFee`),
+nhánh check-in `checkInKind:'reservation'`, tab + route `reservations` của Mobile.
+**Chỉ còn 3 luồng khách hàng**: gửi xe vãng lai · gửi xe có tài khoản (không gói)
+· gói dài hạn (slot floating hoặc slot cố định).
+
+**Giữ lại có chủ đích (tương thích dữ liệu LỊCH SỬ, không phải tính năng)**:
+`Payment.type='reservation'`, `BuildingWalletTransaction.reason='reservation_fee'`,
+collection `reservation_policies` + model `ReservationPolicy` (nay là refund policy
+của gói), audit action `*_RESERVATION`. Xoá enum chỉ được phép sau khi
+`src/scripts/auditLegacyReservationPayments.js` trả về 0 ở mọi môi trường thật.
+
 ### Long-term package (gói dài hạn)
 - **Mặc định floating** (không giữ slot cố định); staff/hệ thống gán slot trống
   dãy `subscriber` lúc check-in. Hết bãi → gói cũng bị chặn theo capacity (không

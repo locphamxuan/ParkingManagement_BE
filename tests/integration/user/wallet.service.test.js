@@ -74,7 +74,7 @@ describe('listTransactions', () => {
   test('phân trang + lọc theo type', async () => {
     await WalletTransaction.create([
       { user: user._id, type: 'credit', amount: 100, balanceAfter: 100, reason: 'payos_topup' },
-      { user: user._id, type: 'debit', amount: 50, balanceAfter: 50, reason: 'reservation_deposit' },
+      { user: user._id, type: 'debit', amount: 50, balanceAfter: 50, reason: 'parking_checkout' },
     ]);
     const all = await walletService.listTransactions(user._id, {});
     expect(all.pagination.total).toBe(2);

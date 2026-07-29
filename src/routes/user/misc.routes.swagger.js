@@ -172,7 +172,7 @@
  * /api/users/buildings:
  *   get:
  *     tags: [User - Buildings]
- *     summary: List active buildings for reservation browsing
+ *     summary: List active buildings available for parking and long-term packages
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200: { description: Buildings returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Building' } } } } } } ] } } } }

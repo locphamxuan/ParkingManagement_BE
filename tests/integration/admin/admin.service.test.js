@@ -124,7 +124,7 @@ describe('revenue.service', () => {
     const b = await f.createBuilding();
     await Payment.create([
       { building: b._id, type: 'session', method: 'cash', amount: 20000, status: 'success' },
-      { building: b._id, type: 'reservation', method: 'wallet', amount: 30000, status: 'success' },
+      { building: b._id, type: 'subscription', method: 'wallet', amount: 30000, status: 'success' },
       { building: b._id, type: 'session', method: 'cash', amount: 10000, status: 'pending' }, // bỏ (pending)
     ]);
     const from = new Date(Date.now() - 24 * 3600 * 1000);

@@ -79,7 +79,12 @@ const swaggerPathAdditions = {
         { in: 'query', name: 'page', schema: { type: 'integer', minimum: 1, default: 1 } },
         { in: 'query', name: 'limit', schema: { type: 'integer', minimum: 1, maximum: 200, default: 30 } },
         { in: 'query', name: 'buildingId', schema: { type: 'string', format: 'objectId' } },
-        { in: 'query', name: 'type', schema: { type: 'string', enum: ['session', 'reservation', 'subscription', 'penalty', 'refund', 'topup', 'cancellation_fee'] } },
+        {
+          in: 'query',
+          name: 'type',
+          description: 'Payment type filter. `reservation` is a legacy value kept so historical records stay searchable; it is never produced by the current system.',
+          schema: { type: 'string', enum: ['session', 'reservation', 'subscription', 'penalty', 'refund', 'topup', 'cancellation_fee'] },
+        },
         { in: 'query', name: 'method', schema: { type: 'string', enum: ['cash', 'wallet', 'qr', 'card', 'payos'] } },
         { in: 'query', name: 'status', schema: { type: 'string', enum: ['pending', 'success', 'failed', 'refunded', 'reconciliation_required'] } },
         { in: 'query', name: 'from', schema: { type: 'string', format: 'date-time' } },

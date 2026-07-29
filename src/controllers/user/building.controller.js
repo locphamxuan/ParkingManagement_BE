@@ -169,7 +169,7 @@ const listSlotsForFloor = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/users/buildings
- * Returns all active buildings for the reservation wizard.
+ * Returns all active buildings for building/package browsing.
  */
 const listBuildings = asyncHandler(async (req, res) => {
   // operatingHours + status cho phép FE hiển thị "đang mở / đang đóng cửa".
