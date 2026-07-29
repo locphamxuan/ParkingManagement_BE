@@ -69,6 +69,15 @@ const paymentSchema = new mongoose.Schema(
     payosPaymentLinkId: { type: String, default: null },
     payosCheckoutUrl: { type: String, default: null },
     payosQrCode: { type: String, default: null },
+    checkoutDraft: {
+      exitPlateImage: { type: String, default: null },
+      exitPortraitImage: { type: String, default: null },
+      exitGate: { type: mongoose.Schema.Types.ObjectId, ref: 'Gate', default: null },
+      verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      staffShift: { type: mongoose.Schema.Types.ObjectId, ref: 'StaffShift', default: null },
+      verifiedAt: { type: Date, default: null },
+      bypassMismatch: { type: Boolean, default: false },
+    },
   },
   { timestamps: true }
 );
