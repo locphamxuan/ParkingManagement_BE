@@ -294,8 +294,30 @@ const scanVehicle = async (staffUser, image, buildingId) => {
   if (!buildingId) throw new AppError('building is required', 400, 'BUILDING_REQUIRED');
   assertBuildingScope(staffUser, buildingId);
 
-  const { plateNumber, plateConfidence, vehicleType, brand, brandConfidence } =
-    await visionScanService.scanVehicleImage(image);
+  // Plate recognition is an assistive step, never a reason to block gate
+  // operations.  A staff member can still enter a plate manually or use the
+  // QR scanner when the configured OCR provider is unavailable.  Invalid
+  // camera payloads remain hard 4xx errors; only a provider outage degrades
+  // gracefully.
+  let scanStatus = 'available';
+  let vision = {
+    plateNumber: '',
+    plateConfidence: 0,
+    vehicleType: null,
+    brand: null,
+    brandConfidence: 0,
+  };
+  try {
+    vision = await visionScanService.scanVehicleImage(image);
+  } catch (err) {
+    if (!['AI_SCAN_FAILED', 'AI_SCAN_NOT_CONFIGURED'].includes(err?.errorCode)) throw err;
+    scanStatus = 'unavailable';
+    // Keep the operational cause in server logs for monitoring, while the
+    // client receives a successful manual-entry fallback instead of a 502.
+    console.error('[staff-scan] OCR provider unavailable; using manual-entry fallback:', err.message);
+  }
+
+  const { plateNumber, plateConfidence, vehicleType, brand, brandConfidence } = vision;
 
   // Resolve the owner account only when we have a valid plate.
   let account = {
@@ -326,6 +348,7 @@ const scanVehicle = async (staffUser, image, buildingId) => {
   );
 
   return {
+    scanStatus,
     plateNumber, // canonical VN form, or '' if unreadable
     plateConfidence,
     vehicleType, // detected by AI (car|motorcycle|null)
