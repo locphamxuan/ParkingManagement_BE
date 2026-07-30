@@ -29,6 +29,20 @@ afterAll(async () => { await db.close(); });
 beforeEach(async () => { await db.clear(); await seedScene(); });
 
 describe('checkIn (walk-in)', () => {
+  test('QR check-in retains only portrait evidence', async () => {
+    const created = await checkIn(staff, {
+      building: building._id,
+      plateNumber: '51F-123.45',
+      vehicleType: vt._id,
+      plateImage: IMG,
+      portraitImage: IMG,
+      identificationMethod: 'qr',
+    });
+
+    expect(created.plateImage).toBeNull();
+    expect(created.portraitImage).toBe(IMG);
+  });
+
   test('tạo phiên active, tự gán slot walk-in, slot → occupied', async () => {
     const created = await checkIn(staff, {
       building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id,
