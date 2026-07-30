@@ -4,7 +4,7 @@ const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../..
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../../utils/plate.util');
 const visionScanService = require('../visionScan.service');
 const { assertStaffHasActiveShift } = require('../../shared/entryAuthorization.service');
-const { asObjectId, calculateFee, calculateLongTermOverageFee, activeSubscriptionMatch, resolveVehicleTypeId, slotCompatibilityFilter, usageRanker } = require('./helpers');
+const { asObjectId, calculateRegularSessionFee, calculateLongTermOverageFee, activeSubscriptionMatch, resolveVehicleTypeId, slotCompatibilityFilter, usageRanker } = require('./helpers');
 
 // Lõi truy vấn dùng chung staff/manager — caller phải tự xác thực quyền building trước.
 const listActiveByFilter = async (buildingFilter) => {
@@ -35,7 +35,7 @@ const listActiveByFilter = async (buildingFilter) => {
         isActive: true,
       }).lean()
     : [];
-  // Map: `${buildingId}|${vehicleTypeId}` → PricePolicy[] để calculateFee tra cứu O(1).
+  // Map: `${buildingId}|${vehicleTypeId}` → PricePolicy[] để tính phí O(1).
   const policyMap = new Map();
   for (const p of rawPolicies) {
     const k = `${p.building}|${p.vehicleType}`;
@@ -44,7 +44,7 @@ const listActiveByFilter = async (buildingFilter) => {
     policyMap.set(k, arr);
   }
 
-  // Attach the current fee (per manager's PricePolicy, fallback by kind) + member flag
+  // Attach the current fee from the manager-configured PricePolicy + member flag.
   // so the staff UI can show the amount and who owns the vehicle.
   return Promise.all(
     sessions.map(async (s) => {
@@ -59,10 +59,14 @@ const listActiveByFilter = async (buildingFilter) => {
         obj.overageHours = overageHours;
         obj.maxHoursPerDay = maxHoursPerDay;
       } else {
-        // Session thường: dùng policies đã preload, không query DB thêm.
+        // Session thường: dùng policies đã preload, không query DB thêm. A
+        // missing policy is surfaced to the UI; it must never look like free
+        // parking or fall back to a hidden flat rate.
         const vtId = s.vehicleType?._id || s.vehicleType || null;
         const sessionPolicies = policyMap.get(`${s.building}|${vtId}`) || [];
-        obj.currentFee = await calculateFee(s, sessionPolicies);
+        const quote = await calculateRegularSessionFee(s, sessionPolicies);
+        obj.currentFee = quote.hasPolicy ? quote.fee : null;
+        obj.pricePolicyConfigured = quote.hasPolicy;
       }
       return obj;
     })

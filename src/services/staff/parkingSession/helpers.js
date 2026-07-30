@@ -6,7 +6,7 @@ const {
   LongTermSubscription,
   VehicleType,
 } = require('../../../models');
-const { calculateParkingFee } = require('../../../utils/feeEngine');
+const { computeFee, calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { expireStaleSubscriptions } = require('../../shared/slotLifecycle.service');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
@@ -293,25 +293,19 @@ const calculateLongTermOverageFee = async (parkingSession, now = new Date()) => 
 };
 
 /**
- * Compute the parking fee (VND) for a session — price by vehicle type via
- * PricePolicy, falling back to a flat hourly rate by kind. Mirrors checkOut.
- * Gói dài hạn (long_term): miễn phí trong hạn mức/ngày, chỉ tính phần vượt.
+ * Quote a regular session exclusively from the building's active PricePolicy.
+ * A missing policy is intentionally exposed to callers so checkout can stop
+ * instead of silently charging a legacy fallback rate.
  */
-const calculateFee = async (parkingSession, preloadedPolicies) => {
-  if (parkingSession.fee && parkingSession.fee > 0) return parkingSession.fee;
-  const now = new Date();
-  if (parkingSession.paymentMethod === 'long_term') {
-    const { fee } = await calculateLongTermOverageFee(parkingSession, now);
-    return fee;
-  }
-  const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
-  let fee = await calculateParkingFee(parkingSession.building, vtId, parkingSession.entryTime, now, preloadedPolicies);
-  if (!fee || fee <= 0) {
-    const kind = vehicleKindFromType(parkingSession.vehicleType);
-    const hours = Math.max(1, Math.ceil((now.getTime() - new Date(parkingSession.entryTime).getTime()) / (1000 * 60 * 60)));
-    fee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
-  }
-  return fee;
+const calculateRegularSessionFee = async (parkingSession, preloadedPolicies, now = new Date()) => {
+  const vehicleTypeId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
+  return computeFee({
+    buildingId: parkingSession.building,
+    vehicleTypeId,
+    start: parkingSession.entryTime,
+    end: now,
+    preloadedPolicies,
+  });
 };
 
 module.exports = {
@@ -333,6 +327,6 @@ module.exports = {
   usageRanker,
   findCompatibleSlots,
   findCapacityForBuilding,
-  calculateFee,
+  calculateRegularSessionFee,
   calculateLongTermOverageFee,
 };

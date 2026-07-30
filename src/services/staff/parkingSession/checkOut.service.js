@@ -18,7 +18,7 @@ const { calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { sendNotificationEmail } = require('../../../utils/email');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
-const { vehicleKindFromType } = require('./helpers');
+const { vehicleKindFromType, calculateRegularSessionFee } = require('./helpers');
 const { assertStaffHasActiveShift } = require('../../shared/entryAuthorization.service');
 const { finalizeSlotAfterCheckout } = require('../../shared/slotLifecycle.service');
 const { resolveOperationalGate } = require('../../shared/gateAuthorization.service');
@@ -339,19 +339,15 @@ async function _computeRegularFee(parkingSession, payload, mongoSession) {
     }
     return { fee: payment.amount, feeMethod };
   }
-  let fee = Number(parkingSession.fee || 0);
-  if (!fee) {
-    const now = new Date();
-    const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
-    // Price by vehicle type via PricePolicy (peak/regular split).
-    fee = await calculateParkingFee(parkingSession.building, vtId, parkingSession.entryTime, now);
-    if (!fee || fee <= 0) {
-      // No PricePolicy configured → fallback to a flat hourly rate by vehicle kind.
-      const kind = vehicleKindFromType(parkingSession.vehicleType);
-      const hours = Math.max(1, Math.ceil((now.getTime() - new Date(parkingSession.entryTime).getTime()) / (1000 * 60 * 60)));
-      fee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
-    }
+  const quote = await calculateRegularSessionFee(parkingSession);
+  if (!quote.hasPolicy) {
+    throw new AppError(
+      'No active price policy is configured for this building and vehicle type',
+      409,
+      'PRICE_POLICY_NOT_CONFIGURED',
+    );
   }
+  let fee = quote.fee;
 
   if (payload.adjustedFee !== undefined && payload.adjustedFee !== null) {
     if (!payload.adjustmentReason) {

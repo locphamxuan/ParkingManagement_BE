@@ -10,7 +10,7 @@ const {
   getPendingSessionIntent,
 } = require('../../payment/paymentIntent.service');
 const buildingWalletService = require('../../manager/buildingWallet.service');
-const { calculateFee } = require('./helpers');
+const { calculateRegularSessionFee } = require('./helpers');
 const { assertStaffHasActiveShift } = require('../../shared/entryAuthorization.service');
 const { resolveOperationalGate } = require('../../shared/gateAuthorization.service');
 
@@ -174,7 +174,15 @@ const initiatePayment = async (staffUser, sessionId, payload = {}) => {
 
   const checkoutDraft = await buildCheckoutDraft(staffUser, parkingSession, payload);
 
-  const fee = await calculateFee(parkingSession);
+  const quote = await calculateRegularSessionFee(parkingSession);
+  if (!quote.hasPolicy) {
+    throw new AppError(
+      'No active price policy is configured for this building and vehicle type',
+      409,
+      'PRICE_POLICY_NOT_CONFIGURED',
+    );
+  }
+  const fee = quote.fee;
   if (!fee || fee <= 0) {
     throw new AppError(
       'This session has no fee due under its current package.',

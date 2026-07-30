@@ -97,18 +97,30 @@ describe('checkIn (walk-in)', () => {
 });
 
 describe('checkOut (walk-in, tiền mặt)', () => {
-  test('hoàn tất phiên: tính phí fallback, slot → available', async () => {
+  test('hoàn tất phiên: tính phí theo PricePolicy, kể cả dưới 10 phút, slot → available', async () => {
+    await f.createPricePolicy(building._id, vt._id, { hourlyRate: 60000 });
     const created = await checkIn(staff, {
       building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG,
     });
-    // Lùi entryTime 2 giờ để phát sinh phí.
-    await ParkingSession.findByIdAndUpdate(created._id, { entryTime: new Date(Date.now() - 2 * 3600 * 1000) });
+    // 5 phút vẫn phải tính phí theo policy — không còn miễn phí grace period ở FE/BE.
+    await ParkingSession.findByIdAndUpdate(created._id, { entryTime: new Date(Date.now() - 5 * 60 * 1000) });
 
     const done = await checkOut(staff, created._id, { paymentMethod: 'cash' });
     expect(done.status).toBe('completed');
     expect(done.fee).toBeGreaterThan(0);
     const freshSlot = await ParkingSlot.findById(slot._id);
     expect(freshSlot.status).toBe('available');
+  });
+
+  test('chặn checkout khi chưa cấu hình PricePolicy cho loại xe', async () => {
+    const created = await checkIn(staff, {
+      building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG,
+    });
+
+    await expect(checkOut(staff, created._id, { paymentMethod: 'cash' }))
+      .rejects.toMatchObject({ statusCode: 409, errorCode: 'PRICE_POLICY_NOT_CONFIGURED' });
+
+    expect((await ParkingSession.findById(created._id)).status).toBe('active');
   });
 
   test('checkout phiên không tồn tại → 404', async () => {
