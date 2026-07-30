@@ -38,6 +38,10 @@ OCR_PROVIDER=paddle
 PADDLE_OCR_URL=http://localhost:8868
 ```
 
+Khi deploy lên Render, `localhost` không phải máy đang chạy API Node. Deploy service
+`pbms-ocr` từ `render.yaml`, sau đó đặt `PADDLE_OCR_URL` của `pbms-api` thành URL
+công khai của service đó (ví dụ `https://<pbms-ocr-url>`), rồi redeploy API.
+
 Bỏ trống `OCR_PROVIDER` → BE tự chọn: có `PADDLE_OCR_URL` dùng paddle, có `GEMINI_API_KEY` dùng gemini. Không cấu hình gì → endpoint `/scan` trả lỗi 503 (không có mock fallback).
 
 ## API

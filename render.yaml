@@ -1,5 +1,17 @@
 services:
   - type: web
+    name: pbms-ocr
+    runtime: python
+    plan: free
+    rootDir: ocr-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+  - type: web
     name: pbms-api
     runtime: node
     plan: free
@@ -32,6 +44,12 @@ services:
       - key: EMAIL_USER
         sync: false
       - key: EMAIL_PASS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OCR_PROVIDER
+        sync: false
+      - key: PADDLE_OCR_URL
         sync: false
       - key: KIOSK_DEVICE_TOKEN
         generateValue: true
