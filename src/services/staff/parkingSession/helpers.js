@@ -12,19 +12,23 @@ const { expireStaleSubscriptions } = require('../../shared/slotLifecycle.service
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
 
 // Resolve a 'car'|'motorcycle' kind (or an ObjectId) to the building's VehicleType _id.
+/**
+ * Đổi 'car' | 'motorcycle' (hoặc ObjectId sẵn có) thành VehicleType của tòa nhà.
+ *
+ * Phân loại BẮT BUỘC đi qua `vehicleKindFromType` — cùng hàm mà toàn bộ luồng
+ * check-in dùng để đọc lại loại xe. Trước đây hàm này có bộ regex riêng, và
+ * "M-OTO-rcycle" khớp nhánh ô tô `/oto/` nên `findOne` trả về loại xe MÁY cho
+ * yêu cầu 'car'; ngay sau đó `assertPackageVehicleKind` đọc lại record ấy thành
+ * 'motorcycle' và từ chối mọi gói ô tô với PACKAGE_VEHICLE_TYPE_MISMATCH.
+ * Một nguồn sự thật duy nhất khiến hai bước này không thể mâu thuẫn nhau nữa.
+ */
 const resolveVehicleTypeId = async (buildingId, kind, session = null) => {
   if (!kind) return null;
   if (mongoose.Types.ObjectId.isValid(kind)) return kind;
-  const k = `${kind}`.toLowerCase();
-  const codes = k === 'motorcycle'
-    ? ['MOTORCYCLE', 'MOTORBIKE', 'XE_MAY', 'BIKE', 'MOTO']
-    : ['CAR', 'OTO', 'AUTO', 'XE_OTO'];
-  const nameRx = k === 'motorcycle' ? /xe m|motor|máy/i : /ô t|oto|car|auto/i;
-  const vt = await VehicleType.findOne({
-    building: buildingId,
-    $or: [{ code: { $in: codes } }, { name: nameRx }],
-  }).session(session);
-  return vt?._id || null;
+  const wanted = `${kind}`.toLowerCase() === 'motorcycle' ? 'motorcycle' : 'car';
+  const types = await VehicleType.find({ building: buildingId }).session(session);
+  const match = types.find((vt) => vehicleKindFromType(vt) === wanted);
+  return match?._id || null;
 };
 
 // Map a VehicleType code/name to our two kinds for fallback pricing.

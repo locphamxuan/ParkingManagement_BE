@@ -229,36 +229,46 @@ const scanWithPaddle = async ({ mediaType, data }) => {
 
 /* ── Provider selection ─────────────────────────────────────────────────── */
 
-// OCR_PROVIDER thắng khi được set; nếu không, tự chọn theo cấu hình sẵn có.
-// KHÔNG có nhánh mock: thiếu cấu hình luôn ném lỗi rõ ràng cho staff thấy.
-const resolveProvider = () => {
-  if (env.ocrProvider === 'paddle') {
-    if (!env.paddleOcrUrl) {
-      throw new AppError(
-        'PaddleOCR chưa được cấu hình (thiếu PADDLE_OCR_URL).',
-        503,
-        'AI_SCAN_NOT_CONFIGURED'
-      );
+const PROVIDER_RUNNERS = { paddle: scanWithPaddle, gemini: scanWithGemini };
+
+const isConfigured = {
+  paddle: () => Boolean(env.paddleOcrUrl),
+  gemini: () => Boolean(env.geminiApiKey),
+};
+
+const NOT_CONFIGURED_MESSAGE = {
+  paddle: 'PaddleOCR chưa được cấu hình (thiếu PADDLE_OCR_URL).',
+  gemini: 'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY).',
+};
+
+/**
+ * Thứ tự provider sẽ thử. OCR_PROVIDER thắng khi được set và luôn đứng đầu;
+ * provider còn lại — nếu đã cấu hình trong cùng .env — là DỰ PHÒNG cho trường
+ * hợp provider chính chết. Một microservice OCR ngừng chạy không được phép làm
+ * liệt cả cổng vào khi vẫn còn đường nhận diện khác dùng được.
+ * KHÔNG có nhánh mock: thiếu cấu hình luôn ném lỗi rõ ràng cho staff thấy.
+ */
+const resolveProviderChain = () => {
+  const primary =
+    env.ocrProvider === 'paddle' || env.ocrProvider === 'gemini' ? env.ocrProvider : null;
+
+  if (primary) {
+    if (!isConfigured[primary]()) {
+      throw new AppError(NOT_CONFIGURED_MESSAGE[primary], 503, 'AI_SCAN_NOT_CONFIGURED');
     }
-    return 'paddle';
+    const backup = primary === 'paddle' ? 'gemini' : 'paddle';
+    return isConfigured[backup]() ? [primary, backup] : [primary];
   }
-  if (env.ocrProvider === 'gemini') {
-    if (!env.geminiApiKey) {
-      throw new AppError(
-        'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY).',
-        503,
-        'AI_SCAN_NOT_CONFIGURED'
-      );
-    }
-    return 'gemini';
+
+  const chain = ['paddle', 'gemini'].filter((provider) => isConfigured[provider]());
+  if (chain.length === 0) {
+    throw new AppError(
+      'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY hoặc PADDLE_OCR_URL). Vui lòng liên hệ quản trị viên.',
+      503,
+      'AI_SCAN_NOT_CONFIGURED'
+    );
   }
-  if (env.paddleOcrUrl) return 'paddle';
-  if (env.geminiApiKey) return 'gemini';
-  throw new AppError(
-    'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY hoặc PADDLE_OCR_URL). Vui lòng liên hệ quản trị viên.',
-    503,
-    'AI_SCAN_NOT_CONFIGURED'
-  );
+  return chain;
 };
 
 /**
@@ -274,9 +284,33 @@ const scanVehicleImage = async (image) => {
   // Validate first: a malformed/oversized/mismatched frame must never reach an
   // external provider, regardless of which one is configured.
   const parsed = parseImage(image);
-  const provider = resolveProvider();
-  if (provider === 'paddle') return scanWithPaddle(parsed);
-  return scanWithGemini(parsed);
+  const chain = resolveProviderChain();
+
+  for (let i = 0; i < chain.length; i += 1) {
+    const provider = chain[i];
+    const isLast = i === chain.length - 1;
+    try {
+      return await PROVIDER_RUNNERS[provider](parsed);
+    } catch (err) {
+      // Chỉ sự cố hạ tầng (AI_SCAN_FAILED: service không phản hồi / HTTP lỗi)
+      // mới đáng chuyển provider. Model trả dữ liệu sai định dạng
+      // (AI_SCAN_BAD_OUTPUT) là lỗi thật — phải nổi lên cho staff thấy.
+      if (isLast || err?.errorCode !== 'AI_SCAN_FAILED') throw err;
+      console.error(
+        `[vision-scan] ${provider} không phản hồi, chuyển sang ${chain[i + 1]}:`,
+        err.message
+      );
+    }
+  }
+
+  /* c8 ignore next */
+  throw new AppError('AI scan thất bại.', 502, 'AI_SCAN_FAILED');
 };
 
-module.exports = { scanVehicleImage, parseImage, MAX_DECODED_BYTES, SUPPORTED_MEDIA_TYPES };
+module.exports = {
+  scanVehicleImage,
+  parseImage,
+  resolveProviderChain,
+  MAX_DECODED_BYTES,
+  SUPPORTED_MEDIA_TYPES,
+};
