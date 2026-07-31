@@ -47,12 +47,35 @@ const kindOfCategory = (code) =>
 const labelOfCategory = (code) =>
   CATEGORY_BY_CODE.get(`${code || ''}`.toLowerCase())?.label || null;
 
+/** Category hợp lệ → chuỗi đã chuẩn hoá; còn lại → null (KHÔNG đoán giá trị mặc định). */
+const normalizeCategory = (code) => {
+  const normalized = `${code || ''}`.trim().toLowerCase();
+  return CATEGORY_BY_CODE.has(normalized) ? normalized : null;
+};
+
+/**
+ * Điều kiện MUA GÓI dài hạn: xe của khách chỉ mua được gói mà danh mục loại xe của
+ * tòa trỏ đúng THỂ LOẠI của nó — so khớp tuyệt đối, không nới sang cùng nhóm 2/4
+ * bánh và không suy từ tên/mã danh mục. `VehicleType` chưa map category (null) thì
+ * trả false để phía gọi báo manager đi cấu hình, thay vì đoán bừa lúc chạy.
+ *
+ * Cố ý KHÁC `kindOfCategory` ở trên: nhóm 2/4 bánh chỉ dùng để khớp ô đỗ vật lý
+ * (ô xe máy không chứa được xe tải), không dùng để xét quyền mua gói.
+ */
+const isCategoryEligible = (vehicleCategory, packageCategory) => {
+  const vehicle = normalizeCategory(vehicleCategory);
+  const target = normalizeCategory(packageCategory);
+  return Boolean(vehicle && target && vehicle === target);
+};
+
 module.exports = {
   VEHICLE_CATEGORIES,
   VEHICLE_CATEGORY_CODES,
   DEFAULT_VEHICLE_CATEGORY,
   VEHICLE_KINDS,
   isVehicleCategory,
+  normalizeCategory,
+  isCategoryEligible,
   kindOfCategory,
   labelOfCategory,
 };

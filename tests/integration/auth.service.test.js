@@ -20,27 +20,16 @@ beforeAll(async () => { await db.connect(); });
 afterAll(async () => { await db.close(); });
 beforeEach(async () => { await db.clear(); jest.clearAllMocks(); });
 
+// Đăng ký trực tiếp đã bị gỡ (bắt buộc xác thực email qua OTP) — các test dưới
+// chỉ cần một user có sẵn, nên seed thẳng qua model.
+// Luồng đăng ký OTP có bộ test riêng: tests/integration/security/otpRegistration.test.js
+const NEW_PASSWORD = 'correct-horse-battery';
 const reg = (over = {}) =>
-  authService.register({ email: 'a@test.com', password: 'secret1', fullName: 'A', ...over });
+  User.create({ email: 'a@test.com', password: 'secret1', fullName: 'A', role: 'user', ...over });
 
 describe('register', () => {
-  test('tạo user role=user, trả token + user công khai (ẩn password)', async () => {
-    const res = await reg();
-    expect(res.token).toBeTruthy();
-    expect(res.user.email).toBe('a@test.com');
-    expect(res.user.role).toBe('user');
-    expect(res.user.password).toBeUndefined();
-  });
-
-  test('email trùng → 409', async () => {
-    await reg();
-    await expect(reg()).rejects.toMatchObject({ statusCode: 409 });
-  });
-
-  test('số điện thoại trùng → 409 PHONE_TAKEN', async () => {
-    await reg({ phone: '0900000001' });
-    await expect(reg({ email: 'b@test.com', phone: '0900000001' }))
-      .rejects.toMatchObject({ errorCode: 'PHONE_TAKEN' });
+  test('không còn export register (chặn đường vòng qua OTP)', () => {
+    expect(authService.register).toBeUndefined();
   });
 });
 
@@ -106,13 +95,13 @@ describe('forgotPassword + resetPassword', () => {
       { email: 'a@test.com' },
       { resetPasswordToken: hashed, resetPasswordExpires: new Date(Date.now() + 60000) },
     );
-    await authService.resetPassword(plain, 'newpass1');
-    const res = await authService.login({ email: 'a@test.com', password: 'newpass1' });
+    await authService.resetPassword(plain, NEW_PASSWORD);
+    const res = await authService.login({ email: 'a@test.com', password: NEW_PASSWORD });
     expect(res.token).toBeTruthy();
   });
 
   test('resetPassword token sai → 400', async () => {
-    await expect(authService.resetPassword('badtoken', 'newpass1'))
+    await expect(authService.resetPassword('badtoken', NEW_PASSWORD))
       .rejects.toMatchObject({ statusCode: 400 });
   });
 });
@@ -155,10 +144,10 @@ describe('requestPasswordResetSms + resetPasswordSms', () => {
     await authService.requestPasswordResetSms('0911111111');
     const otp = await getOtpFor('0911111111');
 
-    const res = await authService.resetPasswordSms({ phone: '0911111111', otp, newPassword: 'newpass1' });
+    const res = await authService.resetPasswordSms({ phone: '0911111111', otp, newPassword: NEW_PASSWORD });
     expect(res.token).toBeTruthy();
 
-    const login = await authService.login({ email: '0911111111@test.com', password: 'newpass1' });
+    const login = await authService.login({ email: '0911111111@test.com', password: NEW_PASSWORD });
     expect(login.token).toBeTruthy();
 
     const record = await PhoneOtp.findOne({ phone: '0911111111' });
@@ -170,7 +159,7 @@ describe('requestPasswordResetSms + resetPasswordSms', () => {
     await authService.requestPasswordResetSms('0911111111');
 
     await expect(
-      authService.resetPasswordSms({ phone: '0911111111', otp: '000000', newPassword: 'newpass1' }),
+      authService.resetPasswordSms({ phone: '0911111111', otp: '000000', newPassword: NEW_PASSWORD }),
     ).rejects.toMatchObject({ statusCode: 400 });
 
     await expect(authService.login({ email: '0911111111@test.com', password: 'secret1' })).resolves.toBeTruthy();
@@ -183,12 +172,12 @@ describe('requestPasswordResetSms + resetPasswordSms', () => {
 
     for (let i = 0; i < 5; i += 1) {
       await expect(
-        authService.resetPasswordSms({ phone: '0911111111', otp: '000000', newPassword: 'newpass1' }),
+        authService.resetPasswordSms({ phone: '0911111111', otp: '000000', newPassword: NEW_PASSWORD }),
       ).rejects.toMatchObject({ statusCode: 400 });
     }
 
     await expect(
-      authService.resetPasswordSms({ phone: '0911111111', otp, newPassword: 'newpass1' }),
+      authService.resetPasswordSms({ phone: '0911111111', otp, newPassword: NEW_PASSWORD }),
     ).rejects.toMatchObject({ statusCode: 400 });
   });
 

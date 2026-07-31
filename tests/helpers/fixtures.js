@@ -73,13 +73,27 @@ const createBuilding = (over = {}) => {
   });
 };
 
+// category = thể loại xe chuẩn dùng cho điều kiện mua gói (constants/vehicle).
+// Mặc định 'car' để các fixture cũ vẫn mua được gói; test nào cần kiểm tra ràng buộc
+// loại xe thì truyền tường minh ('suv', 'motorcycle', null = chưa map, ...).
+/**
+ * Suy thể loại xe từ code/name CHỈ để dựng dữ liệu test cho gọn — production đọc
+ * thẳng `VehicleType.category`, không đoán. Test nào quan tâm tới category thì
+ * truyền thẳng (kể cả `null` để dựng danh mục chưa map).
+ */
+const guessCategory = (over = {}) => {
+  const s = `${over.code || ''} ${over.name || ''}`.toLowerCase();
+  if (/motor|xe m|máy|bike|moto/.test(s)) return 'motorcycle';
+  return 'car';
+};
+
 const createVehicleType = (buildingId, over = {}) => {
   const n = next();
   return VehicleType.create({
     building: buildingId,
     code: over.code || `VT${n}`,
     name: over.name || `Vehicle ${n}`,
-    category: over.category || 'car',
+    category: over.category !== undefined ? over.category : guessCategory(over),
     isActive: over.isActive ?? true,
   });
 };
@@ -168,12 +182,15 @@ const createShift = (buildingId, over = {}) => {
 };
 
 const createStaffShift = (buildingId, staffId, shiftId, over = {}) => {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  // businessTime derives the business date from this instant. Keeping the
+  // current instant avoids using the test runner's local calendar date, which
+  // can differ from the configured business timezone around midnight.
+  const workDate = over.workDate ?? new Date();
   return StaffShift.create({
     building: buildingId,
     staff: staffId,
     shift: shiftId,
-    workDate: over.workDate || today,
+    workDate,
     status: over.status || 'active',
     ...(over.gate ? { gate: over.gate } : {}),
   });

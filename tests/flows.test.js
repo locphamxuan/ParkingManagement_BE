@@ -7,6 +7,7 @@ jest.mock('../src/utils/email', () => ({
 
 const mongoose = require('mongoose');
 const { connect, clearAll, stop } = require('./db');
+const f = require('./helpers/fixtures');
 
 const Building = require('../src/models/building/Building');
 const VehicleType = require('../src/models/building/VehicleType');
@@ -37,7 +38,7 @@ const seedBase = async () => {
     // Mở 24/24 để test không flaky theo giờ chạy (mặc định 06:00–22:00 sẽ chặn check-in ban đêm).
     operatingHours: { open: '00:00', close: '23:59' },
   });
-  const vt = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô' });
+  const vt = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô', category: 'car' });
   const floor = await Floor.create({ building: building._id, code: 'F1', name: 'Floor 1', capacity: 100 });
   await PricePolicy.create({ building: building._id, vehicleType: vt._id, name: 'Reg', type: 'regular', hourlyRate: RATE });
   await ReservationPolicy.create({ building: building._id });
@@ -103,8 +104,9 @@ describe('Walk-in (khách vãng lai)', () => {
 describe('Gói floating & capacity', () => {
   const mkPkgSub = async (building, vt, plateNumber) => {
     const pkg = await LongTermPackage.create({ building: building._id, vehicleType: vt._id, name: 'M', code: 'M1', durationDays: 30, price: 100, maxHoursPerDay: 5 });
+    const user = await f.createUser();
     return LongTermSubscription.create({
-      user: new mongoose.Types.ObjectId(), package: pkg._id, building: building._id,
+      user: user._id, package: pkg._id, building: building._id,
       plateNumber, status: 'active',
       startDate: new Date(Date.now() - HOUR), endDate: new Date(Date.now() + 30 * 24 * HOUR),
     });

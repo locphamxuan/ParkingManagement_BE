@@ -37,6 +37,8 @@ const start = async () => {
   // Cron Schedulers
   // 1. Subscription Expiry Job: Reminds users of upcoming expiry (7/5/3/1 days), marks expired, and releases grace slots.
   require('./jobs/subscriptionExpiry.job').start();
+  // 2. Keep-Alive Job: Prevents server from going into sleep mode on free deployment tiers.
+  require('./jobs/keepAlive.job').start();
 
   // Resolve active port dynamically
   const port = await findAvailablePort(env.port);

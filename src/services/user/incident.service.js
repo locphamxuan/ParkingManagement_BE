@@ -30,40 +30,68 @@ const createIncident = async (userId, payload = {}) => {
     throw new AppError('type is required', 400, 'INVALID_INCIDENT_TYPE');
   }
 
-  let buildingId = payload.buildingId && mongoose.isValidObjectId(payload.buildingId) ? payload.buildingId : null;
-  let slotId = null;
-
-  // Ưu tiên slot user chỉ định → lấy building từ slot.
-  if (payload.slotId && mongoose.isValidObjectId(payload.slotId)) {
-    const slot = await ParkingSlot.findById(payload.slotId).select('_id building');
-    if (slot) {
-      slotId = slot._id;
-      buildingId = buildingId || slot.building;
-    }
+  const requestedBuildingId = payload.buildingId && mongoose.isValidObjectId(payload.buildingId)
+    ? payload.buildingId
+    : null;
+  if (payload.buildingId && !requestedBuildingId) {
+    throw new AppError('buildingId không hợp lệ', 400, 'INVALID_BUILDING');
+  }
+  if (payload.slotId && !mongoose.isValidObjectId(payload.slotId)) {
+    throw new AppError('slotId không hợp lệ', 400, 'INVALID_SLOT');
   }
 
-  // Nếu vẫn chưa có building/slot → suy từ gói hoặc phiên đang hoạt động của user.
-  if (!buildingId || !slotId) {
-    const activeSub = await LongTermSubscription.findOne({ user: userId, status: 'active' })
+  // ── Quan hệ hợp lệ của người báo cáo với tòa nhà (server-derived) ────────────
+  // Client KHÔNG được tự chọn tòa nhà tùy ý: phải có gói đang hiệu lực hoặc một phiên
+  // gửi xe (đang đỗ / đã hoàn tất) trong đúng tòa đó. Nếu không, sự cố sẽ mồ côi hoặc
+  // gắn nhầm tòa — quản lý tòa khác phải xử lý việc không thuộc phạm vi của mình.
+  const [userSubscriptions, userSessions] = await Promise.all([
+    LongTermSubscription.find({ user: userId, status: 'active' })
       .sort('-updatedAt')
-      .select('building slot');
-    if (activeSub) {
-      buildingId = buildingId || activeSub.building;
-      slotId = slotId || activeSub.slot || null;
-    }
-  }
-  if (!buildingId) {
-    const activeSession = await ParkingSession.findOne({ user: userId, status: 'active' })
+      .select('building slot'),
+    ParkingSession.find({ user: userId, status: { $in: ['active', 'completed'] } })
       .sort('-entryTime')
-      .select('building slot');
-    if (activeSession) {
-      buildingId = buildingId || activeSession.building;
-      slotId = slotId || activeSession.slot || null;
-    }
+      .limit(50)
+      .select('building slot status'),
+  ]);
+  const relatedBuildingIds = new Set([
+    ...userSubscriptions.map((item) => `${item.building}`),
+    ...userSessions.map((item) => `${item.building}`),
+  ]);
+
+  let buildingId = requestedBuildingId;
+  if (buildingId && !relatedBuildingIds.has(`${buildingId}`)) {
+    throw new AppError(
+      'Bạn chưa từng gửi xe hoặc mua gói tại tòa nhà này nên không thể báo cáo sự cố ở đây.',
+      403,
+      'BUILDING_RELATION_REQUIRED',
+    );
   }
 
+  // Không chỉ định tòa → suy từ quan hệ gần nhất (gói trước, rồi phiên gửi xe).
+  if (!buildingId) {
+    buildingId = userSubscriptions[0]?.building || userSessions[0]?.building || null;
+  }
   if (!buildingId) {
     throw new AppError('Không xác định được tòa nhà của sự cố. Vui lòng chọn tòa nhà.', 400, 'BUILDING_REQUIRED');
+  }
+
+  // Slot phải THUỘC ĐÚNG tòa nhà đã xác thực — nếu không, sự cố trỏ sang ô của tòa khác.
+  let slotId = null;
+  if (payload.slotId) {
+    const slot = await ParkingSlot.findOne({ _id: payload.slotId, building: buildingId }).select('_id');
+    if (!slot) {
+      throw new AppError(
+        'Ô đỗ không thuộc tòa nhà của sự cố',
+        409,
+        'SLOT_BUILDING_MISMATCH',
+      );
+    }
+    slotId = slot._id;
+  } else {
+    // Không chọn ô → lấy ô từ quan hệ của chính user TRONG tòa nhà đó (nếu có).
+    const relatedInBuilding = userSubscriptions.find((item) => `${item.building}` === `${buildingId}` && item.slot)
+      || userSessions.find((item) => `${item.building}` === `${buildingId}` && item.slot);
+    slotId = relatedInBuilding?.slot || null;
   }
 
   // 'type' hợp lệ nếu thuộc nhóm cố định (sự cố tự thân) HOẶC khớp 1 violation type

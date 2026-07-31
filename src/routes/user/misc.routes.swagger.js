@@ -172,7 +172,7 @@
  * /api/users/buildings:
  *   get:
  *     tags: [User - Buildings]
- *     summary: List active buildings for reservation browsing
+ *     summary: List active buildings available for parking and long-term packages
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200: { description: Buildings returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Building' } } } } } } ] } } } }
@@ -222,23 +222,27 @@
  *     tags: [User - Feedback]
  *     summary: Submit feedback for a completed parking session
  *     security: [{ bearerAuth: [] }]
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [parkingSessionId, rating, comment], properties: { buildingId: { type: string, format: objectId }, parkingSessionId: { type: string, format: objectId }, rating: { type: integer, minimum: 1, maximum: 5, example: 5 }, comment: { type: string, maxLength: 1000, example: Fast check-out and clean parking area. }, portraitImageUrl: { type: string, nullable: true }, plateImageUrl: { type: string, nullable: true } } } } } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [parkingSession, rating, comment], properties: { building: { type: string, format: objectId }, parkingSession: { type: string, format: objectId }, rating: { type: integer, minimum: 1, maximum: 5, example: 5 }, comment: { type: string, maxLength: 1000, example: Fast check-out and clean parking area. } } } } } }
  *     responses:
  *       201: { description: Feedback submitted successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Feedback submitted }, data: { type: object, properties: { feedback: { $ref: '#/components/schemas/Feedback' } } } } } ] } } } }
  *   get:
  *     tags: [User - Feedback]
- *     summary: Browse all feedback (public, no authentication required)
+ *     summary: Browse published reviews (public, no authentication required)
  *     description: >
- *       Mounted before the auth middleware in user/index.js — unlike the other
- *       /feedbacks routes (which authenticate per-route internally), this one is
- *       genuinely public, e.g. for showing building reviews to prospective users.
+ *       Genuinely public — mounted before the auth middleware in user/index.js.
+ *       Returns the PublicFeedback DTO only: no reviewer identity, no parking
+ *       session or plate data, no image URLs, no repliedBy. Only feedback with
+ *       status `resolved` is published. Anything needing the full record must
+ *       use GET /api/manager/buildings/{buildingId}/feedbacks (authenticated,
+ *       building-scoped) or GET /api/users/feedbacks/me (owner only).
  *     parameters:
  *       - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
  *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
  *       - { in: query, name: building, schema: { type: string, format: objectId } }
+ *       - { in: query, name: buildingId, schema: { type: string, format: objectId }, description: Alias for `building`. }
  *       - { in: query, name: rating, schema: { type: integer, minimum: 1, maximum: 5 } }
  *     responses:
- *       200: { description: Feedback returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Feedback' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
+ *       200: { description: Published reviews returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/PublicFeedback' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
  * /api/users/feedbacks/me:
  *   get:
  *     tags: [User - Feedback]

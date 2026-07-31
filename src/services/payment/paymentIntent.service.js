@@ -93,13 +93,18 @@ const getPendingSessionIntent = async (parkingSessionId) => {
   }).sort({ createdAt: -1 });
   if (!payment) return null;
 
-  if (payment.payosCheckoutUrl) {
-    return { payment, ...linkPayload(payment) };
-  }
-
   try {
     const link = await payosService.getPaymentLink(payment.payosOrderCode);
-    const saved = await persistLink(payment._id, link);
+    const status = String(link?.status || '').toUpperCase();
+    if (status === 'EXPIRED' || status === 'CANCELLED') {
+      await Payment.updateOne(
+        { _id: payment._id, status: 'pending' },
+        { $set: { status: 'failed', note: `${payment.note || ''} | payos_link_${status.toLowerCase()}`.trim() } },
+      );
+      return null;
+    }
+
+    const saved = link?.checkoutUrl ? await persistLink(payment._id, link) : payment;
     return { payment: saved, ...linkPayload(saved), ...link };
   } catch (error) {
     throw new AppError(

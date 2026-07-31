@@ -12,6 +12,12 @@ const { normalizePlate, plateMatchRegex } = require('../utils/plate.util');
 const {
   activeSubscriptionMatch,
   findCompatibleSlots,
+  isDuplicateActiveSessionError,
+  duplicateActiveSessionError,
+  loadVehicleKind,
+  packageVehicleOf,
+  assertPackageVehicleKind,
+  POPULATE_PACKAGE_VEHICLE_TYPE,
 } = require('./staff/parkingSession/helpers');
 const { assertBuildingAcceptsEntry } = require('./shared/entryAuthorization.service');
 const { occupyFixedSlotForCheckIn } = require('./shared/slotLifecycle.service');
@@ -64,6 +70,7 @@ const selfCheckInByQr = async (payload = {}) => {
       const subscription = await LongTermSubscription.findOne(subFilter)
         .sort({ updatedAt: -1 })
         .populate('slot')
+        .populate(POPULATE_PACKAGE_VEHICLE_TYPE)
         .session(session);
 
       if (!subscription) {
@@ -98,11 +105,21 @@ const selfCheckInByQr = async (payload = {}) => {
         throw new AppError('Phương tiện đang có phiên gửi xe trong bãi.', 409, 'DUPLICATE_PLATE');
       }
 
+      // Gói floating: chỉ nhận ô đúng loại xe CỦA GÓI (hoặc ô "vạn năng"
+      // vehicleType=null) — gói xe máy không được cấp ô ô tô và ngược lại.
+      const { id: packageVehicleTypeId, kind: packageVehicleKind } = packageVehicleOf(subscription);
+
       let slot = null;
       if (subscription.slot) {
         slot = await occupyFixedSlotForCheckIn(subscription, buildingId, session);
+        const slotVehicleKind = await loadVehicleKind(slot.vehicleType, session);
+        assertPackageVehicleKind(
+          packageVehicleKind,
+          slotVehicleKind,
+          `This fixed slot is configured for ${slotVehicleKind} vehicles but the long-term package covers ${packageVehicleKind} vehicles`,
+        );
       } else {
-        [slot] = await findCompatibleSlots(buildingId, null, 'subscriber', session);
+        [slot] = await findCompatibleSlots(buildingId, packageVehicleTypeId, 'subscriber', session);
       }
       if (!slot) {
         throw new AppError(
@@ -133,7 +150,7 @@ const selfCheckInByQr = async (payload = {}) => {
           {
             building: buildingId,
             slot: slot._id,
-            vehicleType: slot.vehicleType || null,
+            vehicleType: packageVehicleTypeId || slot.vehicleType || null,
             plateNumber: subscription.plateNumber,
             user: subscription.user,
             staff: null,
@@ -165,6 +182,10 @@ const selfCheckInByQr = async (payload = {}) => {
     });
 
     return result;
+  } catch (error) {
+    // Cùng bất biến với staff check-in: 1 biển = 1 phiên active / tòa (unique index).
+    if (isDuplicateActiveSessionError(error)) throw duplicateActiveSessionError();
+    throw error;
   } finally {
     session.endSession();
   }

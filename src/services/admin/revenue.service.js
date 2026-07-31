@@ -111,7 +111,6 @@ const getReport = async ({ from, to, buildingId } = {}) => {
         walletAmount: moneyWhen({ $and: [earned, { $eq: ['$method', 'wallet'] }] }),
         onlineAmount: moneyWhen({ $and: [earned, { $in: ['$method', ONLINE_PAYMENT_METHODS] }] }),
         parkingAmount: moneyWhen(earnedType('session')),
-        reservationAmount: moneyWhen(earnedType('reservation')),
         subscriptionAmount: moneyWhen(earnedType('subscription')),
         penaltyAmount: moneyWhen(earnedType('penalty')),
       },
@@ -145,11 +144,21 @@ const getReport = async ({ from, to, buildingId } = {}) => {
         walletAmount: 1,
         qrAmount: '$onlineAmount',
         onlineAmount: 1,
+        // Nguồn doanh thu của các sản phẩm ĐANG bán. `other` là phần còn lại của
+        // grossRevenue không thuộc 3 nhóm trên — hiện chỉ gồm bản ghi LỊCH SỬ
+        // (vd Payment.type='reservation' từ tính năng đặt chỗ đã bỏ). Giữ `other`
+        // để tổng 4 mục luôn khớp grossRevenue mà không quảng bá đặt chỗ như một
+        // sản phẩm đang hoạt động.
         bySource: {
           parking: '$parkingAmount',
-          reservation: '$reservationAmount',
           subscription: '$subscriptionAmount',
           penalty: '$penaltyAmount',
+          other: {
+            $subtract: [
+              '$grossRevenue',
+              { $add: ['$parkingAmount', '$subscriptionAmount', '$penaltyAmount'] },
+            ],
+          },
         },
       },
     },
@@ -186,11 +195,12 @@ const getReport = async ({ from, to, buildingId } = {}) => {
     grandTotal: summary.grossRevenue,
     summary,
     definitions: {
-      grossRevenue: 'Successful parking, reservation, subscription and penalty payments.',
+      grossRevenue: 'Successful parking, subscription and penalty payments, plus legacy record types kept for historical periods.',
       refunds: 'Money successfully returned to customers.',
       netRevenue: 'Gross revenue minus refunds.',
       pendingCash: 'Cash recorded by staff but not yet confirmed by a manager.',
       walletFunding: 'Wallet/building top-ups; a funding movement, not revenue.',
+      bySource: 'Current product sources (parking, subscription, penalty). "other" holds legacy record types so the four values always add up to grossRevenue.',
       recognitionBasis: 'Cash basis: successful payments are recognized at settledAt.',
     },
   };

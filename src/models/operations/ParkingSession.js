@@ -101,7 +101,22 @@ const parkingSessionSchema = new mongoose.Schema(
 
 parkingSessionSchema.index({ building: 1, entryTime: -1 });
 parkingSessionSchema.index({ building: 1, status: 1 });       // active sessions per building
+parkingSessionSchema.index({ building: 1, status: 1, createdAt: -1 }); // dashboard real-time overview & active sessions table
 parkingSessionSchema.index({ plateNumber: 1, status: 1 });    // check-in duplicate-plate check
+
+// Một biển số (đã normalize) chỉ được có TỐI ĐA MỘT phiên 'active' trong MỖI tòa nhà.
+// Kiểm tra ở tầng ứng dụng thôi thì 2 lượt check-in song song (staff + kiosk, hoặc 2
+// staff) vẫn lọt; đây là chốt chặn DB dùng chung cho mọi đường vào bãi.
+parkingSessionSchema.index(
+  { building: 1, plateNumber: 1 },
+  {
+    unique: true,
+    name: 'uniq_active_session_per_plate_building',
+    // Created only by the audited index CLI; other model indexes still auto-build.
+    _autoIndex: false,
+    partialFilterExpression: { status: 'active' },
+  },
+);
 parkingSessionSchema.index({ user: 1, createdAt: -1 });       // user parking history (sorted)
 
 module.exports = mongoose.model("ParkingSession", parkingSessionSchema);

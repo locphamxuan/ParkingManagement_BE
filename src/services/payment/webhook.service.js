@@ -60,8 +60,8 @@ const handle = async (body) => {
     return;
   }
 
-  // Top-up & session each run their own race-safe transaction (shared with their
-  // manual verify endpoints), so they're handled outside the reservation txn.
+  // Top-up & session each run their own race-safe transaction, shared with their
+  // manual verify endpoints.
   if (pendingPayment.type === 'topup') {
     // Building wallet topup (manager) vs user wallet topup — differentiated by building field
     if (pendingPayment.building) {

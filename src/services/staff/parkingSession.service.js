@@ -27,6 +27,7 @@ module.exports = {
   listMyCheckouts: query.listMyCheckouts,
   listHistory: query.listHistory,
   initiatePayment: payment.initiatePayment,
+  getSessionPaymentIntent: payment.getSessionPaymentIntent,
   settleSessionPayment: payment.settleSessionPayment,
   verifySessionPayment: payment.verifySessionPayment,
 };

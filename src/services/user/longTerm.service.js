@@ -12,13 +12,32 @@ const mongoose = require('mongoose');
 const Vehicle = require('../../models/vehicle/Vehicle');
 const { plateCoreOf } = require('../../models/vehicle/Vehicle');
 const { normalizePlate } = require('../../utils/plate.util');
-const { kindOfCategory, labelOfCategory } = require('../../constants/vehicle');
+const { isCategoryEligible, labelOfCategory } = require('../../constants/vehicle');
 const buildingWalletService = require('../manager/buildingWallet.service');
 const {
   claimFixedSlotForRenewal,
 } = require('../shared/slotLifecycle.service');
 
 const Building = require('../../models/building/Building');
+
+const MOTORCYCLE_LICENSE_PLATE_TYPES = new Set(['motorcycle', 'ebike', 'emotorbike']);
+
+const vehicleKindFromLicensePlate = (vehicleType) => (
+  MOTORCYCLE_LICENSE_PLATE_TYPES.has(`${vehicleType || ''}`.toLowerCase())
+    ? 'motorcycle'
+    : 'car'
+);
+
+const vehicleKindFromPackage = (vehicleType) => {
+  const label = `${vehicleType?.code || ''} ${vehicleType?.name || ''}`.toLowerCase();
+  return /motor|xe m|máy|bike|moto/.test(label) ? 'motorcycle' : 'car';
+};
+
+const compatibleLicensePlateTypes = (vehicleKind) => (
+  vehicleKind === 'motorcycle'
+    ? [...MOTORCYCLE_LICENSE_PLATE_TYPES]
+    : ['car', 'suv', 'truck', 'other']
+);
 
 const listPackages = async (buildingId) => {
   const buildingFilter = { status: 'active', isActive: { $ne: false } };
@@ -38,7 +57,7 @@ const listPackages = async (buildingId) => {
     isActive: true,
     building: { $in: activeBuildingIds },
   })
-    .populate('vehicleType', 'name code')
+    .populate('vehicleType', 'name code category')
     .populate('building', 'name code address')
     .sort('-createdAt');
   return packages;
@@ -76,11 +95,21 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
 
   const pkg = await LongTermPackage.findById(packageId).populate('vehicleType', 'name category');
   if (!pkg || !pkg.isActive) throw new AppError('Package not found or inactive', 404);
+  const packageVehicleTypeId = pkg.vehicleType?._id || pkg.vehicleType;
 
-  // Gói được bán theo loại xe của tòa; mua gói ô tô cho xe máy (hoặc ngược lại) là
-  // sai bảng giá và sai ô đỗ. So theo NHÓM 2 bánh/4 bánh chứ không so category tuyệt
-  // đối, để xe 'suv' vẫn mua được gói 'car' của tòa chỉ định nghĩa một loại 4 bánh.
-  if (pkg.vehicleType && kindOfCategory(vehicle.category) !== kindOfCategory(pkg.vehicleType.category)) {
+  // Danh mục loại xe của tòa chưa được map sang thể loại chuẩn → không có căn cứ để
+  // xét, chặn lại và bắt manager cấu hình thay vì đoán lúc chạy.
+  if (pkg.vehicleType && !pkg.vehicleType.category) {
+    throw new AppError(
+      `Loại xe "${pkg.vehicleType.name}" chưa được cấu hình thể loại xe. Liên hệ quản lý tòa nhà.`,
+      409,
+      'VEHICLE_TYPE_UNMAPPED',
+    );
+  }
+
+  // Khớp TUYỆT ĐỐI thể loại xe với thể loại của gói — không nới sang cùng nhóm 2/4
+  // bánh, vì bảng giá và ô đỗ được bán theo đúng danh mục tòa đã khai.
+  if (pkg.vehicleType && !isCategoryEligible(vehicle.category, pkg.vehicleType.category)) {
     throw new AppError(
       `Gói này dành cho ${pkg.vehicleType.name}, không áp dụng cho ${labelOfCategory(vehicle.category)}`,
       409,
@@ -109,7 +138,7 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
 
   // ── Thu tiền + ghi doanh thu (atomic) ────────────────────────────────────
   // Mua gói = doanh thu của TÒA NHÀ: trừ ví user → tạo Payment(subscription) →
-  // credit BuildingWallet, giống luồng reservation/checkout.
+  // credit BuildingWallet, giống luồng thu phí lúc check-out.
   const mongoSession = await mongoose.startSession();
   let subscription;
   try {
@@ -125,6 +154,30 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
           'Biển số không còn thuộc tài khoản hiện tại',
           403,
           'PLATE_OWNERSHIP_REQUIRED',
+        );
+      }
+
+      // Xe có thể bị xoá hoặc đổi thể loại giữa lúc kiểm tra ở trên và lúc trừ tiền.
+      // Đọc lại trong CÙNG transaction rồi mới trừ ví, để không bán được gói cho một
+      // chiếc xe vừa rời khỏi tài khoản hoặc vừa đổi sang thể loại khác.
+      const vehicleAtCharge = await Vehicle.findOne({
+        owner: userId,
+        plateCore: plateCoreOf(normalizedPlate),
+      })
+        .select('category')
+        .session(mongoSession);
+      if (!vehicleAtCharge) {
+        throw new AppError(
+          'Biển số không còn thuộc tài khoản hiện tại',
+          403,
+          'PLATE_OWNERSHIP_REQUIRED',
+        );
+      }
+      if (pkg.vehicleType && !isCategoryEligible(vehicleAtCharge.category, pkg.vehicleType.category)) {
+        throw new AppError(
+          'Biển số xe không đúng loại xe của gói dài hạn đã chọn',
+          409,
+          'PACKAGE_VEHICLE_TYPE_MISMATCH',
         );
       }
 
@@ -147,8 +200,7 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
         if (slot.usageType !== 'subscriber') {
           throw new AppError('Ô đỗ không thuộc dãy dành cho gói dài hạn', 409, 'SLOT_USAGE_MISMATCH');
         }
-        // pkg.vehicleType đã được populate ở trên → so bằng _id, không so cả document.
-        if (slot.vehicleType && `${slot.vehicleType}` !== `${pkg.vehicleType?._id}`) {
+        if (slot.vehicleType && `${slot.vehicleType}` !== `${packageVehicleTypeId}`) {
           throw new AppError('Ô đỗ không đúng loại xe của gói', 409, 'SLOT_VEHICLE_TYPE_MISMATCH');
         }
         if (slot.reservable === false) {
@@ -293,7 +345,7 @@ const cancelSubscription = async (userId, subscriptionId, { cancelReason, cancel
 
       const packagePrice = subscription.package.price;
       // % hoàn tiền do MANAGER cấu hình — helper chung (default 80, clamp 0–100),
-      // nhất quán với hủy reservation và endpoint public /users/reservations/policy.
+      // nhất quán với mọi đường hủy gói (manager huỷ, job hết hạn).
       const refundPercent = await getRefundPercent(subscription.building, mongoSession);
       const refundAmount = Math.round((packagePrice * refundPercent) / 100);
 
@@ -520,7 +572,7 @@ const listSubscriptions = async (userId, query = {}) => {
 
 const getPackage = async (id) => {
   const pkg = await LongTermPackage.findOne({ _id: id, isActive: true })
-    .populate('vehicleType', 'name code')
+    .populate('vehicleType', 'name code category')
     .populate({
       path: 'building',
       select: 'name code address status isActive',

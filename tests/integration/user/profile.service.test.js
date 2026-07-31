@@ -35,14 +35,16 @@ describe('update', () => {
 describe('changePassword', () => {
   test('mật khẩu hiện tại sai → 400', async () => {
     const u = await f.createUser({ password: 'secret1' });
-    await expect(profileService.changePassword(u._id, { currentPassword: 'wrong', newPassword: 'newpass1' }))
+    await expect(profileService.changePassword(u._id, { currentPassword: 'wrong', newPassword: 'correct-horse-battery' }))
       .rejects.toMatchObject({ statusCode: 400 });
   });
 
   test('đổi mật khẩu thành công (hash mới khớp)', async () => {
     const u = await f.createUser({ password: 'secret1' });
-    await profileService.changePassword(u._id, { currentPassword: 'secret1', newPassword: 'newpass1' });
+    await profileService.changePassword(u._id, { currentPassword: 'secret1', newPassword: 'correct-horse-battery' });
     const fresh = await User.findById(u._id).select('+password');
-    expect(await fresh.comparePassword('newpass1')).toBe(true);
+    expect(await fresh.comparePassword('correct-horse-battery')).toBe(true);
+    // Đổi mật khẩu phải thu hồi token cũ.
+    expect(fresh.tokenVersion).toBe(1);
   });
 });

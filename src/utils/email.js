@@ -95,7 +95,7 @@ const sendOtpEmail = async ({ to, otp, fullName }) => {
 
 /**
  * Generic email cho các thông báo hệ thống (gói dài hạn sắp/đã hết hạn,
- * reservation hết hạn, vượt giờ đỗ, ...). `bodyHtml` do nơi gọi build sẵn.
+ * vượt giờ đỗ, ...). `bodyHtml` do nơi gọi build sẵn.
  */
 const sendNotificationEmail = async ({ to, fullName, subject, heading, bodyHtml }) => {
   await send({

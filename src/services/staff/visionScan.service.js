@@ -49,22 +49,97 @@ const getGeminiClient = () => {
   return cachedClient;
 };
 
-// Strip a data-URL prefix if the caller sent one, and detect the media type.
+/* ── Payload validation (runs BEFORE any provider call) ─────────────────── */
+
+const SUPPORTED_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const MAX_DECODED_BYTES = 3 * 1024 * 1024;
+
+// A declared MIME type is attacker-controlled; the leading bytes are not.
+const MAGIC_BYTE_CHECKS = {
+  'image/jpeg': (buf) => buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff,
+  'image/png': (buf) =>
+    buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  'image/webp': (buf) =>
+    buf.length >= 12 &&
+    buf.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buf.subarray(8, 12).toString('ascii') === 'WEBP',
+};
+
+const BASE64_REGEX = /^[A-Za-z0-9+/]+={0,2}$/;
+const MAX_ENCODED_BYTES = Math.ceil(MAX_DECODED_BYTES / 3) * 4;
+
+/**
+ * Parses and fully validates the inbound frame. Every rejection here is a 4xx
+ * thrown before Gemini/PaddleOCR is contacted — no unvalidated attacker bytes
+ * are ever forwarded to a third-party provider.
+ */
 const parseImage = (image) => {
   if (!image || typeof image !== 'string') {
-    throw new AppError('image (base64) is required', 400);
+    throw new AppError('image (base64 data URL) is required', 400, 'IMAGE_REQUIRED');
   }
-  const dataUrl = image.match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,(.*)$/i);
-  if (dataUrl) {
-    return { mediaType: dataUrl[1].toLowerCase(), data: dataUrl[2] };
+
+  const dataUrl = image.match(/^data:([a-z0-9.+/-]+);base64,(.*)$/is);
+  if (!dataUrl) {
+    throw new AppError(
+      'image must be a base64 data URL, e.g. "data:image/jpeg;base64,...".',
+      400,
+      'IMAGE_MALFORMED',
+    );
   }
-  return { mediaType: 'image/jpeg', data: image };
+
+  const mediaType = dataUrl[1].toLowerCase();
+  if (!SUPPORTED_MEDIA_TYPES.has(mediaType)) {
+    throw new AppError(
+      `Unsupported image type "${mediaType}". Allowed: ${[...SUPPORTED_MEDIA_TYPES].join(', ')}.`,
+      400,
+      'IMAGE_TYPE_UNSUPPORTED',
+    );
+  }
+
+  const data = dataUrl[2].trim();
+  // Reject by encoded length before the regex or Buffer allocation. A multi-megabyte
+  // payload can otherwise overflow the regex engine before reaching the decoded-size
+  // guard below.
+  if (data.length > MAX_ENCODED_BYTES) {
+    throw new AppError(
+      `Image is too large. Maximum is ${MAX_DECODED_BYTES / 1024 / 1024}MB.`,
+      413,
+      'IMAGE_TOO_LARGE',
+    );
+  }
+  if (!data || !BASE64_REGEX.test(data) || data.length % 4 !== 0) {
+    throw new AppError('image is not valid base64.', 400, 'IMAGE_BASE64_INVALID');
+  }
+
+  const buffer = Buffer.from(data, 'base64');
+  // Buffer.from silently drops invalid input; re-encoding catches what the
+  // regex alone cannot (e.g. padding in the wrong place).
+  if (buffer.length === 0 || buffer.toString('base64').replace(/=+$/, '') !== data.replace(/=+$/, '')) {
+    throw new AppError('image is not valid base64.', 400, 'IMAGE_BASE64_INVALID');
+  }
+
+  if (buffer.length > MAX_DECODED_BYTES) {
+    throw new AppError(
+      `Image is too large (${Math.round(buffer.length / 1024)}KB). Maximum is ${MAX_DECODED_BYTES / 1024 / 1024}MB.`,
+      413,
+      'IMAGE_TOO_LARGE',
+    );
+  }
+
+  if (!MAGIC_BYTE_CHECKS[mediaType](buffer)) {
+    throw new AppError(
+      `Image content does not match the declared type "${mediaType}".`,
+      400,
+      'IMAGE_TYPE_MISMATCH',
+    );
+  }
+
+  return { mediaType, data };
 };
 
 /* ── Provider: Google Gemini ────────────────────────────────────────────── */
 
-const scanWithGemini = async (image) => {
-  const { mediaType, data } = parseImage(image);
+const scanWithGemini = async ({ mediaType, data }) => {
   const client = getGeminiClient();
 
   let response;
@@ -114,9 +189,7 @@ const scanWithGemini = async (image) => {
 
 const PADDLE_TIMEOUT_MS = 15000;
 
-const scanWithPaddle = async (image) => {
-  const { mediaType, data } = parseImage(image);
-
+const scanWithPaddle = async ({ mediaType, data }) => {
   let response;
   try {
     response = await fetch(`${env.paddleOcrUrl.replace(/\/$/, '')}/scan`, {
@@ -156,36 +229,46 @@ const scanWithPaddle = async (image) => {
 
 /* ── Provider selection ─────────────────────────────────────────────────── */
 
-// OCR_PROVIDER thắng khi được set; nếu không, tự chọn theo cấu hình sẵn có.
-// KHÔNG có nhánh mock: thiếu cấu hình luôn ném lỗi rõ ràng cho staff thấy.
-const resolveProvider = () => {
-  if (env.ocrProvider === 'paddle') {
-    if (!env.paddleOcrUrl) {
-      throw new AppError(
-        'PaddleOCR chưa được cấu hình (thiếu PADDLE_OCR_URL).',
-        503,
-        'AI_SCAN_NOT_CONFIGURED'
-      );
+const PROVIDER_RUNNERS = { paddle: scanWithPaddle, gemini: scanWithGemini };
+
+const isConfigured = {
+  paddle: () => Boolean(env.paddleOcrUrl),
+  gemini: () => Boolean(env.geminiApiKey),
+};
+
+const NOT_CONFIGURED_MESSAGE = {
+  paddle: 'PaddleOCR chưa được cấu hình (thiếu PADDLE_OCR_URL).',
+  gemini: 'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY).',
+};
+
+/**
+ * Thứ tự provider sẽ thử. OCR_PROVIDER thắng khi được set và luôn đứng đầu;
+ * provider còn lại — nếu đã cấu hình trong cùng .env — là DỰ PHÒNG cho trường
+ * hợp provider chính chết. Một microservice OCR ngừng chạy không được phép làm
+ * liệt cả cổng vào khi vẫn còn đường nhận diện khác dùng được.
+ * KHÔNG có nhánh mock: thiếu cấu hình luôn ném lỗi rõ ràng cho staff thấy.
+ */
+const resolveProviderChain = () => {
+  const primary =
+    env.ocrProvider === 'paddle' || env.ocrProvider === 'gemini' ? env.ocrProvider : null;
+
+  if (primary) {
+    if (!isConfigured[primary]()) {
+      throw new AppError(NOT_CONFIGURED_MESSAGE[primary], 503, 'AI_SCAN_NOT_CONFIGURED');
     }
-    return 'paddle';
+    const backup = primary === 'paddle' ? 'gemini' : 'paddle';
+    return isConfigured[backup]() ? [primary, backup] : [primary];
   }
-  if (env.ocrProvider === 'gemini') {
-    if (!env.geminiApiKey) {
-      throw new AppError(
-        'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY).',
-        503,
-        'AI_SCAN_NOT_CONFIGURED'
-      );
-    }
-    return 'gemini';
+
+  const chain = ['paddle', 'gemini'].filter((provider) => isConfigured[provider]());
+  if (chain.length === 0) {
+    throw new AppError(
+      'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY hoặc PADDLE_OCR_URL). Vui lòng liên hệ quản trị viên.',
+      503,
+      'AI_SCAN_NOT_CONFIGURED'
+    );
   }
-  if (env.paddleOcrUrl) return 'paddle';
-  if (env.geminiApiKey) return 'gemini';
-  throw new AppError(
-    'AI camera chưa được cấu hình (thiếu GEMINI_API_KEY hoặc PADDLE_OCR_URL). Vui lòng liên hệ quản trị viên.',
-    503,
-    'AI_SCAN_NOT_CONFIGURED'
-  );
+  return chain;
 };
 
 /**
@@ -198,9 +281,36 @@ const resolveProvider = () => {
  *         thật cho FE hiển thị alert.
  */
 const scanVehicleImage = async (image) => {
-  const provider = resolveProvider();
-  if (provider === 'paddle') return scanWithPaddle(image);
-  return scanWithGemini(image);
+  // Validate first: a malformed/oversized/mismatched frame must never reach an
+  // external provider, regardless of which one is configured.
+  const parsed = parseImage(image);
+  const chain = resolveProviderChain();
+
+  for (let i = 0; i < chain.length; i += 1) {
+    const provider = chain[i];
+    const isLast = i === chain.length - 1;
+    try {
+      return await PROVIDER_RUNNERS[provider](parsed);
+    } catch (err) {
+      // Chỉ sự cố hạ tầng (AI_SCAN_FAILED: service không phản hồi / HTTP lỗi)
+      // mới đáng chuyển provider. Model trả dữ liệu sai định dạng
+      // (AI_SCAN_BAD_OUTPUT) là lỗi thật — phải nổi lên cho staff thấy.
+      if (isLast || err?.errorCode !== 'AI_SCAN_FAILED') throw err;
+      console.error(
+        `[vision-scan] ${provider} không phản hồi, chuyển sang ${chain[i + 1]}:`,
+        err.message
+      );
+    }
+  }
+
+  /* c8 ignore next */
+  throw new AppError('AI scan thất bại.', 502, 'AI_SCAN_FAILED');
 };
 
-module.exports = { scanVehicleImage };
+module.exports = {
+  scanVehicleImage,
+  parseImage,
+  resolveProviderChain,
+  MAX_DECODED_BYTES,
+  SUPPORTED_MEDIA_TYPES,
+};

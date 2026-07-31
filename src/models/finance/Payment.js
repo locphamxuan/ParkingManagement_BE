@@ -7,6 +7,10 @@ const PAYMENT_STATUS = [
   "refunded",
   "reconciliation_required",
 ];
+// "reservation" là loại LỊCH SỬ: tính năng đặt chỗ theo giờ đã bị gỡ khỏi hệ thống
+// và không còn code path nào tạo Payment loại này. Giữ trong enum để các bản ghi tài
+// chính CŨ vẫn đọc/aggregate được (xoá enum sẽ làm validate + report dữ liệu cũ hỏng).
+// Muốn gỡ hẳn: xem src/scripts/auditLegacyReservationPayments.js.
 const PAYMENT_TYPES = ["session", "reservation", "subscription", "penalty", "refund", "topup", "cancellation_fee"];
 const PAYMENT_METHODS = ["cash", "wallet", "qr", "card", "payos"];
 
@@ -69,6 +73,15 @@ const paymentSchema = new mongoose.Schema(
     payosPaymentLinkId: { type: String, default: null },
     payosCheckoutUrl: { type: String, default: null },
     payosQrCode: { type: String, default: null },
+    checkoutDraft: {
+      exitPlateImage: { type: String, default: null },
+      exitPortraitImage: { type: String, default: null },
+      exitGate: { type: mongoose.Schema.Types.ObjectId, ref: 'Gate', default: null },
+      verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      staffShift: { type: mongoose.Schema.Types.ObjectId, ref: 'StaffShift', default: null },
+      verifiedAt: { type: Date, default: null },
+      bypassMismatch: { type: Boolean, default: false },
+    },
   },
   { timestamps: true }
 );
@@ -83,6 +96,26 @@ paymentSchema.index(
     unique: true,
     name: 'uniq_payos_order_code',
     partialFilterExpression: { payosOrderCode: { $type: 'number' } },
+  },
+);
+
+// MỘT phiên gửi xe chỉ có TỐI ĐA MỘT ý định thanh toán PayOS còn sống (pending) hoặc
+// đã thu (success). Hai request tạo QR song song đều thấy "chưa có pending" rồi cùng
+// tạo link → khách quét cả hai → ví tòa được cộng 2 lần. Unique index này là chốt
+// chặn ở tầng DB (check-rồi-tạo ở service KHÔNG đủ). Bản ghi failed/refunded/
+// reconciliation_required không nằm trong index nên QR hỏng vẫn thay thế được.
+paymentSchema.index(
+  { parkingSession: 1 },
+  {
+    unique: true,
+    name: 'uniq_live_payos_session_intent',
+    // Created only by the audited index CLI; other model indexes still auto-build.
+    _autoIndex: false,
+    partialFilterExpression: {
+      type: 'session',
+      method: 'payos',
+      status: { $in: ['pending', 'success'] },
+    },
   },
 );
 

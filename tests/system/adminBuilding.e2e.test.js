@@ -38,7 +38,7 @@ describe('E2E · Admin building routes (HTTP)', () => {
     const staff = await f.createUser({ role: 'staff', password: 'secret1' });
     const res = await request(app)
       .get('/api/admin/buildings')
-      .set('Authorization', bearer(signToken(staff._id)));
+      .set('Authorization', bearer(signToken(staff)));
     expect(res.status).toBe(403);
   });
 
@@ -46,7 +46,7 @@ describe('E2E · Admin building routes (HTTP)', () => {
     const admin = await f.createUser({ role: 'admin', password: 'secret1' });
     const res = await request(app)
       .post('/api/admin/buildings')
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send(validPayload());
 
     expect(res.status).toBe(201);
@@ -60,7 +60,7 @@ describe('E2E · Admin building routes (HTTP)', () => {
 
     const res = await request(app)
       .post('/api/admin/buildings')
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send(payload);
 
     expect(res.status).toBe(400);
@@ -72,7 +72,7 @@ describe('E2E · Admin building routes (HTTP)', () => {
 
     const res = await request(app)
       .post('/api/admin/buildings')
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send(validPayload({ manager: String(other._id), isActive: false, status: 'maintenance' }));
 
     expect(res.status).toBe(201);
@@ -89,7 +89,7 @@ describe('E2E · Admin building routes (HTTP)', () => {
 
     const res = await request(app)
       .put(`/api/admin/buildings/${building._id}`)
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send({ name: 'Renamed', manager: String(other._id) });
 
     expect(res.status).toBe(200);
@@ -103,14 +103,14 @@ describe('E2E · Admin building routes (HTTP)', () => {
 
     const ok = await request(app)
       .patch(`/api/admin/buildings/${building._id}/status`)
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send({ status: 'maintenance' });
     expect(ok.status).toBe(200);
     expect(ok.body.data.building.status).toBe('maintenance');
 
     const bad = await request(app)
       .patch(`/api/admin/buildings/${building._id}/status`)
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send({ status: 'not-a-status' });
     expect(bad.status).toBe(400);
   });
@@ -119,7 +119,7 @@ describe('E2E · Admin building routes (HTTP)', () => {
     const admin = await f.createUser({ role: 'admin', password: 'secret1' });
     const res = await request(app)
       .delete('/api/admin/buildings/000000000000000000000000')
-      .set('Authorization', bearer(signToken(admin._id)));
+      .set('Authorization', bearer(signToken(admin)));
     expect(res.status).toBe(404);
   });
 
@@ -130,14 +130,14 @@ describe('E2E · Admin building routes (HTTP)', () => {
 
     const assignRes = await request(app)
       .post(`/api/admin/buildings/${building._id}/assign-manager`)
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send({ userId: String(target._id) });
     expect(assignRes.status).toBe(201);
     expect((await User.findById(target._id)).role).toBe('manager');
 
     const revokeRes = await request(app)
       .post(`/api/admin/buildings/${building._id}/revoke-manager`)
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send({ userId: String(target._id) });
     expect(revokeRes.status).toBe(200);
     expect((await User.findById(target._id)).role).toBe('user');
@@ -149,7 +149,7 @@ describe('E2E · Admin building routes (HTTP)', () => {
 
     const res = await request(app)
       .post(`/api/admin/buildings/${building._id}/assign-manager`)
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send({});
     expect(res.status).toBe(400);
   });
@@ -162,14 +162,14 @@ describe('E2E · Admin building routes (HTTP)', () => {
 
     const assignRes = await request(app)
       .post(`/api/admin/buildings/${buildingA._id}/assign-staff`)
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send({ userId: String(target._id) });
     expect(assignRes.status).toBe(201);
     expect((await User.findById(target._id)).role).toBe('staff');
 
     const conflictRes = await request(app)
       .post(`/api/admin/buildings/${buildingB._id}/assign-manager`)
-      .set('Authorization', bearer(signToken(admin._id)))
+      .set('Authorization', bearer(signToken(admin)))
       .send({ userId: String(target._id) });
     expect(conflictRes.status).toBe(400);
   });
@@ -181,7 +181,7 @@ describe('E2E · Admin building routes (HTTP)', () => {
 
     const res = await request(app)
       .post(`/api/admin/buildings/${building._id}/assign-manager`)
-      .set('Authorization', bearer(signToken(manager._id)))
+      .set('Authorization', bearer(signToken(manager)))
       .send({ userId: String(target._id) });
     expect(res.status).toBe(403);
   });

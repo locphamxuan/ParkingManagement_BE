@@ -89,6 +89,15 @@ const userSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+    // Bumped on logout and on every credential reset/change. Every JWT carries
+    // the version it was signed with; auth.middleware rejects any mismatch, so
+    // a stolen token dies immediately instead of living out its 7-day expiry.
+    // Existing documents predate the field — Mongoose applies default 0 on
+    // hydration, and the middleware treats a missing stored value as 0.
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,
@@ -99,11 +108,28 @@ const userSchema = new mongoose.Schema(
         delete ret.resetPasswordExpires;
         delete ret.failedLoginAttempts;
         delete ret.lockUntil;
+        delete ret.tokenVersion;
         delete ret.__v;
         return ret;
       },
     },
   }
+);
+
+// Một biển số chỉ thuộc về DUY NHẤT một tài khoản (toàn hệ thống). Multikey unique
+// index: giá trị đã được normalize trước khi ghi (licensePlate.service) nên so sánh
+// bằng chuỗi là đủ. `partialFilterExpression` loại các user CHƯA có biển số nào —
+// nếu không, mọi user không có biển đều index `null` và đụng nhau.
+// Index này cũng chặn 2 biển trùng trong CÙNG một tài khoản.
+userSchema.index(
+  { 'licensePlates.plateNumber': 1 },
+  {
+    unique: true,
+    name: 'uniq_license_plate_owner',
+    // Created only by the audited index CLI; other model indexes still auto-build.
+    _autoIndex: false,
+    partialFilterExpression: { 'licensePlates.plateNumber': { $exists: true } },
+  },
 );
 
 userSchema.pre('save', async function hashPassword(next) {

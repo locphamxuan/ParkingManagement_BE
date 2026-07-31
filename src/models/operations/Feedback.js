@@ -77,7 +77,17 @@ const feedbackSchema = new mongoose.Schema(
 
 feedbackSchema.index({ building: 1, status: 1, createdAt: -1 });
 feedbackSchema.index({ user: 1, updatedAt: -1 });
-feedbackSchema.index({ parkingSession: 1, user: 1 });
+// Mỗi user chỉ đánh giá MỘT lần cho MỖI phiên gửi xe. Trước đây index này không
+// unique nên 2 request song song cùng qua được bước findOne → 2 review cho 1 phiên.
+feedbackSchema.index(
+  { user: 1, parkingSession: 1 },
+  {
+    unique: true,
+    name: 'uniq_feedback_per_user_session',
+    // Created only by the audited index CLI; other model indexes still auto-build.
+    _autoIndex: false,
+  },
+);
 
 module.exports = mongoose.models.Feedback || mongoose.model('Feedback', feedbackSchema);
 module.exports.FEEDBACK_STATUS = FEEDBACK_STATUS;

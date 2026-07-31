@@ -2,8 +2,7 @@
  * Migration 1 lần — Gói dài hạn chuyển sang "floating" (không giữ slot cố định).
  *
  * Nhả mọi ParkingSlot đang bị một LongTermSubscription giữ (status 'reserved' do
- * gói) về 'available', và xoá tham chiếu slot trên subscription. KHÔNG đụng tới
- * slot do reservation đang giữ (reservation không nằm trong tập slot này).
+ * gói) về 'available', và xoá tham chiếu slot trên subscription.
  *
  * Chạy: `node src/scripts/releasePackageSlots.js`
  */

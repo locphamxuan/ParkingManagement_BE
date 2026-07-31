@@ -152,7 +152,11 @@ describe('customer.service.listCustomers', () => {
     });
     const firstVisit = new Date('2026-06-01T08:00:00Z');
     const lastVisit = new Date('2026-07-01T08:00:00Z');
-    await ParkingSession.create({ building: building._id, user: user._id, plateNumber: '51F-999.11', entryTime: firstVisit });
+    // Lượt cũ phải 'completed': một biển số chỉ được có 1 phiên active/tòa (unique index).
+    await ParkingSession.create({
+      building: building._id, user: user._id, plateNumber: '51F-999.11',
+      entryTime: firstVisit, exitTime: new Date(firstVisit.getTime() + 3600 * 1000), status: 'completed',
+    });
     await ParkingSession.create({ building: building._id, user: user._id, plateNumber: '51F-999.11', entryTime: lastVisit });
 
     const { items } = await customerSvc.listCustomers(manager, building._id, {});

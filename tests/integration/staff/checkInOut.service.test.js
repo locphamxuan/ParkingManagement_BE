@@ -29,6 +29,20 @@ afterAll(async () => { await db.close(); });
 beforeEach(async () => { await db.clear(); await seedScene(); });
 
 describe('checkIn (walk-in)', () => {
+  test('QR check-in retains only portrait evidence', async () => {
+    const created = await checkIn(staff, {
+      building: building._id,
+      plateNumber: '51F-123.45',
+      vehicleType: vt._id,
+      plateImage: IMG,
+      portraitImage: IMG,
+      identificationMethod: 'qr',
+    });
+
+    expect(created.plateImage).toBeNull();
+    expect(created.portraitImage).toBe(IMG);
+  });
+
   test('tạo phiên active, tự gán slot walk-in, slot → occupied', async () => {
     const created = await checkIn(staff, {
       building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id,
@@ -46,13 +60,23 @@ describe('checkIn (walk-in)', () => {
     })).rejects.toMatchObject({ errorCode: 'PORTRAIT_REQUIRED' });
   });
 
-  test('trùng biển đang đỗ (không forceCheckIn) → 400 DUPLICATE_PLATE_WARNING', async () => {
+  // Một biển = một phiên active/tòa là bất biến VẬT LÝ (xe không ở trong bãi 2 lần),
+  // được chốt bằng unique index. forceCheckIn KHÔNG bỏ qua được nữa.
+  test('trùng biển đang đỗ → 409 DUPLICATE_ACTIVE_SESSION, kể cả khi forceCheckIn', async () => {
     // Thêm slot thứ 2 để không chạm giới hạn sức chứa trước khi tới nhánh trùng biển.
     await f.createSlot(building._id, floor._id, { zone: zone._id, vehicleType: vt._id, usageType: 'walk_in' });
     await checkIn(staff, { building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG });
+
     await expect(checkIn(staff, {
       building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG,
-    })).rejects.toMatchObject({ errorCode: 'DUPLICATE_PLATE_WARNING' });
+    })).rejects.toMatchObject({ statusCode: 409, errorCode: 'DUPLICATE_ACTIVE_SESSION' });
+
+    await expect(checkIn(staff, {
+      building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG,
+      forceCheckIn: true, overrideReason: 'khách nói xe đã ra',
+    })).rejects.toMatchObject({ statusCode: 409, errorCode: 'DUPLICATE_ACTIVE_SESSION' });
+
+    expect(await ParkingSession.countDocuments({ plateNumber: '51F-123.45', status: 'active' })).toBe(1);
   });
 
   test('không có ca hôm nay → 403 NO_SHIFT_ASSIGNED', async () => {
@@ -73,18 +97,30 @@ describe('checkIn (walk-in)', () => {
 });
 
 describe('checkOut (walk-in, tiền mặt)', () => {
-  test('hoàn tất phiên: tính phí fallback, slot → available', async () => {
+  test('hoàn tất phiên: tính phí theo PricePolicy, kể cả dưới 10 phút, slot → available', async () => {
+    await f.createPricePolicy(building._id, vt._id, { hourlyRate: 60000 });
     const created = await checkIn(staff, {
       building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG,
     });
-    // Lùi entryTime 2 giờ để phát sinh phí.
-    await ParkingSession.findByIdAndUpdate(created._id, { entryTime: new Date(Date.now() - 2 * 3600 * 1000) });
+    // 5 phút vẫn phải tính phí theo policy — không còn miễn phí grace period ở FE/BE.
+    await ParkingSession.findByIdAndUpdate(created._id, { entryTime: new Date(Date.now() - 5 * 60 * 1000) });
 
     const done = await checkOut(staff, created._id, { paymentMethod: 'cash' });
     expect(done.status).toBe('completed');
     expect(done.fee).toBeGreaterThan(0);
     const freshSlot = await ParkingSlot.findById(slot._id);
     expect(freshSlot.status).toBe('available');
+  });
+
+  test('chặn checkout khi chưa cấu hình PricePolicy cho loại xe', async () => {
+    const created = await checkIn(staff, {
+      building: building._id, plateNumber: '51F-123.45', vehicleType: vt._id, portraitImage: IMG, plateImage: IMG,
+    });
+
+    await expect(checkOut(staff, created._id, { paymentMethod: 'cash' }))
+      .rejects.toMatchObject({ statusCode: 409, errorCode: 'PRICE_POLICY_NOT_CONFIGURED' });
+
+    expect((await ParkingSession.findById(created._id)).status).toBe('active');
   });
 
   test('checkout phiên không tồn tại → 404', async () => {

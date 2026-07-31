@@ -4,6 +4,7 @@ const f = require('../../helpers/fixtures');
 const svc = require('../../../src/services/user/longTerm.service');
 const User = require('../../../src/models/user/User');
 const LongTermSubscription = require('../../../src/models/policy/LongTermSubscription');
+const Vehicle = require('../../../src/models/vehicle/Vehicle');
 const ReservationPolicy = require('../../../src/models/policy/ReservationPolicy');
 const Building = require('../../../src/models/building/Building');
 
@@ -48,6 +49,23 @@ describe('subscribe', () => {
   test('biển sai định dạng → 400', async () => {
     await expect(svc.subscribe(user._id, { packageId: pkg._id, plateNumber: 'XX' }))
       .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  test('biển xe máy không thể mua gói ô tô, không trừ tiền', async () => {
+    await Vehicle.findOneAndUpdate(
+      { owner: user._id, plateNumber: '51F-123.45' },
+      { category: 'motorcycle' },
+    );
+
+    await expect(svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' }))
+      .rejects.toMatchObject({
+        statusCode: 409,
+        errorCode: 'PACKAGE_VEHICLE_TYPE_MISMATCH',
+      });
+
+    const fresh = await User.findById(user._id);
+    expect(fresh.walletBalance).toBe(1000000);
+    expect(await LongTermSubscription.countDocuments()).toBe(0);
   });
 });
 

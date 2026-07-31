@@ -1,0 +1,26 @@
+name: Keep production API warm
+
+on:
+  schedule:
+    # Render Free idles after 15 minutes. A health probe every 10 minutes
+    # reduces cold starts for demo users and staff during active periods.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: keep-pbms-api-warm
+  cancel-in-progress: true
+
+jobs:
+  health-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe production health endpoint
+        run: >-
+          curl --fail --silent --show-error
+          --retry 2 --retry-delay 5
+          --connect-timeout 10 --max-time 90
+          https://pbms-api-8pny.onrender.com/health

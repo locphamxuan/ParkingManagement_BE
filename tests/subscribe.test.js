@@ -19,7 +19,7 @@ const PRICE = 500000;
 
 const seed = async ({ balance = 1000000 } = {}) => {
   const building = await Building.create({ name: 'B', code: 'B1', totalFloors: 1, pricing: { hourlyRate: 15000 } });
-  const vt = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô' });
+  const vt = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô', category: 'car' });
   const floor = await Floor.create({ building: building._id, code: 'F1', name: 'Floor 1', capacity: 10 });
   const slot = await ParkingSlot.create({ building: building._id, floor: floor._id, code: 'A1', vehicleType: vt._id, status: 'available' });
   // Ô dãy subscriber để test chọn slot cố định khi mua gói.

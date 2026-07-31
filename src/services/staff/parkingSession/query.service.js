@@ -6,7 +6,7 @@ const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../
 const { kindOfCategory, labelOfCategory } = require('../../../constants/vehicle');
 const visionScanService = require('../visionScan.service');
 const { assertStaffHasActiveShift } = require('../../shared/entryAuthorization.service');
-const { asObjectId, calculateFee, calculateLongTermOverageFee, activeSubscriptionMatch, resolveVehicleTypeId, slotCompatibilityFilter, usageRanker } = require('./helpers');
+const { asObjectId, calculateRegularSessionFee, calculateLongTermOverageFee, activeSubscriptionMatch, resolveVehicleTypeId, slotCompatibilityFilter, usageRanker } = require('./helpers');
 
 // Lõi truy vấn dùng chung staff/manager — caller phải tự xác thực quyền building trước.
 const listActiveByFilter = async (buildingFilter) => {
@@ -16,7 +16,7 @@ const listActiveByFilter = async (buildingFilter) => {
     .sort({ entryTime: -1 })
     .populate('entryGate', 'code name direction')
     .populate('exitGate', 'code name direction')
-    .populate('vehicleType', 'name code')
+    .populate('vehicleType', 'name code category')
     .populate('user', 'fullName email')
     .populate('staff', 'fullName email')
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } });
@@ -37,7 +37,7 @@ const listActiveByFilter = async (buildingFilter) => {
         isActive: true,
       }).lean()
     : [];
-  // Map: `${buildingId}|${vehicleTypeId}` → PricePolicy[] để calculateFee tra cứu O(1).
+  // Map: `${buildingId}|${vehicleTypeId}` → PricePolicy[] để tính phí O(1).
   const policyMap = new Map();
   for (const p of rawPolicies) {
     const k = `${p.building}|${p.vehicleType}`;
@@ -46,7 +46,7 @@ const listActiveByFilter = async (buildingFilter) => {
     policyMap.set(k, arr);
   }
 
-  // Attach the current fee (per manager's PricePolicy, fallback by kind) + member flag
+  // Attach the current fee from the manager-configured PricePolicy + member flag.
   // so the staff UI can show the amount and who owns the vehicle.
   return Promise.all(
     sessions.map(async (s) => {
@@ -61,10 +61,14 @@ const listActiveByFilter = async (buildingFilter) => {
         obj.overageHours = overageHours;
         obj.maxHoursPerDay = maxHoursPerDay;
       } else {
-        // Session thường: dùng policies đã preload, không query DB thêm.
+        // Session thường: dùng policies đã preload, không query DB thêm. A
+        // missing policy is surfaced to the UI; it must never look like free
+        // parking or fall back to a hidden flat rate.
         const vtId = s.vehicleType?._id || s.vehicleType || null;
         const sessionPolicies = policyMap.get(`${s.building}|${vtId}`) || [];
-        obj.currentFee = await calculateFee(s, sessionPolicies);
+        const quote = await calculateRegularSessionFee(s, sessionPolicies);
+        obj.currentFee = quote.hasPolicy ? quote.fee : null;
+        obj.pricePolicyConfigured = quote.hasPolicy;
       }
       return obj;
     })
@@ -84,7 +88,7 @@ const getByIdInBuilding = async (buildingId, id) => {
   const parkingSession = await ParkingSession.findOne({ _id: id, building: buildingId })
     .populate('entryGate', 'code name direction')
     .populate('exitGate', 'code name direction')
-    .populate('vehicleType', 'name code')
+    .populate('vehicleType', 'name code category')
     .populate('user', 'fullName email')
     .populate('staff', 'fullName email')
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } });
@@ -101,7 +105,7 @@ const getById = async (user, id) => {
 
   const parkingSession = await ParkingSession.findById(id)
     .populate('entryGate', 'code name')
-    .populate('vehicleType', 'name code');
+    .populate('vehicleType', 'name code category');
   if (!parkingSession) {
     throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
   }
@@ -127,7 +131,7 @@ const search = async (user, plate, query = {}) => {
   })
     .sort({ entryTime: -1, _id: -1 })
     .populate('entryGate', 'code name')
-    .populate('vehicleType', 'name code');
+    .populate('vehicleType', 'name code category');
 };
 
 /* ─────────────────────────────────────────────
@@ -261,7 +265,7 @@ const listFreeSlots = async (staffUser, buildingId, opts = {}) => {
     .select('_id code floor zone vehicleType usageType')
     .populate('floor', 'name code')
     .populate('zone', 'code usageType')
-    .populate('vehicleType', 'name code');
+    .populate('vehicleType', 'name code category');
 
   // Bối cảnh sức chứa (KHÔNG lọc theo đối tượng) để FE phân biệt 3 trạng thái khi
   // pool đúng đối tượng rỗng: (a) tòa không có slot cố định → đỗ theo sức chứa;
@@ -302,8 +306,30 @@ const scanVehicle = async (staffUser, image, buildingId) => {
   if (!buildingId) throw new AppError('building is required', 400, 'BUILDING_REQUIRED');
   assertBuildingScope(staffUser, buildingId);
 
-  const { plateNumber, plateConfidence, vehicleType, brand, brandConfidence } =
-    await visionScanService.scanVehicleImage(image);
+  // Plate recognition is an assistive step, never a reason to block gate
+  // operations.  A staff member can still enter a plate manually or use the
+  // QR scanner when the configured OCR provider is unavailable.  Invalid
+  // camera payloads remain hard 4xx errors; only a provider outage degrades
+  // gracefully.
+  let scanStatus = 'available';
+  let vision = {
+    plateNumber: '',
+    plateConfidence: 0,
+    vehicleType: null,
+    brand: null,
+    brandConfidence: 0,
+  };
+  try {
+    vision = await visionScanService.scanVehicleImage(image);
+  } catch (err) {
+    if (!['AI_SCAN_FAILED', 'AI_SCAN_NOT_CONFIGURED'].includes(err?.errorCode)) throw err;
+    scanStatus = 'unavailable';
+    // Keep the operational cause in server logs for monitoring, while the
+    // client receives a successful manual-entry fallback instead of a 502.
+    console.error('[staff-scan] OCR provider unavailable; using manual-entry fallback:', err.message);
+  }
+
+  const { plateNumber, plateConfidence, vehicleType, brand, brandConfidence } = vision;
 
   // Resolve the owner account only when we have a valid plate.
   let account = {
@@ -337,6 +363,7 @@ const scanVehicle = async (staffUser, image, buildingId) => {
   );
 
   return {
+    scanStatus,
     plateNumber, // canonical VN form, or '' if unreadable
     plateConfidence,
     vehicleType, // detected by AI (car|motorcycle|null)
@@ -436,7 +463,7 @@ const listMyCheckIns = async (staffUser, query = {}) => {
     .limit(100)
     .select('-plateImage -portraitImage -exitPlateImage -exitPortraitImage')
     .populate('entryGate', 'code name')
-    .populate('vehicleType', 'name code')
+    .populate('vehicleType', 'name code category')
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
     .lean();
 
@@ -465,7 +492,7 @@ const listMyCheckouts = async (staffUser, query = {}) => {
     .select('-plateImage -portraitImage -exitPlateImage -exitPortraitImage')
     .populate('entryGate', 'code name')
     .populate('exitGate', 'code name')
-    .populate('vehicleType', 'name code')
+    .populate('vehicleType', 'name code category')
     .populate('user', 'fullName email')
     .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })
     .lean();
@@ -497,7 +524,7 @@ const listHistory = async (buildingId, query = {}) => {
       .select('-plateImage -portraitImage -exitPlateImage -exitPortraitImage')
       .populate('entryGate', 'code name')
       .populate('exitGate', 'code name')
-      .populate('vehicleType', 'name code')
+      .populate('vehicleType', 'name code category')
       .populate('user', 'fullName email')
       .populate('staff', 'fullName email')
       .populate({ path: 'slot', select: 'code floor', populate: { path: 'floor', select: 'name code' } })

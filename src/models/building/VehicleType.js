@@ -1,8 +1,5 @@
 const mongoose = require("mongoose");
-const {
-  VEHICLE_CATEGORY_CODES,
-  DEFAULT_VEHICLE_CATEGORY,
-} = require("../../constants/vehicle");
+const { VEHICLE_CATEGORY_CODES } = require("../../constants/vehicle");
 
 /**
  * Danh mục loại xe RIÊNG của từng tòa nhà: manager tự đặt tên/mã hiển thị
@@ -33,16 +30,17 @@ const vehicleTypeSchema = new mongoose.Schema(
       trim: true,
       maxlength: 80,
     },
-    // Thể loại xe chuẩn mà danh mục này đại diện — quyết định nhóm tính phí
-    // (2 bánh / 4 bánh) và việc khớp với xe đã đăng ký của khách.
+    // Thể loại xe chuẩn mà danh mục này của tòa đại diện (constants/vehicle.js).
+    // null = manager chưa map → CHẶN bán gói dài hạn cho danh mục này, tuyệt đối
+    // không đoán từ code/name lúc chạy. Đây là nguồn sự thật duy nhất để xét một
+    // biển số có mua được gói hay không.
     category: {
       type: String,
       enum: {
-        values: [...VEHICLE_CATEGORY_CODES],
+        values: [...VEHICLE_CATEGORY_CODES, null],
         message: `category must be one of: ${VEHICLE_CATEGORY_CODES.join(", ")}`,
       },
-      default: DEFAULT_VEHICLE_CATEGORY,
-      required: true,
+      default: null,
     },
     description: { type: String, trim: true, maxlength: 250, default: "" },
     isActive: { type: Boolean, default: true },

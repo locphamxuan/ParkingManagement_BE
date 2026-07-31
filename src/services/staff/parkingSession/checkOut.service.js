@@ -4,6 +4,7 @@ const AppError = require('../../../utils/AppError');
 const {
   ParkingSession,
   LongTermSubscription,
+  Incident,
   Payment,
   WalletTransaction,
   User,
@@ -12,18 +13,67 @@ const {
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const buildingWalletService = require('../../manager/buildingWallet.service');
 const { settlePendingPenaltyAtCheckout } = require('../../shared/incidentResolve.service');
-const { normalizePlate } = require('../../../utils/plate.util');
+const { normalizePlate, plateMatchRegex } = require('../../../utils/plate.util');
 const { calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { sendNotificationEmail } = require('../../../utils/email');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
-const { vehicleKindFromType } = require('./helpers');
+const { vehicleKindFromType, calculateRegularSessionFee } = require('./helpers');
 const { assertStaffHasActiveShift } = require('../../shared/entryAuthorization.service');
 const { finalizeSlotAfterCheckout } = require('../../shared/slotLifecycle.service');
 const { resolveOperationalGate } = require('../../shared/gateAuthorization.service');
 const { assertEvidenceImage } = require('../../../utils/evidence');
 
+// Phí phạt luôn do STAFF thu tại cổng lúc xe ra — chỉ chấp nhận các phương thức
+// staff thực thu được (PayOS QR chỉ chứa phí gửi xe, không gộp phí phạt).
+const STAFFED_PENALTY_METHODS = ['cash', 'wallet'];
+
 // ── Helpers (module-private) ─────────────────────────────────────────────────
+
+async function _findPendingPenalty(parkingSession, mongoSession) {
+  return Incident.exists({
+    building: parkingSession.building,
+    violatorPlate: plateMatchRegex(parkingSession.plateNumber) || parkingSession.plateNumber,
+    status: 'penalty_pending',
+  }).session(mongoSession);
+}
+
+/**
+ * Phí gửi xe và phí phạt là HAI khoản thu riêng, được phép khác phương thức.
+ *
+ * QR PayOS chỉ chứa phí gửi xe và được tạo TRƯỚC khi manager duyệt phạt (tạo QR
+ * lúc đã có phạt vẫn bị chặn ở `payment.service`). Nếu phạt được duyệt SAU khi
+ * khách đã quét QR trả tiền, khoản phí gửi xe đã thu xong không thể thu lại —
+ * staff phải chỉ định `penaltyPaymentMethod` để thu nốt phần phạt tại cổng, nếu
+ * không xe sẽ kẹt trong bãi dù tiền đã vào tài khoản.
+ *
+ * Các luồng cũ (cash/wallet/...) giữ nguyên: phạt theo đúng phương thức của lượt
+ * check-out khi staff không chỉ định riêng.
+ */
+function _resolvePenaltyPaymentMethod(payload, feeMethod, pendingPenalty) {
+  const requested = payload.penaltyPaymentMethod;
+  if (requested !== undefined && requested !== null && requested !== '') {
+    if (!STAFFED_PENALTY_METHODS.includes(requested)) {
+      throw new AppError(
+        `penaltyPaymentMethod must be one of: ${STAFFED_PENALTY_METHODS.join(', ')}`,
+        400,
+        'INVALID_PENALTY_PAYMENT_METHOD',
+      );
+    }
+    return requested;
+  }
+
+  if (pendingPenalty && feeMethod === 'payos') {
+    throw new AppError(
+      'This vehicle has an approved pending penalty that the PayOS QR did not cover. '
+      + `Provide penaltyPaymentMethod (${STAFFED_PENALTY_METHODS.join(' or ')}) to collect it at the gate.`,
+      400,
+      'PENALTY_PAYMENT_METHOD_REQUIRED',
+    );
+  }
+
+  return feeMethod || 'cash';
+}
 
 async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
   if (!sessionId) {
@@ -31,7 +81,7 @@ async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
   }
 
   const parkingSession = await ParkingSession.findById(sessionId)
-    .populate('vehicleType', 'code name')
+    .populate('vehicleType', 'code name category')
     .populate({ path: 'slot', select: 'floor', populate: { path: 'floor', select: '_id' } })
     .session(mongoSession);
   if (!parkingSession) {
@@ -40,6 +90,31 @@ async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
 
   assertBuildingScope(user, parkingSession.building);
 
+  let checkoutPayload = payload;
+  if (payload.paymentMethod === 'payos') {
+    const payment = await Payment.findOne({
+      parkingSession: parkingSession._id,
+      type: 'session',
+      method: 'payos',
+      status: 'success',
+    }).session(mongoSession);
+    const draft = payment?.checkoutDraft;
+    if (!draft?.verifiedAt) {
+      throw new AppError(
+        'The confirmed PayOS payment has no verified checkout evidence',
+        409,
+        'PAYOS_CHECKOUT_DRAFT_NOT_FOUND',
+      );
+    }
+    checkoutPayload = {
+      ...payload,
+      exitPlateImage: draft.exitPlateImage,
+      exitPortraitImage: draft.exitPortraitImage,
+      exitGate: draft.exitGate,
+      bypassMismatch: draft.bypassMismatch,
+    };
+  }
+
   const activeStaffShift = await assertStaffHasActiveShift(
     user._id,
     parkingSession.building,
@@ -47,7 +122,7 @@ async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
     mongoSession,
   );
   const exitGate = await resolveOperationalGate({
-    gateId: payload.exitGate || payload.gate || null,
+    gateId: checkoutPayload.exitGate || checkoutPayload.gate || null,
     buildingId: parkingSession.building,
     operation: 'out',
     assignedGateId: activeStaffShift.gate?._id || activeStaffShift.gate || null,
@@ -58,15 +133,16 @@ async function _verifyAndLoadSession(user, sessionId, payload, mongoSession) {
     throw new AppError('Session not active', 400);
   }
 
-  const providedPlate = normalizePlate(payload.plateNumber || payload.exitPlateNumber);
-  if (providedPlate && providedPlate !== normalizePlate(parkingSession.plateNumber) && !payload.bypassMismatch) {
+  const providedPlate = normalizePlate(checkoutPayload.plateNumber || checkoutPayload.exitPlateNumber);
+  if (providedPlate && providedPlate !== normalizePlate(parkingSession.plateNumber) && !checkoutPayload.bypassMismatch) {
     throw new AppError('Plate mismatch requires bypass confirmation', 409, 'PLATE_MISMATCH_WARNING');
   }
 
   return {
     parkingSession,
-    exitPlateImage: assertEvidenceImage(payload.exitPlateImage, 'exitPlateImage'),
-    exitPortraitImage: assertEvidenceImage(payload.exitPortraitImage, 'exitPortraitImage'),
+    payload: checkoutPayload,
+    exitPlateImage: assertEvidenceImage(checkoutPayload.exitPlateImage, 'exitPlateImage'),
+    exitPortraitImage: assertEvidenceImage(checkoutPayload.exitPortraitImage, 'exitPortraitImage'),
     activeStaffShift,
     exitGate,
   };
@@ -249,21 +325,29 @@ async function _handleLongTermCheckout(
 
 // Tính phí cho checkout thường (khách vãng lai / user thường).
 // Returns { fee, feeMethod }.
-async function _computeRegularFee(parkingSession, payload) {
+async function _computeRegularFee(parkingSession, payload, mongoSession) {
   const feeMethod = payload.paymentMethod || 'cash';
-  let fee = Number(parkingSession.fee || 0);
-  if (!fee) {
-    const now = new Date();
-    const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
-    // Price by vehicle type via PricePolicy (peak/regular split).
-    fee = await calculateParkingFee(parkingSession.building, vtId, parkingSession.entryTime, now);
-    if (!fee || fee <= 0) {
-      // No PricePolicy configured → fallback to a flat hourly rate by vehicle kind.
-      const kind = vehicleKindFromType(parkingSession.vehicleType);
-      const hours = Math.max(1, Math.ceil((now.getTime() - new Date(parkingSession.entryTime).getTime()) / (1000 * 60 * 60)));
-      fee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
+  if (feeMethod === 'payos') {
+    const payment = await Payment.findOne({
+      parkingSession: parkingSession._id,
+      type: 'session',
+      method: 'payos',
+      status: 'success',
+    }).session(mongoSession);
+    if (!payment) {
+      throw new AppError('PayOS payment has not been confirmed', 409, 'PAYOS_PAYMENT_NOT_CONFIRMED');
     }
+    return { fee: payment.amount, feeMethod };
   }
+  const quote = await calculateRegularSessionFee(parkingSession);
+  if (!quote.hasPolicy) {
+    throw new AppError(
+      'No active price policy is configured for this building and vehicle type',
+      409,
+      'PRICE_POLICY_NOT_CONFIGURED',
+    );
+  }
+  let fee = quote.fee;
 
   if (payload.adjustedFee !== undefined && payload.adjustedFee !== null) {
     if (!payload.adjustmentReason) {
@@ -281,6 +365,26 @@ async function _computeRegularFee(parkingSession, payload) {
   }
 
   return { fee, feeMethod };
+}
+
+// Phí gửi xe đã thu qua PayOS thì không được thu lại bằng tiền mặt/ví.
+// (Chiều ngược lại — PayOS + phạt duyệt muộn — xử lý bằng `penaltyPaymentMethod`.)
+async function _assertPayosCheckoutCanComplete(parkingSession, feeMethod, mongoSession) {
+  if (feeMethod === 'payos') return;
+
+  const paidPayosIntent = await Payment.exists({
+    parkingSession: parkingSession._id,
+    type: 'session',
+    method: 'payos',
+    status: 'success',
+  }).session(mongoSession);
+  if (paidPayosIntent) {
+    throw new AppError(
+      'A PayOS payment has already been received for this session',
+      409,
+      'PAYOS_PAYMENT_ALREADY_RECEIVED',
+    );
+  }
 }
 
 // Trừ ví người dùng khi khách chọn thanh toán bằng ví lúc lấy xe.
@@ -319,6 +423,19 @@ async function _processWalletDebit(fee, targetUserId, parkingSession, mongoSessi
 // manager sẽ "Thu nhận" ở tab Ví để xác nhận đã nhận tiền → lúc đó mới cộng ví building.
 // Các phương thức khác (wallet/qr/...) đã thu điện tử nên 'success' + cộng ví ngay.
 async function _createPaymentRecord(parkingSession, fee, feeMethod, staff, payload, mongoSession) {
+  if (feeMethod === 'payos') {
+    const payment = await Payment.findOne({
+      parkingSession: parkingSession._id,
+      type: 'session',
+      method: 'payos',
+      status: 'success',
+      amount: fee,
+    }).session(mongoSession);
+    if (!payment) {
+      throw new AppError('PayOS payment does not match this checkout', 409, 'PAYOS_PAYMENT_MISMATCH');
+    }
+    return payment;
+  }
   const isCashPending = feeMethod === 'cash';
   const [payment] = await Payment.create(
     [{
@@ -358,6 +475,7 @@ async function _finalizeSession(
   payload,
   fee,
   feeMethod,
+  penaltyPaymentMethod,
   exitPlateImage,
   exitPortraitImage,
   activeStaffShift,
@@ -409,6 +527,7 @@ async function _finalizeSession(
     after: parkingSession.toObject(),
     metadata: {
       paymentMethod: feeMethod,
+      penaltyPaymentMethod: penaltyPaymentMethod || null,
       adjustedFee: payload.adjustedFee ?? null,
       adjustmentReason: payload.adjustmentReason || null,
       forceCheckoutReason: payload.forceCheckoutReason || null,
@@ -430,15 +549,24 @@ const checkOut = async (user, sessionId, payload = {}) => {
   let postCommitEmail = null;
   try {
     const result = await mongoSession.withTransaction(async () => {
-      const { parkingSession, exitPlateImage, exitPortraitImage, activeStaffShift, exitGate } =
+      const { parkingSession, payload: checkoutPayload, exitPlateImage, exitPortraitImage, activeStaffShift, exitGate } =
         await _verifyAndLoadSession(user, sessionId, payload, mongoSession);
+
+      // Xác định phương thức thu phí phạt TRƯỚC khi ghi bất kỳ khoản tiền nào —
+      // thiếu/sai thì lượt check-out phải hỏng sạch, không thu nửa vời.
+      const pendingPenalty = await _findPendingPenalty(parkingSession, mongoSession);
+      const penaltyPaymentMethod = _resolvePenaltyPaymentMethod(
+        checkoutPayload,
+        checkoutPayload.paymentMethod,
+        pendingPenalty,
+      );
 
       // Long-term subscription → separate flow with overage billing.
       if (parkingSession.paymentMethod === 'long_term') {
         postCommitEmail = await _handleLongTermCheckout(
           user,
           parkingSession,
-          payload,
+          checkoutPayload,
           exitPlateImage,
           exitPortraitImage,
           activeStaffShift,
@@ -447,18 +575,19 @@ const checkOut = async (user, sessionId, payload = {}) => {
         );
       } else {
         // Regular checkout (khách vãng lai / user thường).
-        const { fee, feeMethod } = await _computeRegularFee(parkingSession, payload);
+        const { fee, feeMethod } = await _computeRegularFee(parkingSession, checkoutPayload, mongoSession);
+        await _assertPayosCheckoutCanComplete(parkingSession, feeMethod, mongoSession);
 
         if (feeMethod === 'wallet' && fee > 0) {
           await _processWalletDebit(fee, parkingSession.user, parkingSession, mongoSession);
         }
 
         if (fee > 0) {
-          await _createPaymentRecord(parkingSession, fee, feeMethod, user, payload, mongoSession);
+          await _createPaymentRecord(parkingSession, fee, feeMethod, user, checkoutPayload, mongoSession);
         }
 
         await _finalizeSession(
-          user, parkingSession, payload, fee, feeMethod,
+          user, parkingSession, checkoutPayload, fee, feeMethod, penaltyPaymentMethod,
           exitPlateImage, exitPortraitImage, activeStaffShift, exitGate, mongoSession,
         );
       }
@@ -466,7 +595,7 @@ const checkOut = async (user, sessionId, payload = {}) => {
       // Biển số này có đang bị 1 incident 'penalty_pending' (manager đã duyệt phí phạt)
       // chờ thu không? Nếu có → tạo Payment riêng cho phí phạt + resolve incident, ngay
       // trong transaction check-out này (staff là người thực thu tại cổng, không phải manager).
-      await settlePendingPenaltyAtCheckout(user, parkingSession, payload.paymentMethod || 'cash', mongoSession);
+      await settlePendingPenaltyAtCheckout(user, parkingSession, penaltyPaymentMethod, mongoSession);
 
       return parkingSession;
     });

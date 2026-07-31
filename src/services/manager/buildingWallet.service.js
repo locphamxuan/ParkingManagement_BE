@@ -113,7 +113,9 @@ const debit = async (buildingId, amount, reason, relatedPaymentId, performedById
 };
 
 /**
- * Daily revenue for a building (parking_fee + reservation_fee + subscription_fee credits).
+ * Daily revenue for a building (parking_fee + subscription_fee + penalty_fee credits).
+ * The legacy 'reservation_fee' reason stays in the filter so historical days keep
+ * their original total; the current system never writes it.
  * @param {string|ObjectId} buildingId
  * @param {Date|string} [date] - Date or 'YYYY-MM-DD' (defaults to today)
  */
@@ -139,7 +141,7 @@ const getDailyRevenue = async (buildingId, date) => {
 
 /**
  * Doanh thu THEO NGÀY × PHƯƠNG THỨC + tổng doanh thu all-time cho 1 tòa.
- * Nguồn: Payment thành công loại doanh thu (session/reservation/subscription) — nhất
+ * Nguồn: Payment thành công loại doanh thu (session/subscription/penalty) — nhất
  * quán với dashboard, và tách được theo phương thức (cash/wallet/online) mà ví tòa
  * (BuildingWalletTransaction) không lưu. `allTimeTotal` KHÔNG gồm top-up nên phản ánh
  * đúng "tổng doanh thu gửi xe" (khác `wallet.totalReceived` vốn cộng cả top-up).

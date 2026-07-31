@@ -303,7 +303,7 @@
  *     tags: [Staff - Parking Sessions]
  *     summary: Check in a vehicle
  *     security: [{ bearerAuth: [] }]
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [building, plateNumber], properties: { building: { type: string, format: objectId }, slot: { type: string, format: objectId }, vehicleType: { type: string, format: objectId }, plateNumber: { type: string, example: 59G2-038.80 }, vehicleBrand: { type: string, example: Toyota }, entryGate: { type: string, format: objectId }, plateImage: { type: string, example: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ }, portraitImage: { type: string, example: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ }, note: { type: string, example: Manual check-in } } } } } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [building, plateNumber], properties: { building: { type: string, format: objectId }, slot: { type: string, format: objectId }, vehicleType: { type: string, format: objectId }, plateNumber: { type: string, example: 59G2-038.80 }, vehicleBrand: { type: string, example: Toyota }, entryGate: { type: string, format: objectId }, identificationMethod: { type: string, enum: [plate, qr], description: QR identification stores no plate image }, plateImage: { type: string, example: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ }, portraitImage: { type: string, example: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ }, note: { type: string, example: Manual check-in } } } } } }
  *     responses:
  *       200: { description: Parking session created successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { $ref: '#/components/schemas/ParkingSession' } } } ] } } } }
  * /api/staff/parking-sessions/active:
@@ -400,12 +400,35 @@
  *   patch:
  *     tags: [Staff - Parking Sessions]
  *     summary: Check out a parking session
+ *     description: >-
+ *       Closes an active session and settles what is due. The parking fee and an approved pending
+ *       penalty are separate receivables and may use different methods. When paymentMethod is
+ *       `payos` (the parking fee was already paid through the PayOS QR) and the plate has a penalty
+ *       that was approved after the QR was created, `penaltyPaymentMethod` (cash or wallet) is
+ *       required so the penalty is still collected at the gate — otherwise the request fails with
+ *       `PENALTY_PAYMENT_METHOD_REQUIRED` and nothing is committed.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { exitGate: { type: string, format: objectId }, paymentMethod: { type: string, enum: [cash, wallet, qr, card, payos, long_term] }, exitPlateImage: { type: string }, exitPortraitImage: { type: string }, note: { type: string, example: Paid by cash } } } } } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { exitGate: { type: string, format: objectId }, paymentMethod: { type: string, enum: [cash, wallet, qr, card, payos, long_term] }, penaltyPaymentMethod: { type: string, enum: [cash, wallet], description: 'Method used to collect an approved pending penalty. Required when paymentMethod is payos and a penalty is pending; defaults to paymentMethod otherwise.' }, exitPlateImage: { type: string }, exitPortraitImage: { type: string }, note: { type: string, example: Paid by cash } } } } } }
  *     responses:
  *       200: { description: Session checked out successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { $ref: '#/components/schemas/ParkingSession' } } } ] } } } }
+ * /api/staff/parking-sessions/{id}/payment-intent:
+ *   get:
+ *     tags: [Staff - Parking Sessions]
+ *     summary: Read the live PayOS intent of an active session
+ *     description: >
+ *       Trả ý định thanh toán PayOS còn sống của phiên (tối đa 1 mỗi phiên, theo unique
+ *       index `uniq_live_payos_session_intent`) để staff mở lại đúng mã QR cũ thay vì tạo
+ *       mã thứ hai. Intent đang `pending` được đối soát lại với PayOS trước khi trả về.
+ *       `data` = null khi phiên chưa có intent nào còn sống.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: objectId } }
+ *     responses:
+ *       200: { description: Payment intent returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, nullable: true, properties: { status: { type: string, enum: [pending, success] }, orderCode: { type: number }, checkoutUrl: { type: string }, qrCode: { type: string }, amount: { type: number }, plateNumber: { type: string, example: 59G2-038.80 } } } } } ] } } } }
+ *       400: { description: "Phiên không còn active (SESSION_NOT_ACTIVE)" }
+ *       404: { description: "Không tìm thấy phiên (SESSION_NOT_FOUND)" }
  * /api/staff/parking-sessions/{id}/initiate-payment:
  *   post:
  *     tags: [Staff - Parking Sessions]

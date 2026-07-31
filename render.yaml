@@ -1,5 +1,17 @@
 services:
   - type: web
+    name: pbms-ocr
+    runtime: python
+    plan: free
+    rootDir: ocr-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+  - type: web
     name: pbms-api
     runtime: node
     plan: free
@@ -33,12 +45,15 @@ services:
         sync: false
       - key: EMAIL_PASS
         sync: false
-      # Camera cổng: thiếu key này thì mọi lần quét biển số trả 503
-      # AI_SCAN_NOT_CONFIGURED (service không có nhánh mock). PaddleOCR là bản
-      # self-host nên không dùng được trên Render free → chốt provider gemini.
-      - key: OCR_PROVIDER
-        value: gemini
+      # Camera cổng: không cấu hình provider nào thì mọi lần quét trả 503
+      # AI_SCAN_NOT_CONFIGURED (service không có nhánh mock). Trên Render free
+      # chỉ dùng được gemini — PaddleOCR là bản self-host, phải trỏ
+      # PADDLE_OCR_URL sang máy khác nếu muốn dùng.
       - key: GEMINI_API_KEY
+        sync: false
+      - key: OCR_PROVIDER
+        sync: false
+      - key: PADDLE_OCR_URL
         sync: false
       - key: KIOSK_DEVICE_TOKEN
         generateValue: true

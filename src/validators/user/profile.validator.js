@@ -1,4 +1,5 @@
 const AppError = require('../../utils/AppError');
+const { findPasswordWeakness } = require('../../utils/passwordPolicy');
 
 const PHONE_REGEX = /^[0-9+\-\s()]{8,20}$/;
 
@@ -13,9 +14,8 @@ const validateUpdateProfile = (req, _res, next) => {
 const validateChangePassword = (req, _res, next) => {
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword) return next(new AppError('currentPassword is required', 400));
-  if (!newPassword || newPassword.length < 6) {
-    return next(new AppError('newPassword must be at least 6 characters', 400));
-  }
+  const weakness = findPasswordWeakness(newPassword);
+  if (weakness) return next(new AppError(weakness, 400, 'WEAK_PASSWORD'));
   next();
 };
 

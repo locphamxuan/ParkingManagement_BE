@@ -86,6 +86,20 @@ tính năng này như đang sống dù đã xoá 6 ngày trước đó — đã 
 `ReservationsPage`/`StaffReservationsPage`/`userApi.reservations.*`) và Mobile
 (xoá chế độ `bookingType:'hourly'` khỏi `useReservations`, giữ lại mua gói).
 
+Đợt dọn 2026-07-29 gỡ nốt phần "trôi" còn lại trên cả 3 repo: swagger tag
+`User/Staff - Reservations` + `Manager - Reservation Policy` (không route nào
+dùng), nhóm doanh thu `bySource.reservation` (thay bằng `bySource.other`), các
+field FE đã chết (`activeReservation`/`isReservation`/`reservationRemainingFee`),
+nhánh check-in `checkInKind:'reservation'`, tab + route `reservations` của Mobile.
+**Chỉ còn 3 luồng khách hàng**: gửi xe vãng lai · gửi xe có tài khoản (không gói)
+· gói dài hạn (slot floating hoặc slot cố định).
+
+**Giữ lại có chủ đích (tương thích dữ liệu LỊCH SỬ, không phải tính năng)**:
+`Payment.type='reservation'`, `BuildingWalletTransaction.reason='reservation_fee'`,
+collection `reservation_policies` + model `ReservationPolicy` (nay là refund policy
+của gói), audit action `*_RESERVATION`. Xoá enum chỉ được phép sau khi
+`src/scripts/auditLegacyReservationPayments.js` trả về 0 ở mọi môi trường thật.
+
 ### Long-term package (gói dài hạn)
 - **Mặc định floating** (không giữ slot cố định); staff/hệ thống gán slot trống
   dãy `subscriber` lúc check-in. Hết bãi → gói cũng bị chặn theo capacity (không
@@ -95,6 +109,12 @@ tính năng này như đang sống dù đã xoá 6 ngày trước đó — đã 
   building, `usageType:'subscriber'`, còn `available`, đúng vehicleType) → claim
   slot đó ngay (chuyển `reserved`), lưu vào `Subscription.slot`; check-in sau đó
   tự nhận đúng slot đã giữ. Đây là cơ chế thay thế cho reservation theo giờ đã bỏ.
+- **Loại xe của GÓI (`package.vehicleType`) là nguồn sự thật lúc vào bãi** — cả
+  check-in staff lẫn kiosk QR: dùng để validate dãy, chọn slot floating, validate
+  slot staff chọn tay và gán `ParkingSession.vehicleType`. Loại xe camera nhận
+  diện / client gửi lên chỉ là dữ liệu hỗ trợ; khác NHÓM (xe máy = `motorcycle`,
+  `ebike`, `emotorbike`; ô tô = phần còn lại) → 409 `PACKAGE_VEHICLE_TYPE_MISMATCH`,
+  `forceCheckIn` KHÔNG bỏ qua được.
 - 1 biển số chỉ có tối đa 1 gói `active` cùng lúc (unique partial index DB-level
   trên `plateNumber` khi `status:'active'` — gói `pending/cancelled/expired` không
   bị tính nên vẫn mua lại được sau khi hủy/hết hạn).
@@ -140,7 +160,14 @@ tính năng này như đang sống dù đã xoá 6 ngày trước đó — đã 
   xe) theo phương thức staff/khách chọn lúc đó (cash → `pending` chờ manager
   "Thu nhận"; wallet → trừ ví ngay, yêu cầu phiên có `user` liên kết — khách
   vãng lai không tài khoản dùng wallet sẽ bị chặn `NO_WALLET_ACCOUNT`, phải
-  chuyển cash) → incident chuyển `resolved`. `penalty_pending` không cho đổi
+  chuyển cash) → incident chuyển `resolved`. Phí gửi xe và phí phạt là HAI khoản
+  thu riêng nên được phép khác phương thức: `penaltyPaymentMethod` (chỉ
+  `cash`/`wallet`) trong body check-out chỉ định riêng cách thu phạt, mặc định
+  theo `paymentMethod` của lượt check-out. Khi phí gửi xe đã trả qua QR PayOS mà
+  phạt được duyệt SAU lúc tạo QR (QR chỉ chứa phí gửi xe), `penaltyPaymentMethod`
+  là BẮT BUỘC — thiếu → 400 `PENALTY_PAYMENT_METHOD_REQUIRED`, sai giá trị → 400
+  `INVALID_PENALTY_PAYMENT_METHOD`, không thu nửa vời (tạo QR khi ĐÃ có phạt vẫn
+  bị chặn như cũ). `penalty_pending` không cho đổi
   status thủ công (tránh mất dấu khoản phạt chưa thu) và không cho duyệt phạt
   lại trên incident đã `resolved/closed` (tránh double-charge biển số).
 

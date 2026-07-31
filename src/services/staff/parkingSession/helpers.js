@@ -1,11 +1,12 @@
 const mongoose = require('mongoose');
+const AppError = require('../../../utils/AppError');
 const {
   ParkingSession,
   ParkingSlot,
   LongTermSubscription,
   VehicleType,
 } = require('../../../models');
-const { calculateParkingFee } = require('../../../utils/feeEngine');
+const { computeFee, calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { expireStaleSubscriptions } = require('../../shared/slotLifecycle.service');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
@@ -35,23 +36,83 @@ const resolveVehicleTypeId = async (buildingId, categoryOrId, session = null) =>
   const exact = types.find((type) => type.category === category);
   if (exact) return exact._id;
 
+  // Bỏ qua danh mục manager chưa map (category = null): kindOfCategory(null) trả
+  // 'car', lấy nhầm sẽ thành đoán bừa đúng thứ mà việc map ra để tránh.
   const kind = kindOfCategory(category);
-  return types.find((type) => kindOfCategory(type.category) === kind)?._id || null;
+  return types.find((type) => type.category && kindOfCategory(type.category) === kind)?._id || null;
 };
 
 /** Nhóm tính phí ('motorcycle' | 'car') của một danh mục loại xe của tòa. */
-const vehicleKindFromType = (vehicleType) => kindOfCategory(vehicleType?.category);
+// null khi danh mục chưa map category (hoặc chưa populate field đó): trả bừa 'car'
+// sẽ khiến assertPackageVehicleKind so sai và chặn nhầm đúng loại xe. Không biết thì
+// nói không biết, phía gọi sẽ bỏ qua ràng buộc thay vì áp ngược.
+const vehicleKindFromType = (vehicleType) =>
+  vehicleType?.category ? kindOfCategory(vehicleType.category) : null;
+
+/**
+ * Nhóm loại xe của một VehicleType chỉ có reference (slot/dãy lưu ObjectId).
+ * null = không gắn loại xe (slot "vạn năng") → hợp với mọi loại.
+ */
+const loadVehicleKind = async (vehicleTypeId, session = null) => {
+  if (!vehicleTypeId) return null;
+  const vt = await VehicleType.findById(vehicleTypeId).session(session);
+  return vt ? vehicleKindFromType(vt) : null;
+};
+
+/**
+ * Loại xe CHÍNH THỨC của một lượt vào bãi theo gói dài hạn: luôn là loại xe của
+ * GÓI (`subscription.package.vehicleType`, đã populate). Loại xe camera nhận diện
+ * hoặc staff/client gửi lên chỉ là dữ liệu hỗ trợ — không được ghi đè ràng buộc
+ * của gói (gói xe máy không được cấp ô ô tô và ngược lại).
+ */
+const packageVehicleOf = (subscription) => {
+  const vt = subscription?.package?.vehicleType || null;
+  const isPopulated = Boolean(vt?.code || vt?.name || vt?.category);
+  return {
+    id: vt?._id || vt || null,
+    kind: isPopulated ? vehicleKindFromType(vt) : null,
+  };
+};
+
+/** Ràng buộc loại xe của gói — dùng chung cho check-in staff và kiosk. */
+const assertPackageVehicleKind = (packageKind, candidateKind, message) => {
+  if (packageKind && candidateKind && packageKind !== candidateKind) {
+    throw new AppError(message, 409, 'PACKAGE_VEHICLE_TYPE_MISMATCH');
+  }
+};
 
 const asObjectId = (value) =>
   mongoose.Types.ObjectId.isValid(value) ? value : null;
 
 // Trùng biển CHỈ xét trong CÙNG tòa nhà — phiên active ở tòa khác không chặn check-in
-// ở tòa này (mỗi tòa vận hành độc lập; vẫn có forceCheckIn để bỏ qua nếu cần).
-const findDuplicateActiveSession = async (plateNumber, buildingId) => {
+// ở tòa này (mỗi tòa vận hành độc lập). Bất biến này được chốt ở tầng DB bằng unique
+// partial index `uniq_active_session_per_plate_building`; hàm này chỉ để báo lỗi đẹp
+// TRƯỚC khi ghi, KHÔNG phải cơ chế bảo vệ duy nhất.
+const findDuplicateActiveSession = async (plateNumber, buildingId, mongoSession = null) => {
   const filter = { plateNumber, status: 'active' };
   if (buildingId) filter.building = buildingId;
-  return ParkingSession.findOne(filter);
+  const query = ParkingSession.findOne(filter);
+  if (mongoSession) query.session(mongoSession);
+  return query;
 };
+
+/**
+ * Lỗi 11000 của unique index phiên-active → lỗi nghiệp vụ ổn định, dùng CHUNG cho
+ * staff check-in và kiosk để hai đường vào bãi không lệch thông điệp/mã lỗi.
+ */
+const isDuplicateActiveSessionError = (error) => {
+  if (error?.code !== 11000) return false;
+  if (`${error?.message || ''}`.includes('uniq_active_session_per_plate_building')) return true;
+
+  const keys = Object.keys(error?.keyPattern || {}).sort();
+  return keys.length === 2 && keys[0] === 'building' && keys[1] === 'plateNumber';
+};
+
+const duplicateActiveSessionError = () => new AppError(
+  'This plate already has an active parking session in this building. Check the vehicle out before checking it in again.',
+  409,
+  'DUPLICATE_ACTIVE_SESSION',
+);
 
 /**
  * ĐỊNH NGHĨA DUY NHẤT của "gói dài hạn đang hiệu lực" — dùng chung cho cả check-in
@@ -77,6 +138,13 @@ const activeSubscriptionMatch = (now = new Date()) => {
   };
 };
 
+/** Populate loại xe của gói — nguồn sự thật cho ràng buộc slot lúc vào bãi. */
+const POPULATE_PACKAGE_VEHICLE_TYPE = {
+  path: 'package',
+  select: 'vehicleType maxHoursPerDay',
+  populate: { path: 'vehicleType', select: 'code name category' },
+};
+
 const resolveLongTermSubscription = async (plateNumber, allowedBuildings, mongoSession = null) => {
   const now = new Date();
   const query = LongTermSubscription.findOne({
@@ -84,7 +152,9 @@ const resolveLongTermSubscription = async (plateNumber, allowedBuildings, mongoS
     ...activeSubscriptionMatch(now),
     building: { $in: allowedBuildings },
   })
+    .populate('user', 'isActive')
     .populate('slot')
+    .populate(POPULATE_PACKAGE_VEHICLE_TYPE)
     .sort({ updatedAt: -1 });
   if (mongoSession) query.session(mongoSession);
   const subscription = await query;
@@ -94,6 +164,13 @@ const resolveLongTermSubscription = async (plateNumber, allowedBuildings, mongoS
       { plateNumber, buildingIds: allowedBuildings, now },
       mongoSession,
     );
+    return null;
+  }
+
+  // A long-term entitlement must always have a live owner account. This is
+  // normally guaranteed by the account-deletion guard, but checking again at
+  // the gate prevents legacy/corrupt records from granting a free entry.
+  if (!subscription.user || subscription.user.isActive === false) {
     return null;
   }
 
@@ -227,32 +304,32 @@ const calculateLongTermOverageFee = async (parkingSession, now = new Date()) => 
 };
 
 /**
- * Compute the parking fee (VND) for a session — price by vehicle type via
- * PricePolicy, falling back to a flat hourly rate by kind. Mirrors checkOut.
- * Gói dài hạn (long_term): miễn phí trong hạn mức/ngày, chỉ tính phần vượt.
+ * Quote a regular session exclusively from the building's active PricePolicy.
+ * A missing policy is intentionally exposed to callers so checkout can stop
+ * instead of silently charging a legacy fallback rate.
  */
-const calculateFee = async (parkingSession, preloadedPolicies) => {
-  if (parkingSession.fee && parkingSession.fee > 0) return parkingSession.fee;
-  const now = new Date();
-  if (parkingSession.paymentMethod === 'long_term') {
-    const { fee } = await calculateLongTermOverageFee(parkingSession, now);
-    return fee;
-  }
-  const vtId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
-  let fee = await calculateParkingFee(parkingSession.building, vtId, parkingSession.entryTime, now, preloadedPolicies);
-  if (!fee || fee <= 0) {
-    const kind = vehicleKindFromType(parkingSession.vehicleType);
-    const hours = Math.max(1, Math.ceil((now.getTime() - new Date(parkingSession.entryTime).getTime()) / (1000 * 60 * 60)));
-    fee = hours * (DEFAULT_HOURLY_RATE[kind] || DEFAULT_HOURLY_RATE.car);
-  }
-  return fee;
+const calculateRegularSessionFee = async (parkingSession, preloadedPolicies, now = new Date()) => {
+  const vehicleTypeId = parkingSession.vehicleType?._id || parkingSession.vehicleType || null;
+  return computeFee({
+    buildingId: parkingSession.building,
+    vehicleTypeId,
+    start: parkingSession.entryTime,
+    end: now,
+    preloadedPolicies,
+  });
 };
 
 module.exports = {
   resolveVehicleTypeId,
   vehicleKindFromType,
+  loadVehicleKind,
+  packageVehicleOf,
+  assertPackageVehicleKind,
+  POPULATE_PACKAGE_VEHICLE_TYPE,
   asObjectId,
   findDuplicateActiveSession,
+  isDuplicateActiveSessionError,
+  duplicateActiveSessionError,
   activeSubscriptionMatch,
   resolveLongTermSubscription,
   resolveCustomerUsageType,
@@ -261,6 +338,6 @@ module.exports = {
   usageRanker,
   findCompatibleSlots,
   findCapacityForBuilding,
-  calculateFee,
+  calculateRegularSessionFee,
   calculateLongTermOverageFee,
 };

@@ -17,19 +17,19 @@ beforeEach(async () => { await db.clear(); admin = await f.createUser({ role: 'a
 
 describe('user.service', () => {
   test('create user (mặc định role user)', async () => {
-    const u = await userSvc.create(admin, { email: 'new@test.com', password: 'secret1', fullName: 'New' });
+    const u = await userSvc.create(admin, { email: 'new@test.com', password: 'correct-horse-battery', fullName: 'New' });
     expect(u.role).toBe('user');
   });
 
   test('create email trùng → 409', async () => {
-    await userSvc.create(admin, { email: 'dup@test.com', password: 'secret1', fullName: 'A' });
-    await expect(userSvc.create(admin, { email: 'dup@test.com', password: 'secret1', fullName: 'B' }))
+    await userSvc.create(admin, { email: 'dup@test.com', password: 'correct-horse-battery', fullName: 'A' });
+    await expect(userSvc.create(admin, { email: 'dup@test.com', password: 'correct-horse-battery', fullName: 'B' }))
       .rejects.toMatchObject({ statusCode: 409 });
   });
 
   test('tạo 2 user không nhập phone → không đụng sparse unique index', async () => {
-    const u1 = await userSvc.create(admin, { email: 'nophone1@test.com', password: 'secret1', fullName: 'A' });
-    const u2 = await userSvc.create(admin, { email: 'nophone2@test.com', password: 'secret1', fullName: 'B' });
+    const u1 = await userSvc.create(admin, { email: 'nophone1@test.com', password: 'correct-horse-battery', fullName: 'A' });
+    const u2 = await userSvc.create(admin, { email: 'nophone2@test.com', password: 'correct-horse-battery', fullName: 'B' });
     expect(u1.phone).toBeFalsy();
     expect(u2.phone).toBeFalsy();
   });
@@ -139,7 +139,7 @@ describe('revenue.service', () => {
     const b = await f.createBuilding();
     await Payment.create([
       { building: b._id, type: 'session', method: 'cash', amount: 20000, status: 'success' },
-      { building: b._id, type: 'reservation', method: 'wallet', amount: 30000, status: 'success' },
+      { building: b._id, type: 'subscription', method: 'wallet', amount: 30000, status: 'success' },
       { building: b._id, type: 'session', method: 'cash', amount: 10000, status: 'pending' }, // bỏ (pending)
     ]);
     const from = new Date(Date.now() - 24 * 3600 * 1000);

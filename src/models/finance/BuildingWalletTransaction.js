@@ -15,6 +15,8 @@ const buildingWalletTransactionSchema = new mongoose.Schema(
     },
     amount: { type: Number, required: true, min: 0 },
     balanceAfter: { type: Number, required: true, min: 0 },
+    // 'reservation_fee' là lý do LỊCH SỬ (tính năng đặt chỗ theo giờ đã bỏ) — giữ
+    // trong enum để đọc được sổ quỹ cũ; KHÔNG còn bản ghi mới nào dùng giá trị này.
     reason: {
       type: String,
       enum: ['parking_fee', 'reservation_fee', 'subscription_fee', 'penalty_fee', 'transfer_to_system', 'refund', 'topup'],

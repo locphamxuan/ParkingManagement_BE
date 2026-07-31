@@ -57,8 +57,11 @@ describe('vehicleKindFromType (nhóm tính phí, đọc từ category)', () => {
   test('KHÔNG còn đoán theo tên/mã: tên "Xe máy" mà category=car vẫn ra car', () => {
     expect(vehicleKindFromType({ code: 'MOTORCYCLE', name: 'Xe máy', category: 'car' })).toBe('car');
   });
-  test('thiếu category → car (nhóm mặc định)', () => {
-    expect(vehicleKindFromType({})).toBe('car');
-    expect(vehicleKindFromType(null)).toBe('car');
+  test('thiếu category → null, KHÔNG đoán car', () => {
+    // Đoán 'car' ở đây từng làm gói xe máy đọc thành gói ô tô rồi chặn nhầm đúng
+    // loại xe của nó. Không biết thì trả null để phía gọi bỏ qua ràng buộc.
+    expect(vehicleKindFromType({})).toBeNull();
+    expect(vehicleKindFromType(null)).toBeNull();
+    expect(vehicleKindFromType({ code: 'CAR', name: 'Ô tô' })).toBeNull();
   });
 });

@@ -164,7 +164,7 @@ ParkingManagement_BE/
         ├── token.js          # signToken / verifyToken (JWT)
         ├── findPort.js       # Tự chọn port trống khi dev
         ├── formatDate.js     # Định dạng ngày giờ
-        └── generateBookingCode.js  # Sinh mã đặt chỗ
+        └── generateBookingCode.js  # Sinh mã tham chiếu ngắn (mã sự cố INC-…)
 ```
 
 ### Quy ước khi thêm tính năng mới
@@ -200,7 +200,7 @@ Theo ERD — ánh xạ sang MongoDB (Mongoose):
 | `revenue_distributions` | Phân bổ doanh thu |
 | `shifts` / `staff_shifts` / `shift_revenues` | Ca trực & doanh thu ca |
 | `building_managers` | Gán manager ↔ building |
-| `reservation_policies` / `policy_push_logs` | Chính sách đặt chỗ |
+| `reservation_policies` | Chính sách hoàn tiền khi hủy gói dài hạn (collection giữ tên cũ) |
 | `notifications` | Thông báo |
 | `feedbacks` | Đánh giá building |
 | `audit_logs` | Nhật ký thao tác admin |
@@ -229,10 +229,6 @@ Header chung (khi cần đăng nhập): `Authorization: Bearer <token>`
 | GET | `/buildings/:id/slots` | Tra cứu ô trống 
 | GET | `/buildings/:id/feedbacks` | Đánh giá bãi 
 | POST | `/buildings/:id/feedbacks` | Gửi đánh giá 
-| POST | `/reservations` | Đặt chỗ trước (theo policy) 
-| GET | `/reservations` | Danh sách đặt chỗ của tôi 
-| GET | `/reservations/:id` | Chi tiết đặt chỗ 
-| PATCH | `/reservations/:id/cancel` | Hủy đặt chỗ 
 | GET | `/parking-sessions` | Lịch sử gửi xe 
 | GET | `/parking-sessions/:id` | Chi tiết phiên + phí 
 | GET | `/packages` | Gói vé dài hạn (lọc building) 
@@ -268,8 +264,7 @@ Header chung (khi cần đăng nhập): `Authorization: Bearer <token>`
 | CRUD | `/buildings/:id/shifts` | Định nghĩa ca trực 
 | GET/POST | `/staff-shifts` | Phân ca nhân viên 
 | CRUD | `/packages` | Gói vé dài hạn 
-| CRUD | `/reservation-policies` | Chính sách đặt chỗ 
-| POST | `/reservation-policies/:id/push` | Đẩy policy (`policy_push_logs`) 
+| GET/PUT | `/buildings/:buildingId/refund-policy` | % hoàn tiền khi hủy gói dài hạn
 | GET | `/buildings/:buildingId/wallet/revenue-breakdown` | Doanh thu gộp, hoàn tiền, thuần và tiền mặt chờ xác nhận
 | GET | `/subscriptions` | Gói đã bán trong tòa 
 | GET | `/feedbacks` | Phản hồi khách 

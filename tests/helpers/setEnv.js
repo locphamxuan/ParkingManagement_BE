@@ -13,3 +13,10 @@ process.env.PAYOS_CHECKSUM_KEY = process.env.PAYOS_CHECKSUM_KEY || 'test-checksu
 process.env.CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 process.env.FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 process.env.KIOSK_DEVICE_TOKEN = process.env.KIOSK_DEVICE_TOKEN || 'test-kiosk-device-token';
+
+// OCR nhận diện biển số: ghim RỖNG để test không bao giờ phụ thuộc .env của máy
+// dev (dotenv không ghi đè key đã tồn tại, kể cả khi giá trị là ''). Test nào cần
+// một provider cụ thể thì tự set env.ocrProvider / paddleOcrUrl / geminiApiKey.
+process.env.OCR_PROVIDER = '';
+process.env.GEMINI_API_KEY = '';
+process.env.PADDLE_OCR_URL = '';

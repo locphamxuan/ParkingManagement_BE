@@ -16,9 +16,16 @@ const authenticate = asyncHandler(async (req, _res, next) => {
     throw new AppError("Access denied. No token provided.", 401);
   }
 
-  const { id } = verifyToken(token);
+  const { id, tv } = verifyToken(token);
   const user = await User.findById(id);
   if (!user) throw new AppError("User no longer exists", 401);
+
+  // Token revocation: anything signed before the last logout / password change
+  // carries a stale (or, for pre-upgrade tokens, missing) version.
+  if (typeof tv !== "number" || tv !== (user.tokenVersion || 0)) {
+    throw new AppError("Session has been revoked. Please sign in again.", 401, "TOKEN_REVOKED");
+  }
+
   if (!user.isActive) throw new AppError("Account is deactivated", 403);
 
   const assignments = await BuildingManager.find({ user: id, isActive: true }).select('building');

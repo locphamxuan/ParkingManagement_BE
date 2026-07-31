@@ -8,6 +8,7 @@ const f = require('../helpers/fixtures');
 const kioskSvc = require('../../src/services/kiosk.service');
 const User = require('../../src/models/user/User');
 const LongTermSubscription = require('../../src/models/policy/LongTermSubscription');
+const Vehicle = require('../../src/models/vehicle/Vehicle');
 const ParkingSlot = require('../../src/models/building/ParkingSlot');
 const ParkingSession = require('../../src/models/operations/ParkingSession');
 
@@ -43,6 +44,34 @@ const seedSubscriberWithDedicatedSlot = async () => {
   });
   const qrCode = user.vehicles[0].qrCode;
   return { user, dedicatedSlot, subscription, qrCode };
+};
+
+/** Gói XE MÁY floating (không giữ ô cố định) trong toà có cả ô xe máy lẫn ô ô tô. */
+const seedFloatingMotorbikeSubscriber = async () => {
+  const motorbikeType = await f.createVehicleType(building._id, { code: 'MOTORBIKE', name: 'Xe máy' });
+  const carType = await f.createVehicleType(building._id, { code: 'CAR', name: 'Ô tô' });
+  const motorbikeSlot = await f.createSlot(building._id, floor._id, {
+    code: 'M1', usageType: 'subscriber', vehicleType: motorbikeType._id,
+  });
+  const carSlot = await f.createSlot(building._id, floor._id, {
+    code: 'C1', usageType: 'subscriber', vehicleType: carType._id,
+  });
+  const motorbikePkg = await f.createPackage(building._id, motorbikeType._id);
+  // Qua fixture chứ không User.create thẳng: `vehicles` không phải path của User,
+  // gán thẳng sẽ bị Mongoose bỏ im lặng và xe không bao giờ được tạo.
+  const owner = await f.createUser({
+    email: 'kiosk-motorbike@test.com', fullName: 'Kiosk Rider', role: 'user',
+    vehicles: [{ plateNumber: '59X1-222.22', category: 'motorcycle' }],
+  });
+  await LongTermSubscription.create({
+    user: owner._id, package: motorbikePkg._id, building: building._id,
+    plateNumber: '59X1-222.22',
+    startDate: new Date(Date.now() - 24 * 3600 * 1000),
+    endDate: new Date(Date.now() + 29 * 24 * 3600 * 1000),
+    status: 'active',
+  });
+  const qrCode = (await Vehicle.findOne({ owner: owner._id })).qrCode;
+  return { qrCode, motorbikeSlot, carSlot, motorbikeType };
 };
 
 describe('kiosk.service.selfCheckInByQr', () => {
@@ -100,6 +129,21 @@ describe('kiosk.service.selfCheckInByQr', () => {
     expect((await ParkingSlot.findById(dedicatedSlot._id)).status).toBe('occupied');
   });
 
+  test('slot cố định lệch loại xe của package → 409 và transaction giữ slot ở reserved', async () => {
+    const { dedicatedSlot, qrCode } = await seedSubscriberWithDedicatedSlot();
+    const motorbikeType = await f.createVehicleType(building._id, { code: 'MOTORBIKE', name: 'Xe máy' });
+    await ParkingSlot.updateOne(
+      { _id: dedicatedSlot._id },
+      { $set: { vehicleType: motorbikeType._id } },
+    );
+
+    await expect(kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id })).rejects.toMatchObject({
+      statusCode: 409, errorCode: 'PACKAGE_VEHICLE_TYPE_MISMATCH',
+    });
+    expect((await ParkingSlot.findById(dedicatedSlot._id)).status).toBe('reserved');
+    expect(await ParkingSession.countDocuments({})).toBe(0);
+  });
+
   test('slot cố định đang occupied → tự động fallback sang slot trống dãy subscriber', async () => {
     const { dedicatedSlot, qrCode } = await seedSubscriberWithDedicatedSlot();
     dedicatedSlot.status = 'occupied';
@@ -119,6 +163,27 @@ describe('kiosk.service.selfCheckInByQr', () => {
     await expect(kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id })).rejects.toMatchObject({
       statusCode: 409, errorCode: 'FIXED_SLOT_OCCUPIED',
     });
+  });
+
+  test('gói floating: chỉ nhận ô đúng loại xe của GÓI, không mượn ô ô tô', async () => {
+    const { qrCode, motorbikeSlot, carSlot, motorbikeType } = await seedFloatingMotorbikeSubscriber();
+
+    const result = await kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id });
+
+    expect(String(result.parkingSession.slot)).toBe(String(motorbikeSlot._id));
+    expect(String(result.parkingSession.vehicleType)).toBe(String(motorbikeType._id));
+    expect((await ParkingSlot.findById(carSlot._id)).status).toBe('available');
+  });
+
+  test('gói floating: chỉ còn ô ô tô trống → 409 NO_SLOT_AVAILABLE, không cấp ô sai loại', async () => {
+    const { qrCode, motorbikeSlot, carSlot } = await seedFloatingMotorbikeSubscriber();
+    await ParkingSlot.updateOne({ _id: motorbikeSlot._id }, { $set: { status: 'occupied' } });
+
+    await expect(kioskSvc.selfCheckInByQr({ qrCode, gate: kioskGate._id })).rejects.toMatchObject({
+      statusCode: 409, errorCode: 'NO_SLOT_AVAILABLE',
+    });
+    expect((await ParkingSlot.findById(carSlot._id)).status).toBe('available');
+    expect(await ParkingSession.countDocuments({})).toBe(0);
   });
 
   test('xe đã có phiên active trong cùng toà → 409 DUPLICATE_PLATE, không tạo phiên mới', async () => {

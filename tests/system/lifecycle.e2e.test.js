@@ -34,6 +34,9 @@ async function seedFullScene() {
   const building = await f.createBuilding({ operatingHours: { open: '00:00', close: '23:59' } });
   const vt = await f.createVehicleType(building._id);
   const floor = await f.createFloor(building._id, { capacity: 100 });
+  // Check-out phiên thường nay BẮT BUỘC có PricePolicy đang hiệu lực cho đúng
+  // (building, vehicleType) — thiếu là 409 PRICE_POLICY_NOT_CONFIGURED.
+  await f.createPricePolicy(building._id, vt._id, { hourlyRate: 10000 });
   const zone = await f.createZone(building._id, floor._id, vt._id, { usageType: 'walk_in' });
   const slot = await f.createSlot(building._id, floor._id, {
     zone: zone._id, vehicleType: vt._id, usageType: 'walk_in',
@@ -55,9 +58,9 @@ async function seedFullScene() {
 
   return {
     building, vt, floor, zone, slot, staff, customer, manager,
-    staffToken: signToken(staff._id),
-    userToken: signToken(customer._id),
-    managerToken: signToken(manager._id),
+    staffToken: signToken(staff),
+    userToken: signToken(customer),
+    managerToken: signToken(manager),
   };
 }
 
@@ -97,12 +100,21 @@ describe('E2E · Auth & RBAC boundary (HTTP)', () => {
     expect(meRes.status).toBe(200);
     expect(meRes.body.data.user.email).toBe(s.customer.email);
 
+    // Cookie-authenticated writes now require an allowed Origin (CSRF guard);
+    // real browsers always send it on POST.
     const logoutRes = await request(app)
       .post('/api/users/auth/logout')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', authCookie);
     expect(logoutRes.status).toBe(200);
     const clearCookie = logoutRes.headers['set-cookie'] || [];
     expect(clearCookie.some((c) => c.startsWith(`${COOKIE_NAME}=;`))).toBe(true);
+
+    // Logout revokes the token version, so the same cookie is dead immediately.
+    const afterLogout = await request(app)
+      .get('/api/users/auth/me')
+      .set('Cookie', authCookie);
+    expect(afterLogout.status).toBe(401);
   });
 
   test('login sai mật khẩu → 401', async () => {

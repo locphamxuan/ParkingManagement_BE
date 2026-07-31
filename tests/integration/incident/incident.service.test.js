@@ -17,13 +17,17 @@ const Payment = require('../../../src/models/finance/Payment');
 const LongTermSubscription = require('../../../src/models/policy/LongTermSubscription');
 const ViolationType = require('../../../src/models/policy/ViolationType');
 
-let building, staff, manager, reporter;
+let building, staff, manager, reporter, vehicleType;
 
 beforeAll(async () => { await db.connect(); });
 afterAll(async () => { await db.close(); });
 beforeEach(async () => {
   await db.clear();
   building = await f.createBuilding();
+  // Check-out phiên thường nay BẮT BUỘC có PricePolicy đang hiệu lực cho đúng
+  // (building, vehicleType) — thiếu là 409 PRICE_POLICY_NOT_CONFIGURED.
+  vehicleType = await f.createVehicleType(building._id);
+  await f.createPricePolicy(building._id, vehicleType._id, { hourlyRate: 10000 });
   staff = await f.createUser({ role: 'staff' });
   staff.assignedBuildings = [building._id];
   manager = await f.managerFor(building._id);
@@ -34,13 +38,24 @@ beforeEach(async () => {
   // User-facing incident.service chỉ chấp nhận type='slot_occupied' nếu có ViolationType
   // khớp code này cho building — seed sẵn (mô phỏng manager đã cấu hình bảng giá).
   await ViolationType.create({ building: building._id, code: 'slot_occupied', label: 'Occupying a reserved slot', fee: 100000 });
+  // Người báo cáo phải có QUAN HỆ thật với tòa nhà (đã/đang gửi xe hoặc có gói) —
+  // BE không cho gắn sự cố vào một tòa nhà bất kỳ do client gửi lên.
+  await ParkingSession.create({
+    plateNumber: '51F-000.11',
+    building: building._id,
+    user: reporter._id,
+    status: 'completed',
+    entryTime: new Date(Date.now() - 3 * 3600 * 1000),
+    exitTime: new Date(Date.now() - 2 * 3600 * 1000),
+  });
 });
 
 const activeSession = async (plateNumber, over = {}) => {
   const floor = await f.createFloor(building._id);
   const slot = await f.createSlot(building._id, floor._id, { status: 'occupied' });
   const session = await ParkingSession.create({
-    plateNumber, building: building._id, slot: slot._id, status: 'active', staff: staff._id, ...over,
+    plateNumber, building: building._id, slot: slot._id, vehicleType: vehicleType._id,
+    status: 'active', staff: staff._id, ...over,
   });
   return { slot, session };
 };
@@ -281,6 +296,39 @@ describe('rule 3 — staff check-out xe vi phạm mới thực thu; cash pending
 });
 
 describe('user incident.service — type động theo bảng giá vi phạm của manager (không hard code)', () => {
+  test('user cannot report an incident in an unrelated building or attach its slot', async () => {
+    const unrelatedBuilding = await f.createBuilding();
+    const unrelatedFloor = await f.createFloor(unrelatedBuilding._id);
+    const unrelatedSlot = await f.createSlot(unrelatedBuilding._id, unrelatedFloor._id);
+
+    await expect(
+      userIncidentSvc.createIncident(reporter._id, {
+        type: 'other', buildingId: unrelatedBuilding._id,
+      }),
+    ).rejects.toMatchObject({ errorCode: 'BUILDING_RELATION_REQUIRED' });
+
+    await expect(
+      userIncidentSvc.createIncident(reporter._id, {
+        type: 'other', buildingId: building._id, slotId: unrelatedSlot._id,
+      }),
+    ).rejects.toMatchObject({ errorCode: 'SLOT_BUILDING_MISMATCH' });
+  });
+
+  test('staff cannot attach a parking session from another building', async () => {
+    const unrelatedBuilding = await f.createBuilding();
+    const foreignSession = await ParkingSession.create({
+      building: unrelatedBuilding._id,
+      plateNumber: '51F-800.80',
+      status: 'active',
+    });
+
+    await expect(
+      staffIncidentSvc.createIncident(staff, {
+        type: 'other', buildingId: building._id, parkingSessionId: foreignSession._id,
+      }),
+    ).rejects.toMatchObject({ errorCode: 'PARKING_SESSION_BUILDING_MISMATCH' });
+  });
+
   test('type là loại vi phạm chưa được manager cấu hình → 400 INVALID_INCIDENT_TYPE', async () => {
     await expect(
       userIncidentSvc.createIncident(reporter._id, {
