@@ -6,9 +6,11 @@ const { PricePolicy, ReservationPolicy, LongTermPackage, LongTermSubscription, V
 const { ParkingSession, Shift, StaffShift, Feedback } = require("./operations");
 const { Payment, WalletTransaction, BuildingWallet, BuildingWalletTransaction } = require("./finance");
 const { AuditLog, Incident, Notification } = require('./log');
+const { Vehicle } = require('./vehicle');
 module.exports = {
   User,
   OtpVerification,
+  Vehicle,
   Building,
   BuildingManager,
   VehicleType,

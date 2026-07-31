@@ -33,5 +33,12 @@ services:
         sync: false
       - key: EMAIL_PASS
         sync: false
+      # Camera cổng: thiếu key này thì mọi lần quét biển số trả 503
+      # AI_SCAN_NOT_CONFIGURED (service không có nhánh mock). PaddleOCR là bản
+      # self-host nên không dùng được trên Render free → chốt provider gemini.
+      - key: OCR_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
       - key: KIOSK_DEVICE_TOKEN
         generateValue: true

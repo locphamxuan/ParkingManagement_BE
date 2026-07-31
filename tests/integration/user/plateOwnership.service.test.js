@@ -12,6 +12,7 @@ const {
   ParkingSession,
   ParkingSlot,
   User,
+  Vehicle,
 } = require('../../../src/models');
 
 jest.setTimeout(180000);
@@ -40,10 +41,10 @@ const walletOf = async (userId) => (await User.findById(userId)).walletBalance;
 test('mua gói bằng biển KHÔNG thuộc account → 403 PLATE_OWNERSHIP_REQUIRED, không trừ ví', async () => {
   const buyer = await f.createUser({
     walletBalance: 1_000_000,
-    licensePlates: [{ plateNumber: '51F-111.11', vehicleType: 'car' }],
+    vehicles: [{ plateNumber: '51F-111.11', category: 'car' }],
   });
   // Biển của người khác — FE không cho chọn, nhưng API có thể bị gọi trực tiếp.
-  await f.createUser({ licensePlates: [{ plateNumber: '99Z-999.99', vehicleType: 'car' }] });
+  await f.createUser({ vehicles: [{ plateNumber: '99Z-999.99', category: 'car' }] });
 
   await expect(longTermService.subscribe(buyer._id, {
     packageId: pkg._id,
@@ -60,7 +61,7 @@ test('mua gói bằng biển KHÔNG thuộc account → 403 PLATE_OWNERSHIP_REQU
 test('gia hạn khi biển đã bị gỡ khỏi account → 403 PLATE_OWNERSHIP_REQUIRED, không trừ ví', async () => {
   const owner = await f.createUser({
     walletBalance: 1_000_000,
-    licensePlates: [{ plateNumber: '51F-222.22', vehicleType: 'car' }],
+    vehicles: [{ plateNumber: '51F-222.22', category: 'car' }],
   });
   const sub = await LongTermSubscription.create({
     user: owner._id,
@@ -71,8 +72,8 @@ test('gia hạn khi biển đã bị gỡ khỏi account → 403 PLATE_OWNERSHIP
     endDate: new Date(Date.now() + DAY),
     status: 'active',
   });
-  // Biển rời account (dữ liệu cũ tạo trước khi có guard xóa biển).
-  await User.updateOne({ _id: owner._id }, { $set: { licensePlates: [] } });
+  // Xe rời account (dữ liệu cũ tạo trước khi có guard xoá xe).
+  await Vehicle.deleteMany({ owner: owner._id });
 
   await expect(longTermService.renewSubscription(owner._id, sub._id)).rejects.toMatchObject({
     statusCode: 403,
@@ -87,7 +88,7 @@ test('kiosk: chủ QR khác chủ gói → từ chối, KHÔNG tạo phiên gử
   const plateNumber = '51F-333.33';
   // Người quét QR sở hữu biển…
   const qrOwner = await f.createUser({
-    licensePlates: [{ plateNumber, vehicleType: 'car' }],
+    vehicles: [{ plateNumber, category: 'car' }],
   });
   // …nhưng gói dài hạn của biển này lại đứng tên account khác.
   const packageOwner = await f.createUser();
@@ -106,7 +107,7 @@ test('kiosk: chủ QR khác chủ gói → từ chối, KHÔNG tạo phiên gử
     endDate: new Date(Date.now() + 29 * DAY),
     status: 'active',
   });
-  const qrCode = (await User.findById(qrOwner._id)).licensePlates[0].qrCode;
+  const qrCode = qrOwner.vehicles[0].qrCode;
 
   await expect(kioskService.selfCheckInByQr({ qrCode })).rejects.toMatchObject({
     statusCode: 404,

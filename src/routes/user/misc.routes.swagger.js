@@ -284,7 +284,7 @@
  *             type: object
  *             required: [qrCode]
  *             properties:
- *               qrCode: { type: string, example: PLT-7a9f2c11b8d4e003, description: "Vehicle QR token registered on the user's license plate (User.licensePlates[].qrCode)." }
+ *               qrCode: { type: string, example: PLT-7a9f2c11b8d4e003, description: "Vehicle QR token (Vehicle.qrCode). Rejected with 410 VEHICLE_QR_EXPIRED once older than VEHICLE_QR_TTL_DAYS (default 2 days); the driver gets a fresh token by opening the app." }
  *               building: { type: string, format: objectId, description: Optional — scopes the subscription lookup to one building. }
  *               gate: { type: string, format: objectId }
  *               plateImage: { type: string, example: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ' }

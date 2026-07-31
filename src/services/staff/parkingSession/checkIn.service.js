@@ -5,12 +5,14 @@ const {
   ParkingSession,
   ParkingSlot,
   VehicleType,
+  Vehicle,
   Zone,
-  User,
   Notification,
 } = require('../../../models');
+const { plateCoreOf } = require('../../../models/vehicle/Vehicle');
 const { assertBuildingScope, logAudit } = require('../../../utils/staffScope');
-const { normalizePlate, plateMatchRegex } = require('../../../utils/plate.util');
+const { normalizePlate } = require('../../../utils/plate.util');
+const { kindOfCategory, labelOfCategory } = require('../../../constants/vehicle');
 const {
   assertBuildingAcceptsEntry,
   assertStaffHasActiveShift,
@@ -262,33 +264,20 @@ const checkIn = async (user, payload) => {
         return created[0];
       }
 
-      // Link the session to the plate's owner account when one exists (account is
-      // the secondary identifier). Format-tolerant so 59G2-03880 / 59G2-038.80 match.
-      const registeredOwners = await User.find({
-        'licensePlates.plateNumber': plateMatchRegex(plateNumber) || plateNumber,
-      })
-        .select('_id licensePlates')
+      // Gắn phiên với tài khoản chủ xe nếu biển số đã đăng ký. Tra theo "lõi" biển số
+      // (chỉ chữ + số) nên 59G2-03880 và 59G2-038.80 cùng ra một xe; unique index trên
+      // plateCore bảo đảm không thể có hai chủ cho cùng một biển.
+      const registeredVehicle = await Vehicle.findOne({ plateCore: plateCoreOf(plateNumber) })
+        .select('_id owner category')
         .session(session);
-      if (registeredOwners.length > 1) {
-        throw new AppError(
-          'This license plate is linked to multiple accounts and must be resolved by an administrator',
-          409,
-          'DUPLICATE_PLATE_OWNERSHIP',
-        );
-      }
-      const registeredOwner = registeredOwners[0] || null;
-      const registeredPlate = registeredOwner?.licensePlates?.find(
-        (item) => normalizePlate(item.plateNumber) === plateNumber,
-      );
-      if (registeredPlate) {
-        const registeredKind = ['motorcycle', 'ebike', 'emotorbike'].includes(registeredPlate.vehicleType)
-          ? 'motorcycle'
-          : 'car';
+      const registeredOwnerId = registeredVehicle?.owner || null;
+      if (registeredVehicle) {
+        const registeredKind = kindOfCategory(registeredVehicle.category);
         const detectedKind = vehicleKindFromType(vehicleTypeRecord);
         if (detectedKind && registeredKind !== detectedKind) {
           if (!forceCheckIn) {
             throw new AppError(
-              `Vehicle type does not match registration (registered: ${registeredKind}).`,
+              `Loại xe không khớp với đăng ký (đã đăng ký: ${labelOfCategory(registeredVehicle.category)}).`,
               409,
               'VEHICLE_TYPE_MISMATCH',
             );
@@ -305,7 +294,10 @@ const checkIn = async (user, payload) => {
 
       // Đối tượng của lượt check-in (để khớp dãy/slot): có tài khoản → 'registered',
       // còn lại → 'walk_in'.
-      const usageType = resolveCustomerUsageType({ longTerm: null, registeredOwner });
+      const usageType = resolveCustomerUsageType({
+        longTerm: null,
+        registeredOwner: registeredOwnerId,
+      });
 
       // Tự gợi ý slot tương thích nếu staff chưa chọn.
       const selectedZone = await resolveSelectedZone({
@@ -381,7 +373,7 @@ const checkIn = async (user, payload) => {
           plateNumber,
           building: buildingId,
           staff: user._id,
-          user: registeredOwner?._id || null,
+          user: registeredOwnerId,
           slot: slotId,
           // Ưu tiên loại xe của dãy/slot; fallback loại xe camera nhận diện.
           vehicleType: assignedSlotVehicleType || vehicleType,

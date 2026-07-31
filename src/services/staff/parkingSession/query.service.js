@@ -1,7 +1,9 @@
 const AppError = require('../../../utils/AppError');
-const { ParkingSession, ParkingSlot, LongTermSubscription, User, Notification, PricePolicy } = require('../../../models');
+const { ParkingSession, ParkingSlot, LongTermSubscription, Vehicle, Notification, PricePolicy } = require('../../../models');
+const { plateCoreOf } = require('../../../models/vehicle/Vehicle');
 const { assignedBuildingIds, assertBuildingScope, logAudit } = require('../../../utils/staffScope');
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../../utils/plate.util');
+const { kindOfCategory, labelOfCategory } = require('../../../constants/vehicle');
 const visionScanService = require('../visionScan.service');
 const { assertStaffHasActiveShift } = require('../../shared/entryAuthorization.service');
 const { asObjectId, calculateFee, calculateLongTermOverageFee, activeSubscriptionMatch, resolveVehicleTypeId, slotCompatibilityFilter, usageRanker } = require('./helpers');
@@ -145,8 +147,12 @@ const lookupPlate = async (staffUser, plateNumber, buildingId) => {
   // (e.g. 59G2-03880 / 59G2-038.80) still resolves to its owner.
   const plateRx = plateMatchRegex(plate) || plate;
 
-  const user = await User.findOne({ 'licensePlates.plateNumber': plateRx })
-    .select('fullName licensePlates');
+  // Chủ xe được tra qua chính chiếc xe (unique theo lõi biển số) thay vì quét mảng
+  // biển nhúng trong User — một truy vấn có index, không còn regex trên toàn bảng.
+  const vehicle = await Vehicle.findOne({ plateCore: plateCoreOf(plate) })
+    .select('owner category brand')
+    .populate('owner', 'fullName');
+  const user = vehicle?.owner || null;
   const [activeSession, activeSub] = await Promise.all([
     ParkingSession.findOne({ plateNumber: plateRx, status: 'active', building: buildingId })
       .select('_id building entryTime'),
@@ -166,16 +172,17 @@ const lookupPlate = async (staffUser, plateNumber, buildingId) => {
       : Promise.resolve(null),
   ]);
 
-  // The vehicle type registered for THIS plate (normalized to car|motorcycle),
-  // so the gate can verify the actual vehicle matches what was registered.
-  let registeredVehicleType = null;
-  if (user) {
-    const matched = (user.licensePlates || []).find((p) => plateRx.test ? plateRx.test(p.plateNumber) : p.plateNumber === plate);
-    const t = `${matched?.vehicleType || ''}`.toLowerCase();
-    // Xe 2 bánh (kể cả điện) → motorcycle; còn lại (car/suv/truck/other) → car.
-    if (['motorcycle', 'ebike', 'emotorbike'].includes(t)) registeredVehicleType = 'motorcycle';
-    else if (t) registeredVehicleType = 'car';
-  }
+  // Thể loại xe đã đăng ký cho ĐÚNG biển này, để cổng đối chiếu xe thật với hồ sơ.
+  // `registeredVehicleKind` là nhóm 2 bánh/4 bánh dùng cho khớp ô đỗ và bảng giá;
+  // `registeredVehicle` là mô tả đầy đủ để nhân viên nhìn mắt thường mà xác nhận.
+  const registeredVehicle = vehicle
+    ? {
+        category: vehicle.category,
+        categoryLabel: labelOfCategory(vehicle.category),
+        brand: vehicle.brand || null,
+      }
+    : null;
+  const registeredVehicleKind = vehicle ? kindOfCategory(vehicle.category) : null;
 
   // Đối tượng (usageType) suy ra từ trạng thái biển số — khớp resolveCustomerUsageType
   // ở check-in, để FE gọi /free-slots đúng pool slot.
@@ -189,7 +196,8 @@ const lookupPlate = async (staffUser, plateNumber, buildingId) => {
     plateNumber: plate,
     hasAccount: Boolean(user),
     usageType,
-    registeredVehicleType,
+    registeredVehicleKind,
+    registeredVehicle,
     user: user
       ? {
           id: user._id,
@@ -300,7 +308,8 @@ const scanVehicle = async (staffUser, image, buildingId) => {
   // Resolve the owner account only when we have a valid plate.
   let account = {
     hasAccount: false,
-    registeredVehicleType: null,
+    registeredVehicleKind: null,
+    registeredVehicle: null,
     user: null,
     activeSession: null,
     usageType: 'walk_in',
@@ -311,7 +320,8 @@ const scanVehicle = async (staffUser, image, buildingId) => {
     const lookup = await lookupPlate(staffUser, plateNumber, buildingId);
     account = {
       hasAccount: lookup.hasAccount,
-      registeredVehicleType: lookup.registeredVehicleType,
+      registeredVehicleKind: lookup.registeredVehicleKind,
+      registeredVehicle: lookup.registeredVehicle,
       user: lookup.user,
       activeSession: lookup.activeSession,
       usageType: lookup.usageType,
@@ -320,9 +330,10 @@ const scanVehicle = async (staffUser, image, buildingId) => {
     };
   }
 
-  // Whether the camera-detected type contradicts the registered type.
+  // Camera chỉ phân biệt được 2 bánh / 4 bánh, nên đối chiếu ở mức NHÓM chứ không
+  // ở mức thể loại chi tiết — tránh báo lệch giả khi khách khai 'suv' mà máy đọc 'car'.
   const vehicleTypeMismatch = Boolean(
-    account.registeredVehicleType && vehicleType && account.registeredVehicleType !== vehicleType
+    account.registeredVehicleKind && vehicleType && account.registeredVehicleKind !== vehicleType
   );
 
   return {
@@ -366,12 +377,12 @@ const rejectEntry = async (staffUser, { plateNumber, stage, reason, building } =
       );
     }
   }
-  const owner = await User.findOne({ 'licensePlates.plateNumber': plateMatchRegex(plate) || plate }).select('_id');
+  const rejectedVehicle = await Vehicle.findOne({ plateCore: plateCoreOf(plate) }).select('owner');
 
   let notified = false;
-  if (owner) {
+  if (rejectedVehicle) {
     await Notification.create({
-      user: owner._id,
+      user: rejectedVehicle.owner,
       type: isCheckout ? 'checkout_rejected' : 'checkin_rejected',
       title: isCheckout ? 'Check-out Rejected' : 'Check-in Rejected',
       message: `License plate ${plate} was rejected for ${isCheckout ? 'check-out' : 'check-in'}. Reason: ${`${reason}`.trim()}. Please check/update your vehicle details.`,

@@ -9,7 +9,10 @@ const User = require('../../models/user/User');
 const Notification = require('../../models/log/Notification');
 const AppError = require('../../utils/AppError');
 const mongoose = require('mongoose');
-const { normalizePlate, plateMatchRegex } = require('../../utils/plate.util');
+const Vehicle = require('../../models/vehicle/Vehicle');
+const { plateCoreOf } = require('../../models/vehicle/Vehicle');
+const { normalizePlate } = require('../../utils/plate.util');
+const { kindOfCategory, labelOfCategory } = require('../../constants/vehicle');
 const buildingWalletService = require('../manager/buildingWallet.service');
 const {
   claimFixedSlotForRenewal,
@@ -48,11 +51,11 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
   if (!normalizedPlate) {
     throw new AppError('Biển số xe không hợp lệ', 400);
   }
-  const ownedPlate = await User.exists({
-    _id: userId,
-    'licensePlates.plateNumber': plateMatchRegex(normalizedPlate) || normalizedPlate,
-  });
-  if (!ownedPlate) {
+  const vehicle = await Vehicle.findOne({
+    owner: userId,
+    plateCore: plateCoreOf(normalizedPlate),
+  }).select('category');
+  if (!vehicle) {
     throw new AppError(
       'Biển số không thuộc tài khoản hiện tại',
       403,
@@ -71,8 +74,19 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
     throw new AppError('Biển số xe này đã đăng ký một gói dài hạn khác đang hoạt động hoặc chờ thanh toán', 400);
   }
 
-  const pkg = await LongTermPackage.findById(packageId);
+  const pkg = await LongTermPackage.findById(packageId).populate('vehicleType', 'name category');
   if (!pkg || !pkg.isActive) throw new AppError('Package not found or inactive', 404);
+
+  // Gói được bán theo loại xe của tòa; mua gói ô tô cho xe máy (hoặc ngược lại) là
+  // sai bảng giá và sai ô đỗ. So theo NHÓM 2 bánh/4 bánh chứ không so category tuyệt
+  // đối, để xe 'suv' vẫn mua được gói 'car' của tòa chỉ định nghĩa một loại 4 bánh.
+  if (pkg.vehicleType && kindOfCategory(vehicle.category) !== kindOfCategory(pkg.vehicleType.category)) {
+    throw new AppError(
+      `Gói này dành cho ${pkg.vehicleType.name}, không áp dụng cho ${labelOfCategory(vehicle.category)}`,
+      409,
+      'PACKAGE_VEHICLE_TYPE_MISMATCH',
+    );
+  }
   const activeBuilding = await Building.exists({
     _id: pkg.building,
     status: 'active',
@@ -100,29 +114,26 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
   let subscription;
   try {
     await mongoSession.withTransaction(async () => {
+      // Xác nhận lại quyền sở hữu xe BÊN TRONG transaction — nếu người dùng vừa xoá
+      // xe ở tab khác, đọc trong cùng transaction sẽ thấy và huỷ luôn lượt mua.
+      const stillOwnsVehicle = await Vehicle.exists({
+        owner: userId,
+        plateCore: plateCoreOf(normalizedPlate),
+      }).session(mongoSession);
+      if (!stillOwnsVehicle) {
+        throw new AppError(
+          'Biển số không còn thuộc tài khoản hiện tại',
+          403,
+          'PLATE_OWNERSHIP_REQUIRED',
+        );
+      }
+
       const updatedUser = await User.findOneAndUpdate(
-        {
-          _id: userId,
-          walletBalance: { $gte: pkg.price },
-          'licensePlates.plateNumber': plateMatchRegex(normalizedPlate) || normalizedPlate,
-        },
+        { _id: userId, walletBalance: { $gte: pkg.price } },
         { $inc: { walletBalance: -pkg.price } },
         { new: true, session: mongoSession },
       ).select('walletBalance');
-      if (!updatedUser) {
-        const stillOwnsPlate = await User.exists({
-          _id: userId,
-          'licensePlates.plateNumber': plateMatchRegex(normalizedPlate) || normalizedPlate,
-        }).session(mongoSession);
-        if (!stillOwnsPlate) {
-          throw new AppError(
-            'Biển số không còn thuộc tài khoản hiện tại',
-            403,
-            'PLATE_OWNERSHIP_REQUIRED',
-          );
-        }
-        throw new AppError('Số dư ví không đủ', 400);
-      }
+      if (!updatedUser) throw new AppError('Số dư ví không đủ', 400);
 
       // Slot cố định (tùy chọn): validate ô thuộc dãy 'subscriber' đúng loại xe của gói,
       // rồi claim atomic available→reserved (giữ riêng cả kỳ). null = gói floating.
@@ -136,7 +147,8 @@ const subscribe = async (userId, { packageId, plateNumber, slotId }) => {
         if (slot.usageType !== 'subscriber') {
           throw new AppError('Ô đỗ không thuộc dãy dành cho gói dài hạn', 409, 'SLOT_USAGE_MISMATCH');
         }
-        if (slot.vehicleType && `${slot.vehicleType}` !== `${pkg.vehicleType}`) {
+        // pkg.vehicleType đã được populate ở trên → so bằng _id, không so cả document.
+        if (slot.vehicleType && `${slot.vehicleType}` !== `${pkg.vehicleType?._id}`) {
           throw new AppError('Ô đỗ không đúng loại xe của gói', 409, 'SLOT_VEHICLE_TYPE_MISMATCH');
         }
         if (slot.reservable === false) {
@@ -403,11 +415,11 @@ const renewSubscription = async (userId, subscriptionId) => {
       }
 
       const pkg = subscription.package;
-      const ownsPlate = await User.exists({
-        _id: userId,
-        'licensePlates.plateNumber': plateMatchRegex(subscription.plateNumber) || subscription.plateNumber,
+      const ownsVehicle = await Vehicle.exists({
+        owner: userId,
+        plateCore: plateCoreOf(subscription.plateNumber),
       }).session(mongoSession);
-      if (!ownsPlate) {
+      if (!ownsVehicle) {
         throw new AppError(
           'Biển số không còn thuộc tài khoản hiện tại',
           403,
@@ -419,12 +431,7 @@ const renewSubscription = async (userId, subscriptionId) => {
 
       // Trừ ví (atomic) — pattern giống subscribe.
       const updatedUser = await User.findOneAndUpdate(
-        {
-          _id: userId,
-          walletBalance: { $gte: pkg.price },
-          'licensePlates.plateNumber':
-            plateMatchRegex(subscription.plateNumber) || subscription.plateNumber,
-        },
+        { _id: userId, walletBalance: { $gte: pkg.price } },
         { $inc: { walletBalance: -pkg.price } },
         { new: true, session: mongoSession },
       ).select('walletBalance');

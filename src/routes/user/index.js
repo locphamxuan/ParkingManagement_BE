@@ -5,7 +5,7 @@ const { ROLES } = require('../../constants/roles');
 
 const authRoutes = require('./auth.routes');
 const profileRoutes = require('./profile.routes');
-const licensePlateRoutes = require('./licensePlate.routes');
+const vehicleRoutes = require('./vehicle.routes');
 const parkingHistoryRoutes = require('./parkingHistory.routes');
 const walletRoutes = require('./wallet.routes');
 const longTermRoutes = require('./longTerm.routes');
@@ -13,10 +13,15 @@ const notificationRoutes = require('./notification.routes');
 const feedbackRoutes = require('./feedback.routes');
 const incidentRoutes = require('./incident.routes');
 const buildingController = require('../../controllers/user/building.controller');
+const vehicleController = require('../../controllers/user/vehicle.controller');
 const router = express.Router();
 
 router.use('/auth', authRoutes);
 router.use('/feedbacks', feedbackRoutes);
+
+// Danh mục thể loại xe của hệ thống — công khai để form đăng ký xe dựng dropdown
+// từ backend thay vì chép cứng danh sách ở frontend.
+router.get('/vehicle-categories', vehicleController.listCategories);
 
 // Public discovery endpoints. They expose only active building configuration
 // and are used by the marketing pages before a customer signs in.
@@ -31,7 +36,7 @@ router.use(authenticate);
 router.use(authorize(ROLES.USER));
 
 router.use('/profile', profileRoutes);
-router.use('/license-plates', licensePlateRoutes);
+router.use('/vehicles', vehicleRoutes);
 router.use('/parking-history', parkingHistoryRoutes);
 router.use('/wallet', walletRoutes);
 router.use('/long-term', longTermRoutes);

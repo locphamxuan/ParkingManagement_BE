@@ -93,7 +93,7 @@ const options = {
       { name: 'System', description: 'Service health and operational status' },
       { name: 'Auth', description: 'User authentication and registration' },
       { name: 'User - Profile', description: 'User profile management' },
-      { name: 'User - License Plates', description: 'Vehicle license plate management' },
+      { name: 'User - Vehicles', description: "Driver's registered vehicles and their QR tokens" },
       { name: 'User - Reservations', description: 'Parking reservation operations' },
       { name: 'User - Parking History', description: 'User parking session history' },
       { name: 'User - Wallet', description: 'User wallet and top-up operations' },

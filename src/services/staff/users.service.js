@@ -7,6 +7,8 @@ const {
 } = require('../../models');
 const { assertBuildingScope } = require('../../utils/staffScope');
 const { activeSubscriptionMatch } = require('./parkingSession/helpers');
+const { resolveScannedQr } = require('../user/vehicleQr.service');
+const { labelOfCategory } = require('../../constants/vehicle');
 
 /**
  * Ràng buộc CHUNG cho mọi tra cứu QR của staff: phải chỉ đích danh MỘT tòa nhà
@@ -96,19 +98,14 @@ const lookupQr = async (staffUser, qrCode, buildingId) => {
  * in the selected building — no owner identity, contact info or other plates.
  */
 const lookupPlateQr = async (staffUser, qrCode, buildingId) => {
-  if (!qrCode) throw new AppError('qrCode is required', 400);
   assertQrBuildingScope(staffUser, buildingId);
 
-  const owner = await User.findOne({ 'licensePlates.qrCode': qrCode }).select('licensePlates');
-
-  if (!owner) {
-    return { qrCode, found: false, plate: null, activeSessions: [] };
-  }
-
-  const plate = owner.licensePlates.find((p) => p.qrCode === qrCode);
+  // Mã hết hạn/không tồn tại đều ném lỗi từ `resolveScannedQr` — cùng một định nghĩa
+  // "QR còn dùng được" với kiosk, nên hai đường quét không thể xử sự khác nhau.
+  const vehicle = await resolveScannedQr(qrCode);
 
   const activeSessions = await ParkingSession.find({
-    user: owner._id,
+    user: vehicle.owner,
     status: 'active',
     building: buildingId,
   }).select('_id plateNumber entryTime');
@@ -116,10 +113,13 @@ const lookupPlateQr = async (staffUser, qrCode, buildingId) => {
   return {
     qrCode,
     found: true,
-    // Chỉ biển số VỪA QUÉT — không trả toàn bộ licensePlates của chủ xe.
-    plate: plate
-      ? { plateNumber: plate.plateNumber, vehicleType: plate.vehicleType, brand: plate.brand || null }
-      : null,
+    // Chỉ chiếc xe VỪA QUÉT — không lộ các xe khác hay danh tính chủ xe.
+    vehicle: {
+      plateNumber: vehicle.plateNumber,
+      category: vehicle.category,
+      categoryLabel: labelOfCategory(vehicle.category),
+      brand: vehicle.brand || null,
+    },
     activeSessions: activeSessions.map(toSessionSummary),
   };
 };
@@ -128,9 +128,9 @@ const lookupPlateQr = async (staffUser, qrCode, buildingId) => {
  * resolveQr
  * Unified entry point for the staff "Camera 2" QR scanner. Dispatches by token
  * shape so the frontend doesn't have to guess which lookup to call:
- *   - 'PLT-...'        → license-plate QR  (lookupPlateQr)
+ *   - 'PLT-...'        → mã QR phương tiện  (lookupPlateQr)
  *   - valid ObjectId   → account/user QR   (lookupQr)
- * Returns the underlying result tagged with `kind` ('plate' | 'user').
+ * Returns the underlying result tagged with `kind` ('vehicle' | 'user').
  * `buildingId` là BẮT BUỘC và được áp cho CẢ HAI nhánh.
  */
 const resolveQr = async (staffUser, code, buildingId) => {
@@ -140,7 +140,7 @@ const resolveQr = async (staffUser, code, buildingId) => {
 
   if (value.toUpperCase().startsWith('PLT-')) {
     const data = await lookupPlateQr(staffUser, value, buildingId);
-    return { kind: 'plate', ...data };
+    return { kind: 'vehicle', ...data };
   }
 
   if (mongoose.Types.ObjectId.isValid(value)) {

@@ -1,5 +1,9 @@
 const AppError = require("../utils/AppError");
 const { parseTime } = require("../utils/businessTime");
+const {
+  VEHICLE_CATEGORY_CODES,
+  isVehicleCategory,
+} = require("../constants/vehicle");
 
 const isNonEmptyString = (value) =>
   typeof value === "string" && value.trim().length > 0;
@@ -28,6 +32,11 @@ const validateVehicleType = wrap((req) => {
     throw new AppError("code must not be empty", 400);
   if (req.body.name !== undefined && !isNonEmptyString(req.body.name))
     throw new AppError("name is required", 400);
+  if (req.body.category !== undefined && !isVehicleCategory(req.body.category))
+    throw new AppError(
+      `category must be one of: ${VEHICLE_CATEGORY_CODES.join(", ")}`,
+      400
+    );
 });
 
 const validateFloor = wrap((req) => {

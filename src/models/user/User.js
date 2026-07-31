@@ -1,11 +1,6 @@
 const mongoose = require('mongoose');
-const crypto = require('node:crypto');
 const bcrypt = require('bcryptjs');
 const { ROLE_LIST, ROLES } = require('../../constants/roles');
-const { isValidVietnamPlate } = require('../../utils/plate.util');
-
-// Unique opaque QR token for a license plate (staff scans this to identify the vehicle/owner).
-const generatePlateQrCode = () => `PLT-${crypto.randomBytes(8).toString('hex')}`;
 
 const userSchema = new mongoose.Schema(
   {
@@ -51,42 +46,9 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    licensePlates: [
-      {
-        plateNumber: {
-          type: String,
-          required: true,
-          uppercase: true,
-          trim: true,
-          validate: {
-            validator: isValidVietnamPlate,
-            message: 'Biển số không hợp lệ (định dạng Việt Nam, ví dụ: 59G2-038.80)',
-          },
-        },
-        vehicleType: {
-          type: String,
-          enum: ['motorcycle', 'car', 'ebike', 'emotorbike', 'suv', 'truck', 'other'],
-          default: 'car',
-        },
-        // Vehicle make chosen by the user (e.g. Toyota, Honda, VinFast). Optional.
-        brand: {
-          type: String,
-          trim: true,
-          maxlength: [50, 'Brand cannot exceed 50 characters'],
-          default: null,
-        },
-        isDefault: {
-          type: Boolean,
-          default: false,
-        },
-        // Unique QR token auto-generated per plate; scanned by staff to identify the vehicle.
-        qrCode: {
-          type: String,
-          default: generatePlateQrCode,
-          index: true,
-        },
-      },
-    ],
+    // Phương tiện của người dùng nằm ở collection `Vehicle` (models/vehicle/Vehicle.js),
+    // tham chiếu ngược qua `Vehicle.owner`. Trước đây đây là mảng nhúng `licensePlates`;
+    // tách ra để có unique index thật trên biển số và mô tả xe đầy đủ hơn.
     assignedBuildings: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -163,4 +125,3 @@ userSchema.methods.comparePassword = async function comparePassword(
 const User = mongoose.model('User', userSchema);
 
 module.exports = User;
-module.exports.generatePlateQrCode = generatePlateQrCode;

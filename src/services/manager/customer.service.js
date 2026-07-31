@@ -2,7 +2,9 @@ const mongoose = require("mongoose");
 const User = require("../../models/user/User");
 const ParkingSession = require("../../models/operations/ParkingSession");
 const LongTermSubscription = require("../../models/policy/LongTermSubscription");
+const Vehicle = require("../../models/vehicle/Vehicle");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
+const { labelOfCategory } = require("../../constants/vehicle");
 
 /**
  * "Khách hàng" của building = user có account (role: 'user') đã từng dùng bãi này:
@@ -69,9 +71,26 @@ const listCustomers = async (user, buildingId, query = {}) => {
     _id: { $in: Array.from(candidateIds) },
     role: "user",
   })
-    .select("fullName email phone licensePlates isActive walletBalance createdAt")
+    .select("fullName email phone isActive walletBalance createdAt")
     .sort("fullName")
     .lean();
+
+  // Xe của khách nằm ở collection riêng — nạp một lượt cho cả trang rồi gom theo chủ,
+  // tránh N+1 query khi danh sách khách dài.
+  const vehicles = await Vehicle.find({ owner: { $in: users.map((u) => u._id) } })
+    .select("owner plateNumber category brand")
+    .lean();
+  const vehiclesByOwner = new Map();
+  vehicles.forEach((v) => {
+    const list = vehiclesByOwner.get(String(v.owner)) || [];
+    list.push({
+      plateNumber: v.plateNumber,
+      category: v.category,
+      categoryLabel: labelOfCategory(v.category),
+      brand: v.brand || null,
+    });
+    vehiclesByOwner.set(String(v.owner), list);
+  });
 
   let items = users.map((u) => {
     const status = packageStatusByUser.get(String(u._id)) || {
@@ -88,10 +107,7 @@ const listCustomers = async (user, buildingId, query = {}) => {
       isActive: u.isActive,
       walletBalance: u.walletBalance || 0,
       createdAt: u.createdAt,
-      licensePlates: (u.licensePlates || []).map((p) => ({
-        plateNumber: p.plateNumber,
-        vehicleType: p.vehicleType,
-      })),
+      vehicles: vehiclesByOwner.get(String(u._id)) || [],
       sessionCount: visitStats.sessionCount,
       lastVisitAt: visitStats.lastVisitAt,
       hasActivePackage: status.hasActivePackage,

@@ -6,6 +6,7 @@ const ParkingSession = require("../../models/operations/ParkingSession");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
+const { DEFAULT_VEHICLE_CATEGORY } = require("../../constants/vehicle");
 
 const list = async (user, buildingId, query = {}) => {
   ensureManagerOwnsBuilding(user, buildingId);
@@ -44,6 +45,7 @@ const create = async (user, buildingId, payload) => {
     building: buildingId,
     code,
     name: String(payload.name || "").trim(),
+    category: payload.category || DEFAULT_VEHICLE_CATEGORY,
     description: payload.description || "",
     isActive: payload.isActive !== false,
   });
@@ -67,6 +69,7 @@ const update = async (user, buildingId, id, payload) => {
   if (payload.name !== undefined) update.name = String(payload.name).trim();
   if (payload.code !== undefined)
     update.code = String(payload.code).trim().toUpperCase();
+  if (payload.category !== undefined) update.category = payload.category;
   if (payload.description !== undefined) update.description = payload.description;
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
 

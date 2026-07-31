@@ -9,29 +9,38 @@ const { calculateParkingFee } = require('../../../utils/feeEngine');
 const { computeDailyOverageHours } = require('../../../utils/longTermUsage');
 const { expireStaleSubscriptions } = require('../../shared/slotLifecycle.service');
 const { DEFAULT_HOURLY_RATE } = require('../../../constants/pricing');
+const { kindOfCategory } = require('../../../constants/vehicle');
 
-// Resolve a 'car'|'motorcycle' kind (or an ObjectId) to the building's VehicleType _id.
-const resolveVehicleTypeId = async (buildingId, kind, session = null) => {
-  if (!kind) return null;
-  if (mongoose.Types.ObjectId.isValid(kind)) return kind;
-  const k = `${kind}`.toLowerCase();
-  const codes = k === 'motorcycle'
-    ? ['MOTORCYCLE', 'MOTORBIKE', 'XE_MAY', 'BIKE', 'MOTO']
-    : ['CAR', 'OTO', 'AUTO', 'XE_OTO'];
-  const nameRx = k === 'motorcycle' ? /xe m|motor|máy/i : /ô t|oto|car|auto/i;
-  const vt = await VehicleType.findOne({
-    building: buildingId,
-    $or: [{ code: { $in: codes } }, { name: nameRx }],
-  }).session(session);
-  return vt?._id || null;
+/**
+ * Đổi một THỂ LOẠI XE chuẩn (hoặc một _id đã sẵn) sang danh mục VehicleType của tòa.
+ *
+ * Trước đây hàm này đoán bằng danh sách mã cứng ('XE_MAY', 'MOTO'...) và regex tên,
+ * nên manager đặt tên danh mục khác quy ước là hỏng. Giờ mỗi VehicleType tự khai báo
+ * `category`, việc khớp là tra dữ liệu.
+ *
+ * Khớp CHÍNH XÁC category trước. Không có thì lùi về danh mục CÙNG NHÓM (2 bánh /
+ * 4 bánh) — vd khách khai 'suv' mà tòa chỉ định nghĩa 'car' thì vẫn ra bảng giá ô tô
+ * thay vì mất giá. Sắp theo `code` để kết quả ổn định khi tòa có nhiều danh mục
+ * cùng nhóm.
+ */
+const resolveVehicleTypeId = async (buildingId, categoryOrId, session = null) => {
+  if (!categoryOrId) return null;
+  if (mongoose.Types.ObjectId.isValid(categoryOrId)) return categoryOrId;
+
+  const category = `${categoryOrId}`.toLowerCase();
+  const query = VehicleType.find({ building: buildingId, isActive: true }).sort('code');
+  if (session) query.session(session);
+  const types = await query;
+
+  const exact = types.find((type) => type.category === category);
+  if (exact) return exact._id;
+
+  const kind = kindOfCategory(category);
+  return types.find((type) => kindOfCategory(type.category) === kind)?._id || null;
 };
 
-// Map a VehicleType code/name to our two kinds for fallback pricing.
-const vehicleKindFromType = (vt) => {
-  const s = `${vt?.code || ''} ${vt?.name || ''}`.toLowerCase();
-  if (/motor|xe m|máy|bike|moto/.test(s)) return 'motorcycle';
-  return 'car';
-};
+/** Nhóm tính phí ('motorcycle' | 'car') của một danh mục loại xe của tòa. */
+const vehicleKindFromType = (vehicleType) => kindOfCategory(vehicleType?.category);
 
 const asObjectId = (value) =>
   mongoose.Types.ObjectId.isValid(value) ? value : null;

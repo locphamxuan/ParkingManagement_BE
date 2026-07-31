@@ -5,10 +5,13 @@ const {
   Payment,
   StaffShift,
   User,
+  Vehicle,
 } = require('../../models');
+// Cùng một hàm chuẩn hoá "lõi biển số" với unique index của Vehicle — chép lại ở đây
+// sẽ khiến audit và DB hiểu khác nhau về "hai biển này là một".
+const { plateCoreOf } = require('../../models/vehicle/Vehicle');
 
 const SAMPLE_LIMIT = 20;
-const plateCore = (value) => `${value || ''}`.toUpperCase().replace(/[^A-Z0-9]/g, '');
 const sampleIds = (rows) => rows.slice(0, SAMPLE_LIMIT).map((row) => `${row._id}`);
 const category = (rows, details = []) => ({
   total: rows.length,
@@ -93,15 +96,18 @@ const auditBusinessLogicInvariants = async () => {
   );
 
   const userIds = [...new Set(subscriptions.map((subscription) => `${subscription.user}`))];
-  const owners = await User.find({ _id: { $in: userIds } })
-    .select('_id licensePlates.plateNumber')
-    .lean();
-  const platesByOwner = new Map(owners.map((owner) => [
-    `${owner._id}`,
-    new Set((owner.licensePlates || []).map((plate) => plateCore(plate.plateNumber))),
-  ]));
+  const [owners, ownedVehicles] = await Promise.all([
+    User.find({ _id: { $in: userIds } }).select('_id').lean(),
+    Vehicle.find({ owner: { $in: userIds } }).select('owner plateCore').lean(),
+  ]);
+  // Chủ xe còn tồn tại nhưng chưa có xe nào vẫn phải có entry rỗng — nhờ đó phân biệt
+  // được "gói mồ côi vì user đã bị xoá" với "user còn nhưng không còn giữ biển đó".
+  const platesByOwner = new Map(owners.map((owner) => [`${owner._id}`, new Set()]));
+  ownedVehicles.forEach((vehicle) => {
+    platesByOwner.get(`${vehicle.owner}`)?.add(vehicle.plateCore);
+  });
   const subscriptionOwnerMismatch = subscriptions.filter((subscription) => (
-    !platesByOwner.get(`${subscription.user}`)?.has(plateCore(subscription.plateNumber))
+    !platesByOwner.get(`${subscription.user}`)?.has(plateCoreOf(subscription.plateNumber))
   ));
   // Phân loại để người vận hành biết cách xử lý: gói mồ côi (user đã bị xóa) phải
   // cancel + nhả slot, còn gói còn chủ thì thêm biển vào đúng account. Tool không

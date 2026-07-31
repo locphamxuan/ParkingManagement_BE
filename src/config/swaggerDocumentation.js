@@ -49,6 +49,22 @@ const response = (description, schema = { $ref: '#/components/schemas/ApiRespons
 });
 
 const swaggerPathAdditions = {
+  '/': {
+    get: {
+      tags: ['System'],
+      summary: 'Get the API entry point',
+      description: 'Returns the service banner and the prefix every business endpoint is mounted under.',
+      responses: { 200: response('Service banner returned successfully.') },
+    },
+  },
+  '/api-docs.json': {
+    get: {
+      tags: ['System'],
+      summary: 'Download the OpenAPI specification',
+      description: 'Returns this OpenAPI document as JSON, for client generators and contract tests.',
+      responses: { 200: response('OpenAPI specification returned successfully.') },
+    },
+  },
   '/health': {
     get: {
       tags: ['System'],

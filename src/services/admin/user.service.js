@@ -1,4 +1,5 @@
 ﻿const User = require("../../models/user/User");
+const Vehicle = require("../../models/vehicle/Vehicle");
 const BuildingManager = require("../../models/building/BuildingManager");
 const StaffShift = require("../../models/operations/StaffShift");
 const ParkingSession = require("../../models/operations/ParkingSession");
@@ -35,12 +36,28 @@ const list = async (query = {}) => {
     User.find(filter)
       .sort("-createdAt")
       .skip((page - 1) * limit)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     User.countDocuments(filter),
   ]);
 
+  // Xe nằm ở collection riêng nên phải nạp kèm; gom một lượt cho cả trang thay vì
+  // hỏi từng user, và chỉ lấy các trường admin thực sự hiển thị.
+  const vehicles = await Vehicle.find({ owner: { $in: items.map((u) => u._id) } })
+    .select("owner plateNumber category")
+    .lean();
+  const vehiclesByOwner = new Map();
+  vehicles.forEach((vehicle) => {
+    const owned = vehiclesByOwner.get(String(vehicle.owner)) || [];
+    owned.push({ plateNumber: vehicle.plateNumber, category: vehicle.category });
+    vehiclesByOwner.set(String(vehicle.owner), owned);
+  });
+
   return {
-    items,
+    items: items.map((item) => ({
+      ...item,
+      vehicles: vehiclesByOwner.get(String(item._id)) || [],
+    })),
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
   };
 };

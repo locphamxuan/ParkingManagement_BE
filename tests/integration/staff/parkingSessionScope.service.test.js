@@ -22,7 +22,7 @@ test('lookup requires building and never leaks contact or wallet fields', async 
     fullName: 'Plate Owner',
     walletBalance: 900000,
     phone: '0900000000',
-    licensePlates: [{ plateNumber: '51F-123.45', vehicleType: 'car' }],
+    vehicles: [{ plateNumber: '51F-123.45', category: 'car' }],
   });
 
   await expect(queryService.lookupPlate(staff, '51F-123.45'))
@@ -38,7 +38,7 @@ test('lookup requires building and never leaks contact or wallet fields', async 
 
 test('lookup scopes active session to the selected building', async () => {
   await f.createUser({
-    licensePlates: [{ plateNumber: '51F-123.45', vehicleType: 'car' }],
+    vehicles: [{ plateNumber: '51F-123.45', category: 'car' }],
   });
   await ParkingSession.create({
     building: otherBuilding._id,

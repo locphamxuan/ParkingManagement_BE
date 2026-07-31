@@ -165,7 +165,7 @@
  *     description: >
  *       `building` is REQUIRED and must be a building the staff member is assigned to;
  *       there is no fallback to all assigned buildings. The response is minimized for
- *       gate operations — it never contains email, phone, walletBalance or licensePlates.
+ *       gate operations — it never contains email, phone, walletBalance or the customer's other vehicles.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -211,11 +211,13 @@
  * /api/staff/users/lookup-plate-qr/{qrCode}:
  *   get:
  *     tags: [Staff - Users Lookup]
- *     summary: Look up a license plate by QR token, scoped to one building
+ *     summary: Look up a vehicle by its QR token, scoped to one building
  *     description: >
  *       `building` is REQUIRED and must be assigned to the staff member. Only the
- *       scanned plate is returned — never the owner's identity, contact details or
- *       their other registered plates.
+ *       scanned vehicle is returned — never the owner's identity, contact details or
+ *       their other registered vehicles. A token older than VEHICLE_QR_TTL_DAYS
+ *       (default 2 days) is rejected with 410 VEHICLE_QR_EXPIRED — exactly the same
+ *       rule the unmanned kiosk applies, so both scanners never diverge.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -230,7 +232,7 @@
  *         schema: { type: string, format: objectId }
  *     responses:
  *       200:
- *         description: Plate lookup returned successfully.
+ *         description: Vehicle lookup returned successfully.
  *         content:
  *           application/json:
  *             schema:
@@ -243,18 +245,20 @@
  *                       properties:
  *                         qrCode: { type: string }
  *                         found: { type: boolean }
- *                         plate:
+ *                         vehicle:
  *                           type: object
- *                           nullable: true
  *                           properties:
  *                             plateNumber: { type: string, example: 59G2-038.80 }
- *                             vehicleType: { type: string, example: car }
+ *                             category: { type: string, enum: [motorcycle, ebike, emotorbike, car, suv, truck, other], example: car }
+ *                             categoryLabel: { type: string, example: Ô tô }
  *                             brand: { type: string, nullable: true, example: Toyota }
  *                         activeSessions:
  *                           type: array
  *                           items: { $ref: '#/components/schemas/StaffQrSession' }
  *       400: { description: BUILDING_REQUIRED — query parameter `building` is missing., $ref: '#/components/responses/ValidationError' }
  *       403: { description: FORBIDDEN_BUILDING_SCOPE — building is not assigned to this staff member., $ref: '#/components/responses/ForbiddenError' }
+ *       404: { description: VEHICLE_QR_NOT_FOUND — the token matches no registered vehicle. }
+ *       410: { description: VEHICLE_QR_EXPIRED — the token is past its lifetime; the driver must reopen the app to get a new one. }
  * /api/staff/users/resolve-qr/{code}:
  *   get:
  *     tags: [Staff - Users Lookup]

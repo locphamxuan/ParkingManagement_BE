@@ -34,6 +34,11 @@ const env = {
   // Secret provisioned on each managed gate kiosk. It is deliberately not a
   // browser-visible value; a kiosk without it cannot create parking sessions.
   kioskDeviceToken: process.env.KIOSK_DEVICE_TOKEN || null,
+  // Số ngày hiệu lực của mã QR phương tiện. QR là tài sản của CHỦ XE và dùng được
+  // ở mọi tòa nhà, nên hạn dùng phải là một con số duy nhất của hệ thống — nếu để
+  // từng tòa tự đặt thì một chiếc xe đi 3 tòa sẽ có 3 hạn mâu thuẫn nhau.
+  // Hết hạn thì QR tự được cấp lại khi chủ xe mở mã (xem services/user/vehicleQr).
+  vehicleQrTtlDays: Number(process.env.VEHICLE_QR_TTL_DAYS) || 2,
 };
 
 const required = ['mongodbUri', 'jwtSecret', 'payosClientId', 'payosApiKey', 'payosChecksumKey'];

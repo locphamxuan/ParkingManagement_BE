@@ -82,7 +82,7 @@
  *       - { in: query, name: isActive, schema: { type: boolean } }
  *       - { in: query, name: search, schema: { type: string }, description: Search by name, email, or phone. }
  *     responses:
- *       200: { description: Users returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/PublicUser' } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
+ *       200: { description: Users returned successfully. Each item carries its registered vehicles, loaded from the Vehicle collection., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { items: { type: array, items: { allOf: [ { $ref: '#/components/schemas/PublicUser' }, { type: object, properties: { vehicles: { type: array, items: { type: object, properties: { plateNumber: { type: string, example: 59G2-038.80 }, category: { type: string, enum: [motorcycle, ebike, emotorbike, car, suv, truck, other], example: car } } } } } } ] } }, pagination: { $ref: '#/components/schemas/PaginationMeta' } } } } } ] } } } }
  *   post:
  *     tags: [Admin - Users]
  *     summary: Create a user

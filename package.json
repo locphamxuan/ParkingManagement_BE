@@ -9,7 +9,9 @@
     "dev:memory": "node tools/run-dev-memory-db.js",
     "test": "jest --runInBand",
     "audit:business-logic": "node src/businessLogicAudit.cli.js --dry-run",
-    "report:stale-payos": "node src/stalePayosReport.cli.js"
+    "report:stale-payos": "node src/stalePayosReport.cli.js",
+    "migrate:vehicles": "node src/scripts/migrateVehicles.js",
+    "migrate:vehicles:dry": "node src/scripts/migrateVehicles.js --dry-run"
   },
   "keywords": [
     "parking",

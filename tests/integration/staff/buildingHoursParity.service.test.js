@@ -68,7 +68,7 @@ beforeEach(async () => {
   // Khách gói + QR cho lượt kiosk.
   const pkg = await f.createPackage(building._id, vehicleType._id);
   const subscriber = await f.createUser({
-    licensePlates: [{ plateNumber: '51F-777.77', vehicleType: 'car' }],
+    vehicles: [{ plateNumber: '51F-777.77', category: 'car' }],
   });
   const dedicatedSlot = await f.createSlot(building._id, floor._id, {
     vehicleType: vehicleType._id,
@@ -85,7 +85,7 @@ beforeEach(async () => {
     endDate: new Date(Date.now() + 29 * DAY),
     status: 'active',
   });
-  qrCode = (await User.findById(subscriber._id)).licensePlates[0].qrCode;
+  qrCode = subscriber.vehicles[0].qrCode;
 });
 
 const setHours = (open, close) =>

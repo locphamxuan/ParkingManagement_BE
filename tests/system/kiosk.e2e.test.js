@@ -31,16 +31,16 @@ describe('E2E · POST /api/kiosk/package-checkin (managed device)', () => {
       vehicleType: vt._id,
       status: 'reserved',
     });
-    const user = await User.create({
-      email: 'kiosk-http@test.com', password: 'secret1', fullName: 'Kiosk Http', role: 'user',
-      licensePlates: [{ plateNumber: '51F-555.55' }],
+    const user = await f.createUser({
+      email: 'kiosk-http@test.com', fullName: 'Kiosk Http',
+      vehicles: [{ plateNumber: '51F-555.55' }],
     });
     await LongTermSubscription.create({
       user: user._id, package: pkg._id, building: building._id, plateNumber: '51F-555.55', slot: slot._id,
       startDate: new Date(Date.now() - 3600 * 1000), endDate: new Date(Date.now() + 30 * 24 * 3600 * 1000),
       status: 'active',
     });
-    const qrCode = (await User.findById(user._id)).licensePlates[0].qrCode;
+    const qrCode = user.vehicles[0].qrCode;
 
     const res = await request(app)
       .post('/api/kiosk/package-checkin')

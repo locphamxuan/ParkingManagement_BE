@@ -31,7 +31,7 @@ test('dirty and ambiguous dataset reports categories with sample IDs', async () 
   const availableSlot = await f.createSlot(building._id, floor._id, { status: 'available' });
   const pkg = await f.createPackage(building._id, vehicleType._id);
   const owner = await f.createUser({
-    licensePlates: [{ plateNumber: '51F-111.11', vehicleType: 'car' }],
+    vehicles: [{ plateNumber: '51F-111.11', category: 'car' }],
   });
   const now = Date.now();
 

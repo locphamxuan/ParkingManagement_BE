@@ -148,7 +148,7 @@ describe('customer.service.listCustomers', () => {
       fullName: 'Hoang FullInfo',
       phone: '0901234567',
       walletBalance: 250000,
-      licensePlates: [{ plateNumber: '51F-999.11', vehicleType: 'car' }],
+      vehicles: [{ plateNumber: '51F-999.11', category: 'car' }],
     });
     const firstVisit = new Date('2026-06-01T08:00:00Z');
     const lastVisit = new Date('2026-07-01T08:00:00Z');
@@ -162,7 +162,14 @@ describe('customer.service.listCustomers', () => {
     expect(c.walletBalance).toBe(250000);
     expect(c.isActive).toBe(true);
     expect(c.createdAt).toBeTruthy();
-    expect(c.licensePlates).toEqual([{ plateNumber: '51F-999.11', vehicleType: 'car' }]);
+    expect(c.vehicles).toEqual([
+      {
+        plateNumber: '51F-999.11',
+        category: 'car',
+        categoryLabel: 'Ô tô',
+        brand: null,
+      },
+    ]);
     expect(c.sessionCount).toBe(2);
     expect(new Date(c.lastVisitAt).toISOString()).toBe(lastVisit.toISOString());
   });

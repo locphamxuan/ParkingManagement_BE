@@ -61,28 +61,6 @@
  *           type: integer
  *           example: 6
  *
- *     LicensePlate:
- *       type: object
- *       properties:
- *         _id:
- *           $ref: '#/components/schemas/ObjectId'
- *         plateNumber:
- *           type: string
- *           example: 59G2-038.80
- *         vehicleType:
- *           type: string
- *           enum: [motorcycle, car, suv, truck, other]
- *           example: car
- *         brand:
- *           type: string
- *           nullable: true
- *           example: Toyota
- *         isDefault:
- *           type: boolean
- *           example: true
- *         qrCode:
- *           type: string
- *           example: PLT-7a9f2c11b8d4e003
  *
  *     PublicUser:
  *       type: object
@@ -108,10 +86,6 @@
  *           type: string
  *           nullable: true
  *           example: null
- *         licensePlates:
- *           type: array
- *           items:
- *             $ref: '#/components/schemas/LicensePlate'
  *         assignedBuildings:
  *           type: array
  *           items:
@@ -278,6 +252,14 @@
  *         building: { $ref: '#/components/schemas/ObjectId' }
  *         code: { type: string, example: CAR }
  *         name: { type: string, example: Car }
+ *         category:
+ *           type: string
+ *           enum: [motorcycle, ebike, emotorbike, car, suv, truck, other]
+ *           example: car
+ *           description: >
+ *             Thể loại xe chuẩn của hệ thống mà danh mục này đại diện. Quyết định nhóm
+ *             tính phí (2 bánh / 4 bánh) và việc khớp xe đã đăng ký của khách với danh
+ *             mục của tòa — thay cho việc đoán theo tên/mã trước đây.
  *         description: { type: string, example: Standard passenger car }
  *         isActive: { type: boolean, example: true }
  *         createdAt: { type: string, format: date-time, example: '2026-06-01T08:00:00.000Z' }

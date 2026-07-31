@@ -3,6 +3,7 @@
  * Dùng bộ đếm để đảm bảo code/email duy nhất giữa các lần gọi trong 1 test.
  */
 const User = require('../../src/models/user/User');
+const Vehicle = require('../../src/models/vehicle/Vehicle');
 const Building = require('../../src/models/building/Building');
 const VehicleType = require('../../src/models/building/VehicleType');
 const Floor = require('../../src/models/building/Floor');
@@ -19,18 +20,45 @@ let seq = 0;
 const next = () => (seq += 1);
 const resetSeq = () => { seq = 0; };
 
-const createUser = (over = {}) => {
+/**
+ * Tạo user; `over.vehicles` (nếu có) sẽ được tạo trong collection Vehicle rồi gắn
+ * vào thuộc tính `vehicles` của document trả về — thuộc tính này KHÔNG được lưu,
+ * chỉ để test lấy nhanh qrCode/_id mà không phải query lại.
+ */
+const createUser = async (over = {}) => {
   const n = next();
-  return User.create({
+  const user = await User.create({
     email: over.email || `user${n}@test.com`,
     password: over.password || 'secret1',
     fullName: over.fullName || `User ${n}`,
     role: over.role || 'user',
     walletBalance: over.walletBalance ?? 0,
     ...(over.phone ? { phone: over.phone } : {}),
-    ...(over.licensePlates ? { licensePlates: over.licensePlates } : {}),
   });
+
+  const vehicles = over.vehicles
+    ? await Promise.all(
+        over.vehicles.map((v, index) => createVehicle(user._id, { isDefault: index === 0, ...v }))
+      )
+    : [];
+  // defineProperty chứ không gán thẳng: Mongoose bỏ qua mọi assignment vào path
+  // không có trong schema, nên `user.vehicles = ...` sẽ im lặng biến mất.
+  Object.defineProperty(user, 'vehicles', { value: vehicles, enumerable: false });
+  return user;
 };
+
+const createVehicle = (ownerId, over = {}) =>
+  Vehicle.create({
+    owner: ownerId,
+    plateNumber: over.plateNumber,
+    category: over.category || 'car',
+    brand: over.brand ?? null,
+    isDefault: over.isDefault ?? false,
+    qrIssuedAt: new Date(),
+    // Mặc định cấp mã còn hạn; test hạn QR truyền qrExpiresAt trong quá khứ.
+    qrExpiresAt: over.qrExpiresAt ?? new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
+    ...(over.qrCode ? { qrCode: over.qrCode } : {}),
+  });
 
 const createBuilding = (over = {}) => {
   const n = next();
@@ -51,6 +79,7 @@ const createVehicleType = (buildingId, over = {}) => {
     building: buildingId,
     code: over.code || `VT${n}`,
     name: over.name || `Vehicle ${n}`,
+    category: over.category || 'car',
     isActive: over.isActive ?? true,
   });
 };
@@ -174,6 +203,7 @@ module.exports = {
   resetSeq,
   managerFor,
   createUser,
+  createVehicle,
   createBuilding,
   createVehicleType,
   createFloor,

@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const { connect, clearAll, stop } = require('./db');
 
 const User = require('../src/models/user/User');
+const Vehicle = require('../src/models/vehicle/Vehicle');
 const Building = require('../src/models/building/Building');
 const VehicleType = require('../src/models/building/VehicleType');
 const Floor = require('../src/models/building/Floor');
@@ -32,9 +33,14 @@ const seed = async ({ balance = 1000000 } = {}) => {
     password: '123456',
     fullName: 'U',
     walletBalance: balance,
-    licensePlates: [{ plateNumber: '59G2-810.00', vehicleType: 'car' }],
   });
-  return { building, vt, floor, slot, subSlot, pkg, user };
+  const vehicle = await Vehicle.create({
+    owner: user._id,
+    plateNumber: '59G2-810.00',
+    category: 'car',
+    isDefault: true,
+  });
+  return { building, vt, floor, slot, subSlot, pkg, user, vehicle };
 };
 
 beforeAll(connect);

@@ -45,7 +45,7 @@ beforeEach(async () => {
   });
   owner = await f.createUser({
     walletBalance: 1_000_000,
-    licensePlates: [{ plateNumber: PLATE, vehicleType: 'car' }],
+    vehicles: [{ plateNumber: PLATE, category: 'car' }],
   });
   staff = await f.createUser({ role: 'staff' });
   staff.assignedBuildings = [building._id];
@@ -117,7 +117,7 @@ describe('gia hạn gói đã hết hạn', () => {
   test('slot cũ đã thuộc gói khác → 409 FIXED_SLOT_UNAVAILABLE, KHÔNG trừ ví', async () => {
     const sub = await mkSubscription({ status: 'expired', endDate: new Date(Date.now() - DAY) });
     const rival = await f.createUser({
-      licensePlates: [{ plateNumber: '51F-999.99', vehicleType: 'car' }],
+      vehicles: [{ plateNumber: '51F-999.99', category: 'car' }],
     });
     await LongTermSubscription.create({
       user: rival._id,

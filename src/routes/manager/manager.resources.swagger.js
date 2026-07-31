@@ -45,8 +45,15 @@
  *             type: object
  *             required: [name]
  *             properties:
- *               code: { type: string, example: CAR }
+ *               code: { type: string, example: CAR, description: Bỏ trống → tự sinh từ name. }
  *               name: { type: string, example: Car }
+ *               category:
+ *                 type: string
+ *                 enum: [motorcycle, ebike, emotorbike, car, suv, truck, other]
+ *                 default: car
+ *                 description: >
+ *                   Thể loại xe chuẩn mà danh mục này đại diện. Đặt đúng giá trị này là
+ *                   điều kiện để xe của khách được khớp vào đúng bảng giá và ô đỗ của tòa.
  *               description: { type: string, example: Standard passenger car }
  *               isActive: { type: boolean, example: true }
  *     responses:
@@ -88,6 +95,9 @@
  *             properties:
  *               code: { type: string, example: CAR }
  *               name: { type: string, example: Car }
+ *               category:
+ *                 type: string
+ *                 enum: [motorcycle, ebike, emotorbike, car, suv, truck, other]
  *               description: { type: string, example: Updated description }
  *               isActive: { type: boolean, example: true }
  *     responses:

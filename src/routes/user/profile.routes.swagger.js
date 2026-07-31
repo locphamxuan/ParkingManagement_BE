@@ -71,13 +71,6 @@
  *                   phone: '+84901234567'
  *                   role: user
  *                   avatar: https://cdn.parking-system.com/avatars/user-665f1d2c.png
- *                   licensePlates:
- *                     - _id: 665f1d2c7b0d1b0012a34568
- *                       plateNumber: 59G2-038.80
- *                       vehicleType: car
- *                       brand: Toyota
- *                       isDefault: true
- *                       qrCode: PLT-7a9f2c11b8d4e003
  *                   assignedBuildings: []
  *                   isActive: true
  *                   lastLoginAt: '2026-06-12T04:35:20.000Z'

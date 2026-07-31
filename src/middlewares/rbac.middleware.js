@@ -13,7 +13,7 @@ const authorize =
     next();
   };
 
-// 🛠️ FIX TỬ HUYỆN: Kiểm tra an toàn sự tồn tại của req và req.body/query/params
+// Kiểm tra an toàn sự tồn tại của req và req.body, query, params
 const extractBuildingId = (req) => {
   if (!req) return null;
   return (

@@ -67,6 +67,21 @@ describe('user.service', () => {
     expect(staffOnly.items.every((u) => u.role === 'staff')).toBe(true);
   });
 
+  test('list trả kèm xe của từng user (xe nằm ở collection riêng)', async () => {
+    const owner = await f.createUser({
+      role: 'user',
+      vehicles: [{ plateNumber: '59G2-038.80', category: 'car' }],
+    });
+    await f.createUser({ role: 'user' });
+
+    const { items } = await userSvc.list({ role: 'user' });
+    const withVehicle = items.find((u) => String(u._id) === String(owner._id));
+    const withoutVehicle = items.find((u) => String(u._id) !== String(owner._id));
+
+    expect(withVehicle.vehicles).toEqual([{ plateNumber: '59G2-038.80', category: 'car' }]);
+    expect(withoutVehicle.vehicles).toEqual([]);
+  });
+
   test('xóa user còn phiên gửi xe active → 409 USER_HAS_ACTIVE_SESSION (force cũng không bypass)', async () => {
     const building = await f.createBuilding();
     const u = await f.createUser({ role: 'user' });

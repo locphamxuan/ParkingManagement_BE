@@ -5,8 +5,8 @@ const {
   LongTermSubscription,
   ParkingSession,
   ParkingSlot,
-  User,
 } = require('../models');
+const { resolveScannedQr } = require('./user/vehicleQr.service');
 const { logAudit } = require('../utils/staffScope');
 const { normalizePlate, plateMatchRegex } = require('../utils/plate.util');
 const {
@@ -19,28 +19,15 @@ const { resolveOperationalGate } = require('./shared/gateAuthorization.service')
 const { assertEvidenceImage } = require('../utils/evidence');
 
 /**
- * Resolve a REGISTERED vehicle QR token (PLT-...) to its canonical plate + owner.
- * Kiosk is unmanned, so it ONLY accepts a valid per-plate QR token — a bare plate
- * number is rejected (anyone could read a plate off a windshield). Drivers who
- * can't scan their QR must check in via a staff member instead.
+ * Đổi mã QR phương tiện (PLT-...) thành biển số chuẩn + chủ xe.
+ * Kiosk không có người trực nên CHỈ chấp nhận mã QR hợp lệ và CÒN HẠN — nhập tay biển
+ * số thì ai đọc biển trên kính xe cũng check-in được. Mã hết hạn/không tồn tại đều bị
+ * `resolveScannedQr` từ chối kèm mã lỗi riêng để kiosk hiện đúng hướng dẫn cho khách.
  */
 const resolvePlateFromQr = async ({ qrCode }) => {
-  const token = `${qrCode || ''}`.trim();
-  if (!token) {
-    throw new AppError('Vui lòng quét mã QR phương tiện.', 400, 'KIOSK_QR_REQUIRED');
-  }
+  const vehicle = await resolveScannedQr(qrCode);
 
-  const owner = await User.findOne({ 'licensePlates.qrCode': token }).select('licensePlates');
-  const plate = owner?.licensePlates?.find((p) => p.qrCode === token);
-  if (!owner || !plate?.plateNumber) {
-    throw new AppError(
-      'Mã QR không hợp lệ hoặc chưa đăng ký. Vui lòng gặp nhân viên để check-in.',
-      404,
-      'KIOSK_QR_NOT_FOUND',
-    );
-  }
-
-  const plateNumber = normalizePlate(plate.plateNumber);
+  const plateNumber = normalizePlate(vehicle.plateNumber);
   if (!plateNumber) {
     throw new AppError(
       'Biển số QR bị lỗi định dạng, vui lòng gặp nhân viên để check-in.',
@@ -48,7 +35,7 @@ const resolvePlateFromQr = async ({ qrCode }) => {
       'KIOSK_INVALID_PLATE_FORMAT',
     );
   }
-  return { plateNumber, user: owner._id };
+  return { plateNumber, user: vehicle.owner };
 };
 
 /**

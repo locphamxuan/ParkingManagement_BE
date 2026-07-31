@@ -30,9 +30,9 @@ beforeEach(async () => {
     fullName: 'QR Customer',
     phone: '0900000000',
     walletBalance: 750000,
-    licensePlates: [
-      { plateNumber: PLATE_A, vehicleType: 'car', brand: 'Toyota', qrCode: PLATE_QR },
-      { plateNumber: PLATE_B, vehicleType: 'motorcycle' },
+    vehicles: [
+      { plateNumber: PLATE_A, category: 'car', brand: 'Toyota', qrCode: PLATE_QR },
+      { plateNumber: PLATE_B, category: 'motorcycle' },
     ],
   });
 });
@@ -113,7 +113,12 @@ describe('data is scoped to the exact selected building', () => {
     const result = await usersService.lookupPlateQr(staff, PLATE_QR, buildingA._id);
 
     expect(result.found).toBe(true);
-    expect(result.plate).toEqual({ plateNumber: PLATE_A, vehicleType: 'car', brand: 'Toyota' });
+    expect(result.vehicle).toEqual({
+      plateNumber: PLATE_A,
+      category: 'car',
+      categoryLabel: 'Ô tô',
+      brand: 'Toyota',
+    });
     expect(result.activeSessions.map((s) => s.plateNumber)).toEqual([PLATE_A]);
   });
 
@@ -124,7 +129,7 @@ describe('data is scoped to the exact selected building', () => {
 
     const result = await usersService.resolveQr(staff, PLATE_QR, buildingA._id);
 
-    expect(result.kind).toBe('plate');
+    expect(result.kind).toBe('vehicle');
     expect(result.activeSessions.map((s) => s.plateNumber)).toEqual([PLATE_A]);
   });
 
@@ -141,7 +146,7 @@ describe('data is scoped to the exact selected building', () => {
 });
 
 describe('QR responses are minimized — no customer PII', () => {
-  const PII = ['email', 'phone', 'walletBalance', 'licensePlates'];
+  const PII = ['email', 'phone', 'walletBalance', 'vehicles'];
   const assertNoPii = (payload) => {
     const serialized = JSON.stringify(payload);
     PII.forEach((field) => expect(serialized).not.toContain(field));

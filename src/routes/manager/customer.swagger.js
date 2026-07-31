@@ -39,13 +39,16 @@
  *                               isActive: { type: boolean, example: true, description: Account active/locked status. }
  *                               walletBalance: { type: number, example: 250000 }
  *                               createdAt: { type: string, format: date-time, description: Account registration date. }
- *                               licensePlates:
+ *                               vehicles:
  *                                 type: array
+ *                                 description: Vehicles registered by this customer (Vehicle collection).
  *                                 items:
  *                                   type: object
  *                                   properties:
  *                                     plateNumber: { type: string, example: 59G2-038.80 }
- *                                     vehicleType: { type: string, example: car }
+ *                                     category: { type: string, enum: [motorcycle, ebike, emotorbike, car, suv, truck, other], example: car }
+ *                                     categoryLabel: { type: string, example: Ô tô }
+ *                                     brand: { type: string, nullable: true, example: Toyota }
  *                               sessionCount: { type: integer, example: 5, description: Number of parking sessions in THIS building. }
  *                               lastVisitAt: { type: string, format: date-time, nullable: true, description: Most recent entryTime in this building; null if never parked here (subscription-only). }
  *                               hasActivePackage: { type: boolean, example: true }

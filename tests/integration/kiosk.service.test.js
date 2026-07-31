@@ -27,9 +27,9 @@ beforeEach(async () => {
 
 /** User có 1 biển đăng ký (qrCode tự sinh) + gói dài hạn active gắn slot cố định. */
 const seedSubscriberWithDedicatedSlot = async () => {
-  user = await User.create({
-    email: 'kiosk-owner@test.com', password: 'secret1', fullName: 'Kiosk Owner', role: 'user',
-    licensePlates: [{ plateNumber: '51F-777.77', vehicleType: 'car' }],
+  user = await f.createUser({
+    email: 'kiosk-owner@test.com', fullName: 'Kiosk Owner',
+    vehicles: [{ plateNumber: '51F-777.77', category: 'car' }],
   });
   const dedicatedSlot = await f.createSlot(building._id, floor._id, {
     usageType: 'subscriber', vehicleType: vt._id, status: 'reserved',
@@ -41,33 +41,46 @@ const seedSubscriberWithDedicatedSlot = async () => {
     endDate: new Date(Date.now() + 29 * 24 * 3600 * 1000),
     status: 'active',
   });
-  const qrCode = (await User.findById(user._id)).licensePlates[0].qrCode;
+  const qrCode = user.vehicles[0].qrCode;
   return { user, dedicatedSlot, subscription, qrCode };
 };
 
 describe('kiosk.service.selfCheckInByQr', () => {
-  test('thiếu qrCode → 400 KIOSK_QR_REQUIRED', async () => {
+  test('thiếu qrCode → 400 VEHICLE_QR_REQUIRED', async () => {
     await expect(kioskSvc.selfCheckInByQr({})).rejects.toMatchObject({
-      statusCode: 400, errorCode: 'KIOSK_QR_REQUIRED',
+      statusCode: 400, errorCode: 'VEHICLE_QR_REQUIRED',
     });
   });
 
-  test('qrCode không khớp biển đã đăng ký nào → 404 KIOSK_QR_NOT_FOUND (không cho bare biển số)', async () => {
-    await User.create({
-      email: 'someone@test.com', password: 'secret1', fullName: 'Someone', role: 'user',
-      licensePlates: [{ plateNumber: '30A-123.45' }],
+  test('qrCode không khớp xe đã đăng ký nào → 404 VEHICLE_QR_NOT_FOUND (không cho bare biển số)', async () => {
+    await f.createUser({
+      email: 'someone@test.com', fullName: 'Someone',
+      vehicles: [{ plateNumber: '30A-123.45' }],
     });
     await expect(kioskSvc.selfCheckInByQr({ qrCode: 'PLT-doesnotexist' })).rejects.toMatchObject({
-      statusCode: 404, errorCode: 'KIOSK_QR_NOT_FOUND',
+      statusCode: 404, errorCode: 'VEHICLE_QR_NOT_FOUND',
     });
+  });
+
+  test('mã QR đã quá hạn → 410 VEHICLE_QR_EXPIRED, kiosk không nhận xe', async () => {
+    const expiredOwner = await f.createUser({
+      email: 'expired@test.com', fullName: 'Expired QR',
+      vehicles: [{
+        plateNumber: '30A-123.46',
+        qrExpiresAt: new Date(Date.now() - 60 * 1000),
+      }],
+    });
+    await expect(
+      kioskSvc.selfCheckInByQr({ qrCode: expiredOwner.vehicles[0].qrCode }),
+    ).rejects.toMatchObject({ statusCode: 410, errorCode: 'VEHICLE_QR_EXPIRED' });
   });
 
   test('QR hợp lệ nhưng không có gói dài hạn active cho biển này → 404 SUBSCRIPTION_NOT_FOUND', async () => {
-    const walkInUser = await User.create({
-      email: 'noplan@test.com', password: 'secret1', fullName: 'No Plan', role: 'user',
-      licensePlates: [{ plateNumber: '29A-999.99' }],
+    const walkInUser = await f.createUser({
+      email: 'noplan@test.com', fullName: 'No Plan',
+      vehicles: [{ plateNumber: '29A-999.99' }],
     });
-    const qrCode = walkInUser.licensePlates[0].qrCode;
+    const qrCode = walkInUser.vehicles[0].qrCode;
     await expect(kioskSvc.selfCheckInByQr({ qrCode })).rejects.toMatchObject({
       statusCode: 404, errorCode: 'SUBSCRIPTION_NOT_FOUND',
     });
@@ -111,7 +124,7 @@ describe('kiosk.service.selfCheckInByQr', () => {
   test('xe đã có phiên active trong cùng toà → 409 DUPLICATE_PLATE, không tạo phiên mới', async () => {
     const { qrCode } = await seedSubscriberWithDedicatedSlot();
     await ParkingSession.create({
-      building: building._id, plateNumber: '51F-777.77', vehicleType: vt._id, status: 'active',
+      building: building._id, plateNumber: '51F-777.77', category: vt._id, status: 'active',
       entryTime: new Date(),
     });
 

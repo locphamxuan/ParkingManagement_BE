@@ -43,13 +43,21 @@ describe('resolveCustomerUsageType (ưu tiên subscriber > registered > walk_in)
   });
 });
 
-describe('vehicleKindFromType (fallback pricing theo loại)', () => {
-  test('mã/tên gợi ý xe máy → motorcycle', () => {
-    expect(vehicleKindFromType({ code: 'MOTORCYCLE', name: 'Xe máy' })).toBe('motorcycle');
-    expect(vehicleKindFromType({ code: 'BIKE', name: '' })).toBe('motorcycle');
+describe('vehicleKindFromType (nhóm tính phí, đọc từ category)', () => {
+  test('mọi thể loại 2 bánh → motorcycle', () => {
+    expect(vehicleKindFromType({ category: 'motorcycle' })).toBe('motorcycle');
+    expect(vehicleKindFromType({ category: 'ebike' })).toBe('motorcycle');
+    expect(vehicleKindFromType({ category: 'emotorbike' })).toBe('motorcycle');
   });
-  test('còn lại → car', () => {
-    expect(vehicleKindFromType({ code: 'CAR', name: 'Ô tô' })).toBe('car');
+  test('thể loại 4 bánh → car', () => {
+    expect(vehicleKindFromType({ category: 'car' })).toBe('car');
+    expect(vehicleKindFromType({ category: 'suv' })).toBe('car');
+    expect(vehicleKindFromType({ category: 'truck' })).toBe('car');
+  });
+  test('KHÔNG còn đoán theo tên/mã: tên "Xe máy" mà category=car vẫn ra car', () => {
+    expect(vehicleKindFromType({ code: 'MOTORCYCLE', name: 'Xe máy', category: 'car' })).toBe('car');
+  });
+  test('thiếu category → car (nhóm mặc định)', () => {
     expect(vehicleKindFromType({})).toBe('car');
     expect(vehicleKindFromType(null)).toBe('car');
   });
