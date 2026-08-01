@@ -26,6 +26,10 @@ const env = {
   ocrProvider: process.env.OCR_PROVIDER || null,
   // Base URL của PaddleOCR microservice (ocr-service/), vd http://localhost:8868
   paddleOcrUrl: process.env.PADDLE_OCR_URL || null,
+  // Hạn chờ PaddleOCR. 15s là đủ cho service chạy sẵn cùng mạng nội bộ, nhưng một
+  // service host miễn phí ngủ đông phải nạp lại model OCR khi tỉnh dậy và có thể
+  // mất lâu hơn thế — nới biến này thay vì sửa code khi gặp trường hợp đó.
+  paddleOcrTimeoutMs: Number(process.env.PADDLE_OCR_TIMEOUT_MS) || 15000,
   // eSMS.vn — gửi OTP SMS cho luồng quên mật khẩu qua điện thoại (Mobile).
   // Optional: app vẫn khởi động không có key; chỉ throw lúc thực sự gửi SMS (utils/sms.js).
   esmsApiKey: process.env.ESMS_API_KEY || null,

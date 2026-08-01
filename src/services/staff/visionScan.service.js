@@ -187,8 +187,6 @@ const scanWithGemini = async ({ mediaType, data }) => {
 
 /* ── Provider: PaddleOCR microservice ───────────────────────────────────── */
 
-const PADDLE_TIMEOUT_MS = 15000;
-
 const scanWithPaddle = async ({ mediaType, data }) => {
   let response;
   try {
@@ -196,7 +194,7 @@ const scanWithPaddle = async ({ mediaType, data }) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: data, mediaType }),
-      signal: AbortSignal.timeout(PADDLE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(env.paddleOcrTimeoutMs),
     });
   } catch (err) {
     throw new AppError(

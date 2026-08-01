@@ -266,6 +266,7 @@ BẮT BUỘC — xem `.env.example` để có mô tả đầy đủ từng biế
 | `GEMINI_API_KEY` | – | AI camera nhận diện biển số/hãng xe; thiếu → `/scan` trả 503 |
 | `OCR_PROVIDER` | – | `gemini` \| `paddle`; bỏ trống tự chọn theo biến nào có sẵn |
 | `PADDLE_OCR_URL` | – | URL microservice PaddleOCR tự host (xem `ocr-service/README.md`) |
+| `PADDLE_OCR_TIMEOUT_MS` | – | default `15000`; nới lên nếu host OCR ngủ đông và phải nạp lại model |
 
 **Chạy MongoDB in-memory (không cần Atlas)**: `npm run dev:memory`
 (`tools/run-dev-memory-db.js`) — dựng `mongodb-memory-server` local (standalone, không
