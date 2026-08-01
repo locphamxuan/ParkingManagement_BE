@@ -4,7 +4,7 @@ const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
 
 // Bộ giá khởi tạo khi building chưa cấu hình gì (giống pattern DEFAULT_POLICY của
-// reservationPolicy.service) — CHỈ là điểm khởi đầu, manager sửa/xoá/thêm tự do
+// refundPolicy.service) — CHỈ là điểm khởi đầu, manager sửa/xoá/thêm tự do
 // ngay sau đó; không phải mức phí cố định trong code.
 const DEFAULT_VIOLATION_TYPES = [
   { code: "wrong_spot", label: "Wrong spot / wrong vehicle type", fee: 50000 },

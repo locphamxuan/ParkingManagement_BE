@@ -117,7 +117,7 @@ describe('renew & cancel', () => {
     expect(u.walletBalance).toBe(2000000 - 2 * PRICE);
   });
 
-  test('cancel trong 3 ngày: hoàn theo refundPercent (fallback 80% khi building không có ReservationPolicy) + status cancelled', async () => {
+  test('cancel trong 3 ngày: hoàn theo refundPercent (fallback 80% khi building không có RefundPolicy) + status cancelled', async () => {
     const { pkg, user } = await seed();
     const sub = await longTerm.subscribe(user._id, { packageId: pkg._id, plateNumber: '59G2-81000' });
 
@@ -125,7 +125,7 @@ describe('renew & cancel', () => {
     expect(res.subscription.status).toBe('cancelled');
 
     const u = await User.findById(user._id).select('walletBalance');
-    // Không seed ReservationPolicy → fallback 80%: 1,000,000 - 500,000 + round(500,000*0.8)=400,000 → 900,000
+    // Không seed RefundPolicy → fallback 80%: 1,000,000 - 500,000 + round(500,000*0.8)=400,000 → 900,000
     expect(u.walletBalance).toBe(1000000 - PRICE + Math.round(PRICE * 0.8));
   });
 });

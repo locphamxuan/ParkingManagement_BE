@@ -8,6 +8,7 @@ const { assertStrongPassword } = require('../utils/passwordPolicy');
 const { ROLES } = require('../constants/roles');
 const { sendResetPasswordEmail, sendOtpEmail } = require('../utils/email');
 const { sendOtpSms } = require('../utils/sms');
+const logger = require('../utils/logger');
 const env = require('../config/env');
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 phút
@@ -169,7 +170,18 @@ const requestRegistration = async (body) => {
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
 
-  await sendOtpEmail({ to: email, otp, fullName });
+  // SMTP hỏng là lỗi hạ tầng, không phải lỗi người dùng: dịch sang lỗi nghiệp vụ
+  // để người đăng ký biết cần thử lại, thay vì nhận 500 kèm chi tiết mạng nội bộ.
+  try {
+    await sendOtpEmail({ to: email, otp, fullName });
+  } catch (err) {
+    logger.error('[auth] Failed to send registration OTP email', err);
+    throw new AppError(
+      'Could not send the verification email. Please try again in a moment.',
+      503,
+      'OTP_EMAIL_SEND_FAILED',
+    );
+  }
 };
 
 /**

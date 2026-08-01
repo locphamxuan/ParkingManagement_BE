@@ -22,7 +22,7 @@ describe('clampPercent', () => {
     expect(clampPercent(0, 80)).toBe(0);
   });
 
-  test('DEFAULT_REFUND_PERCENT = 80 (khớp DEFAULTS của reservationPolicy.service)', () => {
+  test('DEFAULT_REFUND_PERCENT = 80 (khớp DEFAULTS của refundPolicy.service)', () => {
     expect(DEFAULT_REFUND_PERCENT).toBe(80);
   });
 });

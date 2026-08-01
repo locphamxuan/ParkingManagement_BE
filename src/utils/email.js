@@ -4,16 +4,38 @@
  * Ba loại email: reset mật khẩu, OTP đăng ký, và thông báo hệ thống chung.
  * Mọi email dùng chung một khung layout (renderLayout) để nhất quán thương hiệu.
  */
+const dns = require("node:dns").promises;
 const nodemailer = require("nodemailer");
 
 const BRAND_COLOR = "#f97316";
 const MUTED_COLOR = "#64748b";
 const FOOTER_COLOR = "#94a3b8";
 const APP_NAME = "PBMS — Parking Building Management System";
+const SMTP_HOST = "smtp.gmail.com";
 
-const createTransporter = () =>
-  nodemailer.createTransport({
-    host: "smtp.gmail.com",
+// smtp.gmail.com có cả bản ghi A lẫn AAAA, còn container trên Render có interface
+// IPv6 nhưng KHÔNG có route IPv6 ra ngoài → nodemailer bốc trúng địa chỉ IPv6 là
+// chết ngay với ENETUNREACH (đây chính là nguyên nhân đăng ký trả 500).
+//
+// Option `family` của nodemailer không dùng được: nó dựng opts socket từ một danh
+// sách field cố định và không chép `family` vào, nên đặt cũng vô tác dụng. Cách
+// chắc chắn là tự phân giải sang IPv4 rồi đưa thẳng IP làm host — kèm `servername`
+// để bắt tay STARTTLS vẫn kiểm chứng chứng chỉ theo đúng tên miền Gmail.
+let cachedSmtpIp = null;
+const resolveSmtpIpv4 = async () => {
+  if (cachedSmtpIp) return cachedSmtpIp;
+  const [address] = await dns.resolve4(SMTP_HOST);
+  if (address) cachedSmtpIp = address;
+  return address;
+};
+
+const createTransporter = async () => {
+  // DNS hỏng thì vẫn để nodemailer tự xoay với hostname, đừng chặn luôn việc gửi mail.
+  const host = await resolveSmtpIpv4().catch(() => null);
+
+  return nodemailer.createTransport({
+    host: host || SMTP_HOST,
+    servername: SMTP_HOST,
     port: 587,
     secure: false,
     auth: {
@@ -24,6 +46,7 @@ const createTransporter = () =>
     greetingTimeout: Number(process.env.EMAIL_GREETING_TIMEOUT_MS) || 10000,
     socketTimeout: Number(process.env.EMAIL_SOCKET_TIMEOUT_MS) || 10000,
   });
+};
 
 const fromAddress = () => `"PBMS - Parking Management" <${process.env.EMAIL_USER}>`;
 
@@ -44,7 +67,7 @@ const send = async ({ to, subject, html }) => {
   if (process.env.NODE_ENV === 'test' || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
     return false;
   }
-  const transporter = createTransporter();
+  const transporter = await createTransporter();
   await transporter.sendMail({ from: fromAddress(), to, subject, html });
   return true;
 };

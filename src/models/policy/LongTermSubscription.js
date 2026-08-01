@@ -73,7 +73,7 @@ const longTermSubscriptionSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    // Snapshot % và số tiền đã hoàn lúc hủy (theo ReservationPolicy tại thời điểm đó) —
+    // Snapshot % và số tiền đã hoàn lúc hủy (theo RefundPolicy tại thời điểm đó) —
     // để hiển thị lại chính xác trong lịch sử, tránh tính lại sai nếu policy đổi sau này.
     refundPercent: {
       type: Number,

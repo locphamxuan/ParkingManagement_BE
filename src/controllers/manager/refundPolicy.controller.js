@@ -1,6 +1,6 @@
 const asyncHandler = require("../../utils/asyncHandler");
 const { sendSuccess } = require("../../utils/response");
-const service = require("../../services/manager/reservationPolicy.service");
+const service = require("../../services/manager/refundPolicy.service");
 
 const get = asyncHandler(async (req, res) => {
   const item = await service.get(req.user, req.params.buildingId);

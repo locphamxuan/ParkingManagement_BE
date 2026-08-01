@@ -59,11 +59,11 @@ describe('package.service', () => {
     expect(String(removed.id)).toBe(String(pkg._id));
   });
 
-  test('cancelSubscription: refund theo ReservationPolicy.refundPercent, không hardcode 95%', async () => {
+  test('cancelSubscription: refund theo RefundPolicy.refundPercent, không hardcode 95%', async () => {
     const pkg = await packageSvc.createPackage(manager, building._id, {
       vehicleType: vt._id, name: 'Tháng', code: 'M2', durationDays: 30, price: 300000,
     });
-    await f.createReservationPolicy(building._id, { refundPercent: 60 });
+    await f.createRefundPolicy(building._id, { refundPercent: 60 });
     const user = await f.createUser({
       walletBalance: 300000,
       vehicles: [{ plateNumber: '51F-999.99', category: 'car' }],
@@ -76,7 +76,7 @@ describe('package.service', () => {
     expect(fresh.walletBalance).toBe(180000);
   });
 
-  test('cancelSubscription: building không có ReservationPolicy → fallback 80%', async () => {
+  test('cancelSubscription: building không có RefundPolicy → fallback 80%', async () => {
     const pkg = await packageSvc.createPackage(manager, building._id, {
       vehicleType: vt._id, name: 'Tháng', code: 'M3', durationDays: 30, price: 300000,
     });

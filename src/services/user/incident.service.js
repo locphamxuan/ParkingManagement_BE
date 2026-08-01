@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { Incident, ParkingSlot, ParkingSession, LongTermSubscription, ViolationType } = require('../../models');
+const { Incident, ParkingSlot, ParkingSession, ViolationType } = require('../../models');
 const AppError = require('../../utils/AppError');
 const generateBookingCode = require('../../utils/generateBookingCode');
 const { normalizePlate } = require('../../utils/plate.util');
@@ -21,8 +21,13 @@ const POPULATE_BUILDING = { path: 'building', select: '_id code name' };
 const POPULATE_SLOT = { path: 'slot', select: '_id code' };
 
 /**
- * User tạo phiếu sự cố. Building/slot được suy ra từ slotId (nếu có) hoặc từ
- * subscription/parking session đang hoạt động của user; cuối cùng mới tới buildingId.
+ * User tạo phiếu sự cố.
+ *
+ * Điều kiện tiên quyết: người báo cáo phải ĐANG có xe đỗ trong bãi. Trước đây một
+ * phiên đã hoàn tất hoặc một gói còn hiệu lực là đủ, nhưng như vậy người dùng có
+ * thể mở phiếu cho tòa nhà mình không hề có mặt — staff không thể ra kiểm chứng
+ * tại chỗ, và vụ vi phạm đã trôi qua từ lâu. Building/slot vì thế được suy ra từ
+ * chính phiên đang đỗ, không lấy theo ý client.
  */
 const createIncident = async (userId, payload = {}) => {
   const type = String(payload.type || '').trim();
@@ -39,44 +44,51 @@ const createIncident = async (userId, payload = {}) => {
   if (payload.slotId && !mongoose.isValidObjectId(payload.slotId)) {
     throw new AppError('slotId không hợp lệ', 400, 'INVALID_SLOT');
   }
+  if (payload.sessionId && !mongoose.isValidObjectId(payload.sessionId)) {
+    throw new AppError('sessionId không hợp lệ', 400, 'INVALID_SESSION');
+  }
 
-  // ── Quan hệ hợp lệ của người báo cáo với tòa nhà (server-derived) ────────────
-  // Client KHÔNG được tự chọn tòa nhà tùy ý: phải có gói đang hiệu lực hoặc một phiên
-  // gửi xe (đang đỗ / đã hoàn tất) trong đúng tòa đó. Nếu không, sự cố sẽ mồ côi hoặc
-  // gắn nhầm tòa — quản lý tòa khác phải xử lý việc không thuộc phạm vi của mình.
-  const [userSubscriptions, userSessions] = await Promise.all([
-    LongTermSubscription.find({ user: userId, status: 'active' })
-      .sort('-updatedAt')
-      .select('building slot'),
-    ParkingSession.find({ user: userId, status: { $in: ['active', 'completed'] } })
-      .sort('-entryTime')
-      .limit(50)
-      .select('building slot status'),
-  ]);
-  const relatedBuildingIds = new Set([
-    ...userSubscriptions.map((item) => `${item.building}`),
-    ...userSessions.map((item) => `${item.building}`),
-  ]);
+  // ── Phải đang đỗ xe thì mới được báo sự cố ──────────────────────────────────
+  const activeSessions = await ParkingSession.find({ user: userId, status: 'active' })
+    .sort('-entryTime')
+    .select('building slot plateNumber');
 
-  let buildingId = requestedBuildingId;
-  if (buildingId && !relatedBuildingIds.has(`${buildingId}`)) {
+  if (activeSessions.length === 0) {
     throw new AppError(
-      'Bạn chưa từng gửi xe hoặc mua gói tại tòa nhà này nên không thể báo cáo sự cố ở đây.',
-      403,
-      'BUILDING_RELATION_REQUIRED',
+      'Bạn chỉ có thể báo cáo sự cố khi xe đang đỗ trong bãi.',
+      409,
+      'ACTIVE_SESSION_REQUIRED',
     );
   }
 
-  // Không chỉ định tòa → suy từ quan hệ gần nhất (gói trước, rồi phiên gửi xe).
-  if (!buildingId) {
-    buildingId = userSubscriptions[0]?.building || userSessions[0]?.building || null;
-  }
-  if (!buildingId) {
-    throw new AppError('Không xác định được tòa nhà của sự cố. Vui lòng chọn tòa nhà.', 400, 'BUILDING_REQUIRED');
+  // Nhiều xe cùng đỗ → client chỉ được chọn trong đúng các phiên của mình.
+  let session = null;
+  if (payload.sessionId) {
+    session = activeSessions.find((item) => `${item._id}` === `${payload.sessionId}`) || null;
+    if (!session) {
+      throw new AppError(
+        'Phiên gửi xe không tồn tại hoặc đã kết thúc.',
+        409,
+        'ACTIVE_SESSION_REQUIRED',
+      );
+    }
+  } else if (requestedBuildingId) {
+    session = activeSessions.find((item) => `${item.building}` === `${requestedBuildingId}`) || null;
+    if (!session) {
+      throw new AppError(
+        'Bạn không có xe nào đang đỗ tại tòa nhà này nên không thể báo cáo sự cố ở đây.',
+        403,
+        'BUILDING_RELATION_REQUIRED',
+      );
+    }
+  } else {
+    session = activeSessions[0];
   }
 
+  const buildingId = session.building;
+
   // Slot phải THUỘC ĐÚNG tòa nhà đã xác thực — nếu không, sự cố trỏ sang ô của tòa khác.
-  let slotId = null;
+  let slotId = session.slot || null;
   if (payload.slotId) {
     const slot = await ParkingSlot.findOne({ _id: payload.slotId, building: buildingId }).select('_id');
     if (!slot) {
@@ -87,11 +99,6 @@ const createIncident = async (userId, payload = {}) => {
       );
     }
     slotId = slot._id;
-  } else {
-    // Không chọn ô → lấy ô từ quan hệ của chính user TRONG tòa nhà đó (nếu có).
-    const relatedInBuilding = userSubscriptions.find((item) => `${item.building}` === `${buildingId}` && item.slot)
-      || userSessions.find((item) => `${item.building}` === `${buildingId}` && item.slot);
-    slotId = relatedInBuilding?.slot || null;
   }
 
   // 'type' hợp lệ nếu thuộc nhóm cố định (sự cố tự thân) HOẶC khớp 1 violation type
@@ -117,6 +124,14 @@ const createIncident = async (userId, payload = {}) => {
   // account (subscription/phiên gắn user) trong building chưa. Không tìm thấy →
   // tự động escalate cho manager xử lý (staff chỉ xem, không đủ thẩm quyền).
   const violatorPlate = normalizePlate(payload.violatorPlate || '') || '';
+  if (violatorPlate && violatorPlate === normalizePlate(session.plateNumber || '')) {
+    throw new AppError(
+      'Biển số vi phạm không thể là biển số xe của chính bạn.',
+      400,
+      'SELF_REPORTED_PLATE',
+    );
+  }
+
   let plateAccountFound = null;
   let status = 'open';
   if (violatorPlate) {
@@ -127,7 +142,8 @@ const createIncident = async (userId, payload = {}) => {
   const incident = await Incident.create({
     code: generateBookingCode('INC'),
     type,
-    target: String(payload.target || '').trim(),
+    // Không khai target → dùng biển số đang đỗ, để staff biết ngay phiếu này thuộc xe nào.
+    target: String(payload.target || '').trim() || String(session.plateNumber || '').trim(),
     note: String(payload.note || payload.description || '').trim(),
     building: buildingId,
     slot: slotId,

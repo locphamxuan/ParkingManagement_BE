@@ -1,8 +1,10 @@
 /**
- * Đặt chỗ theo giờ (reservation) đã bị gỡ khỏi sản phẩm. Test này KHOÁ hợp đồng API
- * mà FE/Mobile dựa vào: staff chỉ phân loại xe thành GÓI DÀI HẠN (`hasActivePackage`)
- * hoặc THƯỜNG — không còn field `activeReservation` / `isReservation` /
- * `reservationRemainingFee` nào được trả về để client dựng lại luồng đặt chỗ.
+ * KHOÁ hợp đồng API mà FE/Mobile dựa vào: staff chỉ phân loại xe thành GÓI DÀI HẠN
+ * (`hasActivePackage`) hoặc THƯỜNG — đúng hai nhóm, không có nhóm thứ ba.
+ *
+ * REMOVED_BOOKING_FIELDS là các field của luồng đặt chỗ theo giờ đã bị gỡ khỏi sản
+ * phẩm. Giữ danh sách này để nếu ai đó vô tình dựng lại luồng đó, test đỏ ngay thay
+ * vì client cũ âm thầm hoạt động trở lại.
  */
 const db = require('../../helpers/db');
 const f = require('../../helpers/fixtures');
@@ -18,7 +20,7 @@ jest.setTimeout(120000);
 const IMG = 'data:image/png;base64,AAAA';
 const PLATE = '51F-123.45';
 const DAY = 24 * 60 * 60 * 1000;
-const RESERVATION_FIELDS = ['activeReservation', 'isReservation', 'reservationRemainingFee'];
+const REMOVED_BOOKING_FIELDS = ['activeReservation', 'isReservation', 'reservationRemainingFee'];
 
 let building, floor, vehicleType, staff, owner;
 
@@ -52,26 +54,26 @@ const subscribe = async () => {
 };
 
 describe('staff lookup contract', () => {
-  test('lookupPlate của xe THƯỜNG: không có gói, không có field reservation nào', async () => {
+  test('lookupPlate của xe THƯỜNG: không có gói, không có field đặt chỗ nào', async () => {
     const result = await queryService.lookupPlate(staff, PLATE, building._id);
 
     expect(result.hasActivePackage).toBe(false);
     expect(result.activePackage).toBeNull();
     expect(result.usageType).toBe('registered');
-    RESERVATION_FIELDS.forEach((field) => expect(result).not.toHaveProperty(field));
+    REMOVED_BOOKING_FIELDS.forEach((field) => expect(result).not.toHaveProperty(field));
   });
 
-  test('lookupPlate của xe CÓ GÓI: trả activePackage, vẫn không có field reservation', async () => {
+  test('lookupPlate của xe CÓ GÓI: trả activePackage, vẫn không có field đặt chỗ', async () => {
     await subscribe();
 
     const result = await queryService.lookupPlate(staff, PLATE, building._id);
 
     expect(result.hasActivePackage).toBe(true);
     expect(result.usageType).toBe('subscriber');
-    RESERVATION_FIELDS.forEach((field) => expect(result).not.toHaveProperty(field));
+    REMOVED_BOOKING_FIELDS.forEach((field) => expect(result).not.toHaveProperty(field));
   });
 
-  test('lookupQr / lookupPlateQr chỉ trả gói dài hạn, không trả reservation', async () => {
+  test('lookupQr / lookupPlateQr chỉ trả gói dài hạn', async () => {
     await subscribe();
     const qrCode = (await Vehicle.findOne({ owner: owner._id })).qrCode;
 
@@ -79,7 +81,7 @@ describe('staff lookup contract', () => {
     const byPlate = await usersService.lookupPlateQr(staff, qrCode, building._id);
 
     expect(byUser.activePackages).toHaveLength(1);
-    RESERVATION_FIELDS.forEach((field) => {
+    REMOVED_BOOKING_FIELDS.forEach((field) => {
       expect(byUser).not.toHaveProperty(field);
       expect(byPlate).not.toHaveProperty(field);
     });
@@ -111,7 +113,7 @@ describe('staff check-in chỉ có 2 nhóm: gói dài hạn hoặc thường', (
     expect(created.fee).toBe(0);
   });
 
-  test('danh sách xe đang đỗ chỉ gắn cờ long_term/member — không có cờ reservation', async () => {
+  test('danh sách xe đang đỗ chỉ gắn cờ long_term/member', async () => {
     await f.createSlot(building._id, floor._id, { vehicleType: vehicleType._id, usageType: 'registered' });
     await doCheckIn();
 
@@ -119,6 +121,6 @@ describe('staff check-in chỉ có 2 nhóm: gói dài hạn hoặc thường', (
 
     expect(item).toHaveProperty('isLongTerm', false);
     expect(item).toHaveProperty('currentFee');
-    RESERVATION_FIELDS.forEach((field) => expect(item).not.toHaveProperty(field));
+    REMOVED_BOOKING_FIELDS.forEach((field) => expect(item).not.toHaveProperty(field));
   });
 });

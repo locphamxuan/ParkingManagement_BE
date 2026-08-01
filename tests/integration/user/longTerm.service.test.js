@@ -5,7 +5,7 @@ const svc = require('../../../src/services/user/longTerm.service');
 const User = require('../../../src/models/user/User');
 const LongTermSubscription = require('../../../src/models/policy/LongTermSubscription');
 const Vehicle = require('../../../src/models/vehicle/Vehicle');
-const ReservationPolicy = require('../../../src/models/policy/ReservationPolicy');
+const RefundPolicy = require('../../../src/models/policy/RefundPolicy');
 const Building = require('../../../src/models/building/Building');
 
 let building, vt, user, pkg;
@@ -22,7 +22,7 @@ beforeEach(async () => {
     vehicles: [{ plateNumber: '51F-123.45', category: 'car' }],
   });
   // refundPercent do MANAGER cấu hình theo building — không hardcode trong service.
-  await f.createReservationPolicy(building._id, { refundPercent: 95 });
+  await f.createRefundPolicy(building._id, { refundPercent: 95 });
 });
 
 describe('subscribe', () => {
@@ -86,8 +86,8 @@ describe('cancelSubscription', () => {
       .rejects.toMatchObject({ statusCode: 400 });
   });
 
-  test('refundPercent lấy theo ReservationPolicy của building, không hardcode', async () => {
-    await ReservationPolicy.findOneAndUpdate({ building: building._id }, { refundPercent: 50 });
+  test('refundPercent lấy theo RefundPolicy của building, không hardcode', async () => {
+    await RefundPolicy.findOneAndUpdate({ building: building._id }, { refundPercent: 50 });
     const sub = await svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' });
     await svc.cancelSubscription(user._id, sub._id, { cancelReason: 'no_longer_needed' });
     const fresh = await User.findById(user._id);
@@ -95,8 +95,8 @@ describe('cancelSubscription', () => {
     expect(fresh.walletBalance).toBe(850000);
   });
 
-  test('building không có ReservationPolicy → fallback hoàn 80%', async () => {
-    await ReservationPolicy.deleteMany({ building: building._id });
+  test('building không có RefundPolicy → fallback hoàn 80%', async () => {
+    await RefundPolicy.deleteMany({ building: building._id });
     const sub = await svc.subscribe(user._id, { packageId: pkg._id, plateNumber: '51F-123.45' });
     await svc.cancelSubscription(user._id, sub._id, { cancelReason: 'no_longer_needed' });
     const fresh = await User.findById(user._id);

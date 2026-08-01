@@ -128,7 +128,7 @@
  *     parameters:
  *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
  *     responses:
- *       200: { description: Refund policy returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { item: { $ref: '#/components/schemas/ReservationPolicy' } } } } } ] } } } }
+ *       200: { description: Refund policy returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { item: { $ref: '#/components/schemas/RefundPolicy' } } } } } ] } } } }
  *   put:
  *     tags: [Manager - Refund Policy]
  *     summary: Create or update package refund policy
@@ -137,7 +137,7 @@
  *       - { in: path, name: buildingId, required: true, schema: { type: string, format: objectId } }
  *     requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { refundPercent: { type: number, example: 80 }, isActive: { type: boolean, example: true } } } } } }
  *     responses:
- *       200: { description: Refund policy saved successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Refund policy saved }, data: { type: object, properties: { item: { $ref: '#/components/schemas/ReservationPolicy' } } } } } ] } } } }
+ *       200: { description: Refund policy saved successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { message: { type: string, example: Refund policy saved }, data: { type: object, properties: { item: { $ref: '#/components/schemas/RefundPolicy' } } } } } ] } } } }
  * /api/manager/buildings/{buildingId}/violation-types:
  *   get:
  *     tags: [Manager - Refund Policy]

@@ -17,6 +17,9 @@ const list = async (userId, query = {}) => {
   // Trang "Lịch sử gửi xe" hiển thị toàn bộ phiên gửi xe của user.
   const filter = { user: userId };
   if (query.buildingId) filter.building = query.buildingId;
+  // Lọc theo status để màn báo sự cố lấy đúng các phiên đang đỗ, thay vì tải một
+  // trang lịch sử rồi tự dò — cách đó trượt phiên active khi user gửi xe nhiều lần.
+  if (['active', 'completed', 'cancelled'].includes(query.status)) filter.status = query.status;
 
   const page = Math.max(Number(query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);

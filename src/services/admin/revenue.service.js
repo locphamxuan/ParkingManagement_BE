@@ -144,11 +144,8 @@ const getReport = async ({ from, to, buildingId } = {}) => {
         walletAmount: 1,
         qrAmount: '$onlineAmount',
         onlineAmount: 1,
-        // Nguồn doanh thu của các sản phẩm ĐANG bán. `other` là phần còn lại của
-        // grossRevenue không thuộc 3 nhóm trên — hiện chỉ gồm bản ghi LỊCH SỬ
-        // (vd Payment.type='reservation' từ tính năng đặt chỗ đã bỏ). Giữ `other`
-        // để tổng 4 mục luôn khớp grossRevenue mà không quảng bá đặt chỗ như một
-        // sản phẩm đang hoạt động.
+        // `other` là phần còn lại của grossRevenue không thuộc 3 nhóm trên — giữ
+        // để tổng 4 mục luôn khớp grossRevenue kể cả khi xuất hiện loại thanh toán mới.
         bySource: {
           parking: '$parkingAmount',
           subscription: '$subscriptionAmount',

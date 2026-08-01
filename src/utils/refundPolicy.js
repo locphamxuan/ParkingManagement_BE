@@ -1,7 +1,7 @@
-const ReservationPolicy = require('../models/policy/ReservationPolicy');
+const RefundPolicy = require('../models/policy/RefundPolicy');
 
-// Default duy nhất toàn hệ thống khi tòa CHƯA có ReservationPolicy — khớp DEFAULT_POLICY
-// của manager/reservationPolicy.service. (Trước đây mỗi luồng hủy dùng default khác nhau
+// Default duy nhất toàn hệ thống khi tòa CHƯA có RefundPolicy — khớp DEFAULT_POLICY
+// của manager/refundPolicy.service. (Trước đây mỗi luồng hủy dùng default khác nhau
 // → user được hứa 80% nhưng thực nhận 0đ ở tòa chưa cấu hình.)
 const DEFAULT_REFUND_PERCENT = 80;
 
@@ -12,12 +12,12 @@ const clampPercent = (value, fallback) => {
 };
 
 /**
- * % hoàn tiền khi hủy gói dài hạn theo ReservationPolicy (refund policy) của tòa.
+ * % hoàn tiền khi hủy gói dài hạn theo RefundPolicy (refund policy) của tòa.
  * Dùng chung cho MỌI luồng hoàn tiền (user tự hủy / manager hủy) để default/clamp
  * luôn nhất quán.
  */
 const getRefundPercent = async (buildingId, session = null) => {
-  const policy = await ReservationPolicy.findOne({ building: buildingId })
+  const policy = await RefundPolicy.findOne({ building: buildingId })
     .select('refundPercent isActive')
     .session(session);
   if (policy && !policy.isActive) return 0;

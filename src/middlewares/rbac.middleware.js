@@ -31,7 +31,7 @@ const authorizeBuildingAccess = (req, _res, next) => {
     return next(new AppError("Authentication required", 401));
   }
 
-  // Nếu là ADMIN tối cao thì cho qua luôn, không cần check building
+  // Nếu là ADMIN thì cho qua luôn, không cần check building
   if (req.user.role === 'admin' || req.user.role === ROLES.ADMIN) {
     return next();
   }

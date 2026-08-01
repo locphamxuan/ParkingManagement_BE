@@ -14,7 +14,7 @@ const VehicleType = require('../src/models/building/VehicleType');
 const Floor = require('../src/models/building/Floor');
 const ParkingSlot = require('../src/models/building/ParkingSlot');
 const PricePolicy = require('../src/models/policy/PricePolicy');
-const ReservationPolicy = require('../src/models/policy/ReservationPolicy');
+const RefundPolicy = require('../src/models/policy/RefundPolicy');
 const LongTermPackage = require('../src/models/policy/LongTermPackage');
 const LongTermSubscription = require('../src/models/policy/LongTermSubscription');
 const { ParkingSession, Shift, StaffShift } = require('../src/models');
@@ -41,7 +41,7 @@ const seedBase = async () => {
   const vt = await VehicleType.create({ building: building._id, code: 'CAR', name: 'Ô tô', category: 'car' });
   const floor = await Floor.create({ building: building._id, code: 'F1', name: 'Floor 1', capacity: 100 });
   await PricePolicy.create({ building: building._id, vehicleType: vt._id, name: 'Reg', type: 'regular', hourlyRate: RATE });
-  await ReservationPolicy.create({ building: building._id });
+  await RefundPolicy.create({ building: building._id });
   const staff = { _id: new mongoose.Types.ObjectId(), assignedBuildings: [building._id] };
   const shift = await Shift.create({
     building: building._id,

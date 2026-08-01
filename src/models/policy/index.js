@@ -1,7 +1,7 @@
 const PricePolicy = require("./PricePolicy");
-const ReservationPolicy = require("./ReservationPolicy");
+const RefundPolicy = require("./RefundPolicy");
 const LongTermPackage = require("./LongTermPackage");
 const LongTermSubscription = require("./LongTermSubscription");
 const ViolationType = require("./ViolationType");
 
-module.exports = { PricePolicy, ReservationPolicy, LongTermPackage, LongTermSubscription, ViolationType };
+module.exports = { PricePolicy, RefundPolicy, LongTermPackage, LongTermSubscription, ViolationType };

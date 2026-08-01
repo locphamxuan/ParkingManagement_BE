@@ -153,8 +153,8 @@ const validatePackage = wrap((req) => {
     throw new AppError("maxHoursPerDay must be >= 0", 400);
 });
 
-// Chính sách hoàn tiền gói (trước là reservation policy — chỉ còn refundPercent).
-const validateReservationPolicy = wrap((req) => {
+// Chính sách hoàn tiền gói — chỉ còn refundPercent.
+const validateRefundPolicy = wrap((req) => {
   if (
     req.body.refundPercent !== undefined &&
     (req.body.refundPercent < 0 || req.body.refundPercent > 100)
@@ -215,7 +215,7 @@ module.exports = {
   validateZone,
   validatePricePolicy,
   validatePackage,
-  validateReservationPolicy,
+  validateRefundPolicy,
   validateShift,
   validateStaffShift,
   validateFeedbackResponse,

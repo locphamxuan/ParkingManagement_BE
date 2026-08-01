@@ -98,8 +98,8 @@ const swaggerPathAdditions = {
         {
           in: 'query',
           name: 'type',
-          description: 'Payment type filter. `reservation` is a legacy value kept so historical records stay searchable; it is never produced by the current system.',
-          schema: { type: 'string', enum: ['session', 'reservation', 'subscription', 'penalty', 'refund', 'topup', 'cancellation_fee'] },
+          description: 'Payment type filter.',
+          schema: { type: 'string', enum: ['session', 'subscription', 'penalty', 'refund', 'topup', 'cancellation_fee'] },
         },
         { in: 'query', name: 'method', schema: { type: 'string', enum: ['cash', 'wallet', 'qr', 'card', 'payos'] } },
         { in: 'query', name: 'status', schema: { type: 'string', enum: ['pending', 'success', 'failed', 'refunded', 'reconciliation_required'] } },

@@ -1,10 +1,10 @@
-/** manager: vehicleType, floor, gate, reservationPolicy — CRUD + ràng buộc. */
+/** manager: vehicleType, floor, gate, refundPolicy — CRUD + ràng buộc. */
 const db = require('../../helpers/db');
 const f = require('../../helpers/fixtures');
 const vtSvc = require('../../../src/services/manager/vehicleType.service');
 const floorSvc = require('../../../src/services/manager/floor.service');
 const gateSvc = require('../../../src/services/manager/gate.service');
-const rpSvc = require('../../../src/services/manager/reservationPolicy.service');
+const rpSvc = require('../../../src/services/manager/refundPolicy.service');
 const vtypeSvc = require('../../../src/services/manager/violationType.service');
 const Gate = require('../../../src/models/building/Gate');
 
@@ -91,7 +91,7 @@ describe('gate.service', () => {
   });
 });
 
-describe('reservationPolicy.service (refund policy)', () => {
+describe('refundPolicy.service (refund policy)', () => {
   test('get tạo policy mặc định nếu chưa có', async () => {
     const p = await rpSvc.get(manager, building._id);
     expect(p.refundPercent).toBe(80);

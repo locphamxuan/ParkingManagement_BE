@@ -33,6 +33,8 @@ AGENTS.md
 # Tài liệu nghiệp vụ trỏ tới file:dòng — số dòng trôi theo code, nên nó PHẢI đi
 # cùng commit với code nó mô tả. Để ngoài version control là bảo đảm nó sẽ sai.
 !/docs/NGHIEP_VU_BACKEND.md
+# Script xuất tài liệu sang Word. Không có nó thì bản .docx không tái tạo được.
+!/docs/export-to-docx.py
 
 # Generated exports / reports
 postman/

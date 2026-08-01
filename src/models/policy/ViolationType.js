@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 // Bảng giá phạt vi phạm do MANAGER tự cấu hình theo building (không hard code mức
-// phạt trong code) — thay cho ReservationPolicy.ruleViolationFee (1 mức chung cho
+// phạt trong code) — thay cho RefundPolicy.ruleViolationFee (1 mức chung cho
 // mọi loại vi phạm). Mỗi violation type gắn 1 mức phí cố định: khi manager duyệt
 // phạt (penalize_violator) cho 1 incident có type khớp code này, phí bị áp ĐÚNG
 // giá trị ở đây — manager không được nhập tay số khác (chặn set phí tuỳ tiện/quá cao).

@@ -9,7 +9,7 @@ const VehicleType = require('../../src/models/building/VehicleType');
 const Floor = require('../../src/models/building/Floor');
 const Zone = require('../../src/models/building/Zone');
 const ParkingSlot = require('../../src/models/building/ParkingSlot');
-const ReservationPolicy = require('../../src/models/policy/ReservationPolicy');
+const RefundPolicy = require('../../src/models/policy/RefundPolicy');
 const PricePolicy = require('../../src/models/policy/PricePolicy');
 const LongTermPackage = require('../../src/models/policy/LongTermPackage');
 const Shift = require('../../src/models/operations/Shift');
@@ -135,9 +135,9 @@ const createSlot = (buildingId, floorId, over = {}) => {
   });
 };
 
-// Chính sách hoàn tiền gói (model giữ tên ReservationPolicy sau khi bỏ đặt chỗ).
-const createReservationPolicy = (buildingId, over = {}) =>
-  ReservationPolicy.create({
+// Chính sách hoàn tiền gói (model giữ tên RefundPolicy sau khi bỏ đặt chỗ).
+const createRefundPolicy = (buildingId, over = {}) =>
+  RefundPolicy.create({
     building: buildingId,
     refundPercent: over.refundPercent ?? 80,
   });
@@ -226,7 +226,7 @@ module.exports = {
   createFloor,
   createZone,
   createSlot,
-  createReservationPolicy,
+  createRefundPolicy,
   createPricePolicy,
   createPackage,
   createShift,

@@ -38,15 +38,14 @@ beforeEach(async () => {
   // User-facing incident.service chỉ chấp nhận type='slot_occupied' nếu có ViolationType
   // khớp code này cho building — seed sẵn (mô phỏng manager đã cấu hình bảng giá).
   await ViolationType.create({ building: building._id, code: 'slot_occupied', label: 'Occupying a reserved slot', fee: 100000 });
-  // Người báo cáo phải có QUAN HỆ thật với tòa nhà (đã/đang gửi xe hoặc có gói) —
-  // BE không cho gắn sự cố vào một tòa nhà bất kỳ do client gửi lên.
+  // Người báo cáo phải ĐANG đỗ xe trong tòa nhà — BE suy building/slot từ chính
+  // phiên này, không nhận tòa nhà tuỳ ý do client gửi lên.
   await ParkingSession.create({
     plateNumber: '51F-000.11',
     building: building._id,
     user: reporter._id,
-    status: 'completed',
-    entryTime: new Date(Date.now() - 3 * 3600 * 1000),
-    exitTime: new Date(Date.now() - 2 * 3600 * 1000),
+    status: 'active',
+    entryTime: new Date(Date.now() - 3600 * 1000),
   });
 });
 
@@ -312,6 +311,50 @@ describe('user incident.service — type động theo bảng giá vi phạm củ
         type: 'other', buildingId: building._id, slotId: unrelatedSlot._id,
       }),
     ).rejects.toMatchObject({ errorCode: 'SLOT_BUILDING_MISMATCH' });
+  });
+
+  // Chốt luật: chỉ báo được sự cố khi xe ĐANG đỗ. Phiên đã hoàn tất hay gói còn hạn
+  // đều không đủ — nếu không, user mở phiếu cho tòa nhà mình không hề có mặt.
+  test('không có phiên đang đỗ → 409 ACTIVE_SESSION_REQUIRED', async () => {
+    await ParkingSession.updateMany({ user: reporter._id }, { status: 'completed', exitTime: new Date() });
+
+    await expect(
+      userIncidentSvc.createIncident(reporter._id, { type: 'other', buildingId: building._id }),
+    ).rejects.toMatchObject({ errorCode: 'ACTIVE_SESSION_REQUIRED' });
+  });
+
+  test('gói dài hạn còn hiệu lực nhưng xe không đỗ → vẫn không báo được', async () => {
+    await ParkingSession.deleteMany({ user: reporter._id });
+    const vt = await f.createVehicleType(building._id);
+    const pkg = await f.createPackage(building._id, vt._id);
+    await LongTermSubscription.create({
+      user: reporter._id, package: pkg._id, building: building._id, plateNumber: '51F-000.11',
+      startDate: new Date(), endDate: new Date(Date.now() + 30 * 86400000), status: 'active',
+    });
+
+    await expect(
+      userIncidentSvc.createIncident(reporter._id, { type: 'other', buildingId: building._id }),
+    ).rejects.toMatchObject({ errorCode: 'ACTIVE_SESSION_REQUIRED' });
+  });
+
+  test('building/slot lấy theo phiên đang đỗ, không theo client', async () => {
+    const floor = await f.createFloor(building._id);
+    const slot = await f.createSlot(building._id, floor._id, { status: 'occupied' });
+    await ParkingSession.updateMany({ user: reporter._id, status: 'active' }, { slot: slot._id });
+
+    const res = await userIncidentSvc.createIncident(reporter._id, { type: 'other', note: 'x' });
+
+    expect(String(res.item.building._id)).toBe(String(building._id));
+    expect(String(res.item.slot._id)).toBe(String(slot._id));
+    expect(res.item.target).toBe('51F-000.11');
+  });
+
+  test('không được khai chính biển số xe của mình là biển vi phạm', async () => {
+    await expect(
+      userIncidentSvc.createIncident(reporter._id, {
+        type: 'slot_occupied', buildingId: building._id, violatorPlate: '51F-000.11',
+      }),
+    ).rejects.toMatchObject({ errorCode: 'SELF_REPORTED_PLATE' });
   });
 
   test('staff cannot attach a parking session from another building', async () => {

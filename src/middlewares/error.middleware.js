@@ -30,8 +30,18 @@ const errorHandler = (err, req, res, _next) => {
     message = 'Invalid resource ID';
   }
 
-  if (process.env.NODE_ENV === 'development') {
+  // Lỗi 5xx phải được log ở mọi môi trường: trước đây chỉ log ở development nên
+  // sự cố production (vd SMTP không kết nối được) không để lại dấu vết nào.
+  if (statusCode >= 500) {
+    logger.error(`[Error] ${req.method} ${req.originalUrl}`, err);
+  } else if (process.env.NODE_ENV === 'development') {
     logger.error('[Error]', err);
+  }
+
+  // Chỉ lỗi nghiệp vụ (AppError) mới được trả nguyên văn ra ngoài. Lỗi hệ thống
+  // 5xx mang chi tiết hạ tầng (IP, host, stack driver) — che lại ở production.
+  if (statusCode >= 500 && !err.isOperational && process.env.NODE_ENV !== 'development') {
+    message = 'Internal Server Error';
   }
 
   res.status(statusCode).json({

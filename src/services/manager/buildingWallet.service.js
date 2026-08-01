@@ -114,8 +114,6 @@ const debit = async (buildingId, amount, reason, relatedPaymentId, performedById
 
 /**
  * Daily revenue for a building (parking_fee + subscription_fee + penalty_fee credits).
- * The legacy 'reservation_fee' reason stays in the filter so historical days keep
- * their original total; the current system never writes it.
  * @param {string|ObjectId} buildingId
  * @param {Date|string} [date] - Date or 'YYYY-MM-DD' (defaults to today)
  */
@@ -127,7 +125,7 @@ const getDailyRevenue = async (buildingId, date) => {
       $match: {
         building: new mongoose.Types.ObjectId(String(buildingId)),
         type: 'credit',
-        reason: { $in: ['parking_fee', 'reservation_fee', 'subscription_fee', 'penalty_fee'] },
+        reason: { $in: ['parking_fee', 'subscription_fee', 'penalty_fee'] },
         createdAt: { $gte: start, $lte: end },
       },
     },

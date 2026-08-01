@@ -10,7 +10,7 @@ const slotController = require("../../controllers/manager/slot.controller");
 const zoneController = require("../../controllers/manager/zone.controller");
 const pricingController = require("../../controllers/manager/pricing.controller");
 const packageController = require("../../controllers/manager/package.controller");
-const reservationPolicyController = require("../../controllers/manager/reservationPolicy.controller");
+const refundPolicyController = require("../../controllers/manager/refundPolicy.controller");
 const violationTypeController = require("../../controllers/manager/violationType.controller");
 const shiftController = require("../../controllers/manager/shift.controller");
 const feedbackController = require("../../controllers/manager/feedback.controller");
@@ -137,11 +137,11 @@ router.delete("/subscriptions/:id", packageController.cancelSubscription);
 // (không tính walk-in — không có account để "đăng ký gói").
 router.get("/customers", customerController.list);
 
-// Chính sách hoàn tiền khi hủy gói dài hạn (đổi từ /reservation-policy sau khi bỏ đặt chỗ).
+// Chính sách hoàn tiền khi hủy gói dài hạn.
 router
   .route("/refund-policy")
-  .get(reservationPolicyController.get)
-  .put(v.validateReservationPolicy, reservationPolicyController.upsert);
+  .get(refundPolicyController.get)
+  .put(v.validateRefundPolicy, refundPolicyController.upsert);
 
 // Bảng giá phạt vi phạm — mỗi loại vi phạm 1 mức phí manager tự cấu hình (không
 // hard code), dùng khi duyệt phạt (Incident action=penalize_violator).

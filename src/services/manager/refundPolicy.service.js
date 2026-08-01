@@ -1,9 +1,9 @@
-const ReservationPolicy = require("../../models/policy/ReservationPolicy");
+const RefundPolicy = require("../../models/policy/RefundPolicy");
 const AppError = require("../../utils/AppError");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
 const { writeAuditLog } = require("../../utils/audit");
 
-// Chính sách hoàn tiền gói dài hạn — chỉ còn refundPercent sau khi bỏ reservation.
+// Chính sách hoàn tiền gói dài hạn — chỉ còn refundPercent.
 // Phí phạt vi phạm đã tách sang violationType.service.js (1 mức/loại vi phạm).
 const validatePolicyPayload = (payload) => {
   if (payload.refundPercent !== undefined) {
@@ -21,9 +21,9 @@ const DEFAULT_POLICY = {
 
 const get = async (user, buildingId) => {
   ensureManagerOwnsBuilding(user, buildingId);
-  let policy = await ReservationPolicy.findOne({ building: buildingId });
+  let policy = await RefundPolicy.findOne({ building: buildingId });
   if (!policy) {
-    policy = await ReservationPolicy.create({
+    policy = await RefundPolicy.create({
       building: buildingId,
       ...DEFAULT_POLICY,
     });
@@ -34,7 +34,7 @@ const get = async (user, buildingId) => {
 // Cho phép Staff & Public xem chính sách hoàn tiền / phạt tiền của tòa nhà
 const getPublic = async (buildingId) => {
   if (!buildingId) return DEFAULT_POLICY;
-  let policy = await ReservationPolicy.findOne({ building: buildingId });
+  let policy = await RefundPolicy.findOne({ building: buildingId });
   if (!policy) {
     return { building: buildingId, ...DEFAULT_POLICY };
   }
@@ -44,13 +44,13 @@ const getPublic = async (buildingId) => {
 const upsert = async (user, buildingId, payload) => {
   ensureManagerOwnsBuilding(user, buildingId);
   validatePolicyPayload(payload);
-  const current = await ReservationPolicy.findOne({ building: buildingId });
+  const current = await RefundPolicy.findOne({ building: buildingId });
 
   const update = {};
   if (payload.refundPercent !== undefined) update.refundPercent = Number(payload.refundPercent);
   if (payload.isActive !== undefined) update.isActive = !!payload.isActive;
 
-  const updated = await ReservationPolicy.findOneAndUpdate(
+  const updated = await RefundPolicy.findOneAndUpdate(
     { building: buildingId },
     { $set: update },
     { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
@@ -59,7 +59,7 @@ const upsert = async (user, buildingId, payload) => {
   await writeAuditLog({
     actor: user,
     action: "UPDATE_REFUND_POLICY",
-    targetTable: "reservation_policies",
+    targetTable: "refund_policies",
     targetId: updated._id,
     building: buildingId,
     previousValue: current?.toObject() ?? null,
