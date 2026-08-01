@@ -69,7 +69,7 @@ describe('Logout', () => {
     const user = await f.createUser({ password: OLD_PASSWORD });
     const login = await request(app)
       .post('/api/users/auth/login')
-      .send({ email: user.email, password: OLD_PASSWORD });
+      .send({ email: user.email, password: OLD_PASSWORD, clientType: 'mobile' });
     const token = login.body.data.token;
     const cookie = login.headers['set-cookie'].find((c) => c.startsWith(`${COOKIE_NAME}=`));
 
@@ -108,7 +108,7 @@ describe('Credential resets revoke existing tokens', () => {
 
     const relogin = await request(app)
       .post('/api/users/auth/login')
-      .send({ email: user.email, password: STRONG_PASSWORD });
+      .send({ email: user.email, password: STRONG_PASSWORD, clientType: 'mobile' });
     expect((await getMe(relogin.body.data.token)).status).toBe(200);
   });
 
@@ -122,7 +122,7 @@ describe('Credential resets revoke existing tokens', () => {
 
     const res = await request(app)
       .post('/api/users/auth/reset-password')
-      .send({ token: resetToken, newPassword: STRONG_PASSWORD });
+      .send({ token: resetToken, newPassword: STRONG_PASSWORD, clientType: 'mobile' });
 
     expect(res.status).toBe(200);
     expect((await getMe(oldToken)).status).toBe(401);
@@ -141,7 +141,7 @@ describe('Credential resets revoke existing tokens', () => {
 
     const res = await request(app)
       .post('/api/users/auth/reset-password-sms')
-      .send({ phone: user.phone, otp: '123456', newPassword: STRONG_PASSWORD });
+      .send({ phone: user.phone, otp: '123456', newPassword: STRONG_PASSWORD, clientType: 'mobile' });
 
     expect(res.status).toBe(200);
     expect((await getMe(oldToken)).status).toBe(401);

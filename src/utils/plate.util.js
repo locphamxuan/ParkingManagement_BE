@@ -91,4 +91,24 @@ const plateMatchRegex = (raw) => {
   return new RegExp(`^${body}$`, 'i');
 };
 
-module.exports = { normalizePlate, isValidVietnamPlate, plateMatchRegex };
+/**
+ * Nhóm xe suy ra TỪ CHÍNH BIỂN SỐ: 'motorcycle' | 'car' | null (không đoán được).
+ *
+ * Sê-ri biển đã nói lên loại xe: một chữ cái là ô tô (30A), một chữ cái kèm một
+ * chữ số là xe máy (59X1). Biển hai chữ cái (51LD, 80NG, 59AB1) là biển đặc
+ * biệt/liên doanh, không theo quy tắc đó → trả null để phía gọi bỏ qua thay vì
+ * từ chối oan.
+ *
+ * Dùng để chặn khai sai thể loại xe lúc đăng ký: `category` quyết định bảng giá
+ * và ô đỗ, nên một chiếc ô tô khai là xe máy sẽ được tính tiền và gán ô sai.
+ */
+const plateVehicleKind = (raw) => {
+  const canonical = normalizePlate(raw);
+  if (!isValidVietnamPlate(canonical)) return null;
+  const series = canonical.match(/^\d{2}([A-Z]{1,2})(\d?)-/);
+  if (!series) return null;
+  if (series[1].length !== 1) return null; // biển 2 chữ cái: không suy đoán
+  return series[2] ? 'motorcycle' : 'car';
+};
+
+module.exports = { normalizePlate, isValidVietnamPlate, plateMatchRegex, plateVehicleKind };

@@ -70,7 +70,8 @@ describe('E2E · Auth & RBAC boundary (HTTP)', () => {
     const s = await seedFullScene();
     const res = await request(app)
       .post('/api/users/auth/login')
-      .send({ email: s.customer.email, password: 'secret1' });
+      // clientType 'mobile' = đường native dùng Bearer, nên body mới có token.
+      .send({ email: s.customer.email, password: 'secret1', clientType: 'mobile' });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -86,7 +87,8 @@ describe('E2E · Auth & RBAC boundary (HTTP)', () => {
 
     const loginRes = await request(app)
       .post('/api/users/auth/login')
-      .send({ email: s.customer.email, password: 'secret1' });
+      // clientType 'mobile' = đường native dùng Bearer, nên body mới có token.
+      .send({ email: s.customer.email, password: 'secret1', clientType: 'mobile' });
     expect(loginRes.status).toBe(200);
     const setCookie = loginRes.headers['set-cookie'] || [];
     const authCookie = setCookie.find((c) => c.startsWith(`${COOKIE_NAME}=`));

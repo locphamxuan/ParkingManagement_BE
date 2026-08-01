@@ -57,10 +57,27 @@ const list = async (query = {}) => {
     vehiclesByOwner.set(String(vehicle.owner), owned);
   });
 
+  // Phân công đọc từ BuildingManager chứ không lấy `User.assignedBuildings` đã lưu:
+  // trường đó chỉ là bản sao, lệch một nhịp là màn admin hiện sai ai đang rảnh để
+  // giao toà. Gom một lượt cho cả trang, cùng kiểu với phần xe ở trên.
+  const assignments = await BuildingManager.find({
+    user: { $in: items.map((u) => u._id) },
+    isActive: true,
+  })
+    .select("user building")
+    .lean();
+  const buildingsByUser = new Map();
+  assignments.forEach((assignment) => {
+    const owned = buildingsByUser.get(String(assignment.user)) || [];
+    owned.push(assignment.building);
+    buildingsByUser.set(String(assignment.user), owned);
+  });
+
   return {
     items: items.map((item) => ({
       ...item,
       vehicles: vehiclesByOwner.get(String(item._id)) || [],
+      assignedBuildings: buildingsByUser.get(String(item._id)) || [],
     })),
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
   };

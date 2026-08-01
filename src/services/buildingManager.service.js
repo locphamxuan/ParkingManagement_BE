@@ -11,6 +11,14 @@ const findUser = async (userId) => {
   return user;
 };
 
+/**
+ * Ghi lại bản sao phân công lên User cho tiện tra cứu/hiển thị.
+ *
+ * KHÔNG phải nguồn sự thật: `BuildingManager` mới là nơi lưu phân công, và
+ * `auth.middleware` dựng lại `req.user.assignedBuildings` từ đó ở mỗi request.
+ * Không được dùng trường đã lưu này để quyết định phân quyền — nó có thể lệch
+ * (ghi thẳng vào DB, hoặc một nhánh update lỗi giữa chừng).
+ */
 const syncUserAssignedBuildings = async (userId) => {
   const activeAssignments = await buildingManagerRepo.findActiveByUser(userId);
   const assignedBuildingIds = activeAssignments.map(
@@ -47,14 +55,16 @@ const assignManagerToBuilding = async ({ buildingId, userId }) => {
     throw new AppError("User is already assigned to another building", 400);
   }
 
-  // Check if building already has a different active manager.
-  // Use User model (role + assignedBuildings) instead of BuildingManager
-  // to avoid false-positives from staff records sharing the same building.
-  const existingManager = await User.findOne({
-    _id: { $ne: userId },
-    role: "manager",
-    assignedBuildings: buildingId,
-  });
+  // Toà đã có manager khác chưa? Hỏi thẳng BuildingManager — đây là nơi phân công
+  // thực sự được lưu và cũng là nơi auth.middleware đọc để dựng phạm vi mỗi
+  // request. Bản trước hỏi `User.assignedBuildings`, vốn chỉ là bản sao được
+  // đồng bộ lại sau mỗi thay đổi: nó lệch một nhịp là toà nhận được hai manager.
+  // Lọc theo role ở bước sau để không dính bản ghi của staff cùng toà.
+  const activeAssignments = await buildingManagerRepo.findActiveByBuilding(buildingId);
+  const existingManager = activeAssignments.find(
+    (assignment) =>
+      assignment.user?.role === "manager" && String(assignment.user?._id) !== String(userId),
+  );
   if (existingManager) {
     throw new AppError("Building already has an active manager", 400);
   }

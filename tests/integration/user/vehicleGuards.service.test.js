@@ -67,8 +67,11 @@ test('không đổi được thể loại xe khi xe đang gửi', async () => {
     status: 'active',
   });
 
+  // Đổi sang 'suv' chứ không phải 'motorcycle': biển 51F là biển ô tô nên khai
+  // xe máy sẽ bị chặn sớm hơn bởi ràng buộc biển↔thể loại (400), che mất đúng
+  // thứ test này muốn chứng minh — đang gửi xe thì không đổi được thể loại.
   await expect(
-    vehicleService.update(user._id, vehicle._id, { category: 'motorcycle' }),
+    vehicleService.update(user._id, vehicle._id, { category: 'suv' }),
   ).rejects.toMatchObject({
     statusCode: 409,
     errorCode: 'VEHICLE_CATEGORY_CONFLICT',

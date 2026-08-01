@@ -4,6 +4,9 @@ const f = require('../../helpers/fixtures');
 const svc = require('../../../src/services/user/vehicle.service');
 const qrSvc = require('../../../src/services/user/vehicleQr.service');
 const Vehicle = require('../../../src/models/vehicle/Vehicle');
+const {
+  validateCreateVehicle,
+} = require('../../../src/validators/user/vehicle.validator');
 
 let user;
 beforeAll(async () => { await db.connect(); });
@@ -80,6 +83,17 @@ describe('setDefault + update + remove', () => {
     expect(updated.category).toBe('suv');
   });
 
+  test('đổi sang thể loại lệch nhóm với biển số → 400 PLATE_CATEGORY_MISMATCH', async () => {
+    // 51F = biển ô tô (1 chữ cái, không có số sê-ri). Khai thành xe máy là sai
+    // bảng giá và sai ô đỗ, nên phải chặn ngay cả khi xe không vướng gói/phiên.
+    const vehicle = await svc.add(user._id, { plateNumber: '51F-123.45', category: 'car' });
+    await expect(svc.update(user._id, vehicle._id, { category: 'motorcycle' }))
+      .rejects.toMatchObject({ statusCode: 400, errorCode: 'PLATE_CATEGORY_MISMATCH' });
+
+    const unchanged = await Vehicle.findById(vehicle._id);
+    expect(unchanged.category).toBe('car');
+  });
+
   test('sửa mô tả xe không đụng tới biển số', async () => {
     const vehicle = await svc.add(user._id, { plateNumber: '51F-123.45' });
     const updated = await svc.update(user._id, vehicle._id, { brand: 'Honda' });
@@ -151,5 +165,38 @@ describe('vòng đời mã QR', () => {
       (vehicle.qrExpiresAt.getTime() - vehicle.qrIssuedAt.getTime()) / (24 * 60 * 60 * 1000);
     expect(lifetimeDays).toBeCloseTo(qrSvc.qrTtlDays(), 5);
     expect(qrSvc.qrTtlDays()).toBe(2);
+  });
+});
+
+/** Ràng buộc biển ↔ thể loại nằm ở validator cho đường tạo mới (service không thấy body thô). */
+describe('validateCreateVehicle — biển số phải khớp thể loại', () => {
+  const run = (body) => {
+    const req = { body };
+    return new Promise((resolve, reject) => {
+      validateCreateVehicle(req, {}, (err) => (err ? reject(err) : resolve(req.body)));
+    });
+  };
+
+  test('biển xe máy khai thành ô tô → 400 PLATE_CATEGORY_MISMATCH', async () => {
+    await expect(run({ plateNumber: '59G2-038.80', category: 'car' }))
+      .rejects.toMatchObject({ statusCode: 400, errorCode: 'PLATE_CATEGORY_MISMATCH' });
+  });
+
+  test('biển ô tô khai thành xe máy → 400 PLATE_CATEGORY_MISMATCH', async () => {
+    await expect(run({ plateNumber: '30A-970.22', category: 'motorcycle' }))
+      .rejects.toMatchObject({ statusCode: 400, errorCode: 'PLATE_CATEGORY_MISMATCH' });
+  });
+
+  test('khớp nhóm thì qua, kể cả khi category chi tiết khác nhau (suv vẫn là 4 bánh)', async () => {
+    await expect(run({ plateNumber: '30A-970.22', category: 'suv' })).resolves.toMatchObject({
+      category: 'suv',
+    });
+    await expect(run({ plateNumber: '59G2-038.80', category: 'ebike' })).resolves.toMatchObject({
+      category: 'ebike',
+    });
+  });
+
+  test('biển đặc biệt 2 chữ cái không suy được nhóm → không chặn', async () => {
+    await expect(run({ plateNumber: '51LD-123.45', category: 'motorcycle' })).resolves.toBeTruthy();
   });
 });

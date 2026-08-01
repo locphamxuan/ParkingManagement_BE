@@ -38,7 +38,10 @@ const requestOtp = (over = {}) =>
     .send({ email: EMAIL, fullName: 'New User', ...over });
 
 const verify = (body) =>
-  request(app).post('/api/users/auth/register-verify').send({ email: EMAIL, ...body });
+  request(app)
+    .post('/api/users/auth/register-verify')
+    // Đường native: token chỉ trả trong body khi client tự khai là mobile.
+    .send({ email: EMAIL, clientType: 'mobile', ...body });
 
 describe('OTP record contents', () => {
   test('stores neither a plaintext password nor a plaintext OTP', async () => {

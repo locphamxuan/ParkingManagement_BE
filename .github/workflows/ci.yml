@@ -1,5 +1,7 @@
 name: Backend CI
 
+# Chỉ KIỂM TRA, không deploy — file này từng tên là ci-cd.yml nhưng chưa bao giờ
+# có bước CD. Render tự deploy qua autoDeploy trên nhánh main (xem render.yaml).
 on:
   pull_request:
     branches: [main, dev]
