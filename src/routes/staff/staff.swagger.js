@@ -158,6 +158,67 @@
  *         plateNumber: { type: string, example: 59G2-038.80 }
  *         startDate: { type: string, format: date-time }
  *         endDate: { type: string, format: date-time }
+ *     StaffPlateLookup:
+ *       type: object
+ *       description: >
+ *         What the gate learns about one plate INSIDE the selected building. Like every
+ *         other staff lookup it carries no email, phone or wallet balance — only the
+ *         display name. Note `registeredVehicleKind` (the 2-wheel/4-wheel group used for
+ *         slot matching and pricing), which is a different field from the detailed
+ *         `registeredVehicle.category`.
+ *       properties:
+ *         plateNumber: { type: string, example: 59G2-038.80, description: Canonical VN form. }
+ *         hasAccount: { type: boolean, example: true }
+ *         usageType:
+ *           type: string
+ *           enum: [walk_in, registered, subscriber]
+ *           description: Feed this back into /free-slots so the slot pool matches check-in.
+ *         registeredVehicleKind:
+ *           type: string
+ *           nullable: true
+ *           enum: [car, motorcycle]
+ *         registeredVehicle:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             category: { type: string, enum: [motorcycle, ebike, emotorbike, car, suv, truck, other] }
+ *             categoryLabel: { type: string, nullable: true, example: Ô tô }
+ *             brand: { type: string, nullable: true, example: Toyota }
+ *         user:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             id: { $ref: '#/components/schemas/ObjectId' }
+ *             fullName: { type: string, example: Nguyễn Văn A }
+ *         activeSession:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             id: { $ref: '#/components/schemas/ObjectId' }
+ *             building: { $ref: '#/components/schemas/ObjectId' }
+ *             entryTime: { type: string, format: date-time }
+ *         hasActivePackage: { type: boolean }
+ *         activePackage:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             id: { $ref: '#/components/schemas/ObjectId' }
+ *             name: { type: string, example: Gói tháng }
+ *             maxHoursPerDay: { type: number, example: 12 }
+ *             slot:
+ *               type: object
+ *               nullable: true
+ *               description: Fixed slot bought with the package; null means staff must assign a free one.
+ *               properties:
+ *                 id: { $ref: '#/components/schemas/ObjectId' }
+ *                 code: { type: string, example: A-12 }
+ *                 status: { type: string }
+ *                 floor:
+ *                   type: object
+ *                   nullable: true
+ *                   properties:
+ *                     name: { type: string }
+ *                     code: { type: string }
  * /api/staff/users/lookup-qr/{qrCode}:
  *   get:
  *     tags: [Staff - Users Lookup]
@@ -266,6 +327,9 @@
  *     description: >
  *       `building` is REQUIRED and is applied to BOTH branches (`PLT-` plate token and
  *       account ObjectId). Response is the matching lookup payload tagged with `kind`.
+ *       `kind` is `vehicle` for a `PLT-` token — the payload then carries the scanned
+ *       car under `vehicle` (with `category`, NOT `vehicleType`) — and `user` for an
+ *       account ObjectId. Neither branch returns email, phone or wallet balance.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -289,10 +353,42 @@
  *                 - type: object
  *                   properties:
  *                     data:
- *                       type: object
- *                       properties:
- *                         kind: { type: string, enum: [plate, user] }
- *                       additionalProperties: true
+ *                       oneOf:
+ *                         - type: object
+ *                           description: A `PLT-` vehicle token — same payload as /lookup-plate-qr.
+ *                           properties:
+ *                             kind: { type: string, enum: [vehicle] }
+ *                             qrCode: { type: string, example: PLT-abc123 }
+ *                             found: { type: boolean }
+ *                             vehicle:
+ *                               type: object
+ *                               properties:
+ *                                 plateNumber: { type: string, example: 59G2-038.80 }
+ *                                 category: { type: string, enum: [motorcycle, ebike, emotorbike, car, suv, truck, other], example: car }
+ *                                 categoryLabel: { type: string, nullable: true, example: Ô tô }
+ *                                 brand: { type: string, nullable: true, example: Toyota }
+ *                             activeSessions:
+ *                               type: array
+ *                               items: { $ref: '#/components/schemas/StaffQrSession' }
+ *                         - type: object
+ *                           description: An account ObjectId — same payload as /lookup-qr.
+ *                           properties:
+ *                             kind: { type: string, enum: [user] }
+ *                             userId: { $ref: '#/components/schemas/ObjectId' }
+ *                             hasAccount: { type: boolean }
+ *                             user:
+ *                               type: object
+ *                               nullable: true
+ *                               properties:
+ *                                 id: { $ref: '#/components/schemas/ObjectId' }
+ *                                 fullName: { type: string }
+ *                                 isActive: { type: boolean }
+ *                             activeSessions:
+ *                               type: array
+ *                               items: { $ref: '#/components/schemas/StaffQrSession' }
+ *                             activePackages:
+ *                               type: array
+ *                               items: { $ref: '#/components/schemas/StaffQrPackage' }
  *       400: { description: BUILDING_REQUIRED / INVALID_QR_CODE., $ref: '#/components/responses/ValidationError' }
  *       403: { description: FORBIDDEN_BUILDING_SCOPE — building is not assigned to this staff member., $ref: '#/components/responses/ForbiddenError' }
  */
@@ -374,20 +470,62 @@
  * /api/staff/parking-sessions/lookup-plate/{plate}:
  *   get:
  *     tags: [Staff - Parking Sessions]
- *     summary: Look up account and wallet details by license plate
+ *     summary: Look up the owner, registered vehicle and long-term package of a plate
+ *     description: >
+ *       `building` is REQUIRED — an open session, a package and its fixed slot only mean
+ *       anything inside one building. No wallet balance or contact detail is returned.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: plate, required: true, schema: { type: string }, example: 59G2-038.80 }
+ *       - { in: query, name: building, required: true, schema: { type: string, format: objectId }, description: Missing → 400 BUILDING_REQUIRED. }
  *     responses:
- *       200: { description: Plate lookup returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { hasAccount: { type: boolean, example: true }, user: { $ref: '#/components/schemas/PublicUser' }, walletBalance: { type: number, example: 150000 } } } } } ] } } } }
+ *       200: { description: Plate lookup returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { $ref: '#/components/schemas/StaffPlateLookup' } } } ] } } } }
+ *       400: { description: BUILDING_REQUIRED — query parameter `building` is missing., $ref: '#/components/responses/ValidationError' }
  * /api/staff/parking-sessions/scan:
  *   post:
  *     tags: [Staff - Parking Sessions]
- *     summary: Scan vehicle image for plate and brand recognition
+ *     summary: Recognize a plate from a camera frame and resolve the vehicle's account
+ *     description: >
+ *       `image` MUST be a full data URL (`data:image/jpeg;base64,...`). The declared MIME
+ *       type is checked against the file's magic bytes before anything is forwarded to an
+ *       OCR provider, so a bare base64 string is rejected with 400 IMAGE_MALFORMED.
+ *       Allowed types are image/jpeg, image/png and image/webp, up to 3MB decoded.
+ *       `building` is REQUIRED in the body.
+ *
+ *       Plate recognition is assistive, never a gate blocker: when the configured OCR
+ *       provider is down the response is still 200 with `scanStatus: "unavailable"` and an
+ *       empty `plateNumber`, so staff fall back to manual entry. Only a malformed payload
+ *       is a hard 4xx. With the PaddleOCR provider `vehicleType` and `brand` are always
+ *       null — it reads text only, and staff pick the vehicle type in the UI.
  *     security: [{ bearerAuth: [] }]
- *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [image], properties: { image: { type: string, example: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ } } } } } }
+ *     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [image, building], properties: { image: { type: string, example: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ }, building: { type: string, format: objectId } } } } } }
  *     responses:
- *       200: { description: Scan result returned successfully., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiResponseWrapper' }, { type: object, properties: { data: { type: object, properties: { plateNumber: { type: string, example: 59G2-038.80 }, brand: { type: string, example: Toyota }, hasAccount: { type: boolean, example: true }, user: { $ref: '#/components/schemas/PublicUser' } } } } } ] } } } }
+ *       200:
+ *         description: Scan result returned successfully (including the degraded manual-entry fallback).
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/ApiResponseWrapper'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       allOf:
+ *                         - $ref: '#/components/schemas/StaffPlateLookup'
+ *                         - type: object
+ *                           properties:
+ *                             scanStatus:
+ *                               type: string
+ *                               enum: [available, unavailable]
+ *                               description: '`unavailable` = OCR provider outage; plateNumber is empty and staff type it in.'
+ *                             plateConfidence: { type: number, format: float, example: 0.97 }
+ *                             vehicleType: { type: string, nullable: true, enum: [car, motorcycle], description: Detected by the provider; always null on PaddleOCR. }
+ *                             brand: { type: string, nullable: true, example: Toyota }
+ *                             brandConfidence: { type: number, format: float, example: 0.81 }
+ *                             vehicleTypeMismatch: { type: boolean, description: True only when BOTH the detected and the registered kind are known and differ. }
+ *       400: { description: BUILDING_REQUIRED / IMAGE_MALFORMED / IMAGE_TYPE_UNSUPPORTED / IMAGE_BASE64_INVALID / IMAGE_TYPE_MISMATCH., $ref: '#/components/responses/ValidationError' }
+ *       413: { description: IMAGE_TOO_LARGE — the decoded frame is over 3MB. }
+ *       429: { description: Too many scans from this staff account. }
  * /api/staff/parking-sessions/reject:
  *   post:
  *     tags: [Staff - Parking Sessions]
