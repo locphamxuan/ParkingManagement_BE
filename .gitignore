@@ -30,6 +30,9 @@ API_DOC.md
 AGENTS.md
 /docs/*
 !/docs/COUNCIL_DEFENSE_NOTES.md
+# Tài liệu nghiệp vụ trỏ tới file:dòng — số dòng trôi theo code, nên nó PHẢI đi
+# cùng commit với code nó mô tả. Để ngoài version control là bảo đảm nó sẽ sai.
+!/docs/NGHIEP_VU_BACKEND.md
 
 # Generated exports / reports
 postman/

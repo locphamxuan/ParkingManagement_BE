@@ -5,6 +5,12 @@ Stack: **Node.js**, **Express**, **MongoDB Atlas**, **Mongoose**, **JWT**.
 
 Tài liệu tham chiếu: `Requirements+Database.docx`, ERD (25 collections).
 
+| Tài liệu | Dùng khi nào |
+|---|---|
+| **[docs/NGHIEP_VU_BACKEND.md](docs/NGHIEP_VU_BACKEND.md)** | Cần biết **nghiệp vụ X nằm ở file nào, dòng nào**; lý thuyết đã áp dụng; hướng dẫn thêm chức năng mới từ A→Z |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Kiến trúc tổng thể, biến môi trường, checklist deploy |
+| `/api-docs` (chạy server) | Hợp đồng API chi tiết (Swagger UI) |
+
 ---
 
 ## Mục lục
