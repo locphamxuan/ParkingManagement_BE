@@ -8,6 +8,26 @@ const visionScanService = require('../visionScan.service');
 const { assertStaffHasActiveShift } = require('../../shared/entryAuthorization.service');
 const { asObjectId, calculateRegularSessionFee, calculateLongTermOverageFee, activeSubscriptionMatch, resolveVehicleTypeId, slotCompatibilityFilter, usageRanker } = require('./helpers');
 
+/**
+ * Số tiền phải thu HIỆN TẠI của một phiên, luôn dẫn xuất từ PricePolicy manager đặt.
+ *
+ * Dùng chung cho danh sách xe đang đỗ và cho màn thu phí, nên hai chỗ không bao giờ
+ * hiển thị hai con số khác nhau. Thiếu bảng giá được trả ra tường minh
+ * (`pricePolicyConfigured: false` + `currentFee: null`) chứ KHÔNG quy về 0 — 0 đồng
+ * nghĩa là "miễn phí", còn đây là "chưa cấu hình giá" và check-out sẽ bị chặn.
+ */
+const quoteLiveFee = async (parkingSession, preloadedPolicies) => {
+  if (parkingSession.paymentMethod === 'long_term') {
+    const { fee, overageHours, maxHoursPerDay } = await calculateLongTermOverageFee(parkingSession);
+    return { currentFee: fee, overageHours, maxHoursPerDay, pricePolicyConfigured: true };
+  }
+  const quote = await calculateRegularSessionFee(parkingSession, preloadedPolicies);
+  return {
+    currentFee: quote.hasPolicy ? quote.fee : null,
+    pricePolicyConfigured: quote.hasPolicy,
+  };
+};
+
 // Lõi truy vấn dùng chung staff/manager — caller phải tự xác thực quyền building trước.
 const listActiveByFilter = async (buildingFilter) => {
   const sessions = await ParkingSession.find({ ...buildingFilter, status: 'active' })
@@ -54,22 +74,9 @@ const listActiveByFilter = async (buildingFilter) => {
       obj.isLongTerm = s.paymentMethod === 'long_term';
       // long_term session requires an account — treat as member even if user ref is null (data inconsistency)
       obj.isMember = Boolean(s.user) || obj.isLongTerm;
-      if (obj.isLongTerm) {
-        // Gói dài hạn: miễn phí trong hạn mức/ngày, chỉ tính phần vượt.
-        const { fee, overageHours, maxHoursPerDay } = await calculateLongTermOverageFee(s);
-        obj.currentFee = fee;
-        obj.overageHours = overageHours;
-        obj.maxHoursPerDay = maxHoursPerDay;
-      } else {
-        // Session thường: dùng policies đã preload, không query DB thêm. A
-        // missing policy is surfaced to the UI; it must never look like free
-        // parking or fall back to a hidden flat rate.
-        const vtId = s.vehicleType?._id || s.vehicleType || null;
-        const sessionPolicies = policyMap.get(`${s.building}|${vtId}`) || [];
-        const quote = await calculateRegularSessionFee(s, sessionPolicies);
-        obj.currentFee = quote.hasPolicy ? quote.fee : null;
-        obj.pricePolicyConfigured = quote.hasPolicy;
-      }
+      // Session thường dùng policies đã preload để không query DB thêm (tránh N+1).
+      const vtId = s.vehicleType?._id || s.vehicleType || null;
+      Object.assign(obj, await quoteLiveFee(s, policyMap.get(`${s.building}|${vtId}`) || []));
       return obj;
     })
   );
@@ -95,7 +102,15 @@ const getByIdInBuilding = async (buildingId, id) => {
   if (!parkingSession) {
     throw new AppError('Parking session not found', 404, 'SESSION_NOT_FOUND');
   }
-  return parkingSession;
+
+  // Cùng nguồn số tiền với danh sách và với màn thu phí của staff (xem `quoteLiveFee`).
+  const obj = parkingSession.toObject();
+  obj.isLongTerm = parkingSession.paymentMethod === 'long_term';
+  obj.isMember = Boolean(parkingSession.user) || obj.isLongTerm;
+  if (parkingSession.status === 'active') {
+    Object.assign(obj, await quoteLiveFee(parkingSession));
+  }
+  return obj;
 };
 
 const getById = async (user, id) => {
@@ -112,7 +127,18 @@ const getById = async (user, id) => {
 
   assertBuildingScope(user, parkingSession.building);
 
-  return parkingSession;
+  // Số tiền phải thu, tính LẠI tại thời điểm gọi từ PricePolicy đang hiệu lực của
+  // tòa nhà. Màn thu phí lấy con số ở đây ngay trước khi check-out nên nó luôn
+  // khớp với số tiền checkOut() sẽ thực sự ghi nhận, thay vì một giá trị chụp lại
+  // từ lần tải danh sách trước đó.
+  const obj = parkingSession.toObject();
+  obj.isLongTerm = parkingSession.paymentMethod === 'long_term';
+  obj.isMember = Boolean(parkingSession.user) || obj.isLongTerm;
+  if (parkingSession.status === 'active') {
+    Object.assign(obj, await quoteLiveFee(parkingSession));
+  }
+
+  return obj;
 };
 
 const search = async (user, plate, query = {}) => {

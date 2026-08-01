@@ -440,6 +440,22 @@
  *         entryTime: { type: string, format: date-time, example: '2026-06-12T08:00:00.000Z' }
  *         exitTime: { type: string, format: date-time, nullable: true, example: null }
  *         fee: { type: number, example: 45000 }
+ *         currentFee:
+ *           type: number
+ *           nullable: true
+ *           example: 45000
+ *           description: >
+ *             Amount due right now for an ACTIVE session, recomputed from the
+ *             building's active PricePolicy on every read (staff/manager list and
+ *             detail endpoints). For a long-term session this is the overage fee
+ *             only. `null` means no price policy is configured — never treat it
+ *             as free parking; check-out is rejected with PRICE_POLICY_NOT_CONFIGURED.
+ *         pricePolicyConfigured:
+ *           type: boolean
+ *           example: true
+ *           description: Whether an active PricePolicy exists for this building + vehicle type.
+ *         overageHours: { type: number, nullable: true, example: 2.5, description: Long-term sessions only — hours parked beyond the daily allowance. }
+ *         maxHoursPerDay: { type: number, nullable: true, example: 8, description: Long-term sessions only — free hours per day granted by the package. }
  *         paymentMethod: { type: string, enum: [cash, wallet, qr, card, payos, long_term], nullable: true, example: wallet }
  *         status: { type: string, enum: [active, completed, cancelled], example: active }
  *         note: { type: string, example: Customer paid by wallet }
