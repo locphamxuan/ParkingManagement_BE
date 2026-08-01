@@ -38,9 +38,11 @@ OCR_PROVIDER=paddle
 PADDLE_OCR_URL=http://localhost:8868
 ```
 
-Khi deploy lên Render, `localhost` không phải máy đang chạy API Node. Deploy service
-`pbms-ocr` từ `render.yaml`, sau đó đặt `PADDLE_OCR_URL` của `pbms-api` thành URL
-công khai của service đó (ví dụ `https://<pbms-ocr-url>`), rồi redeploy API.
+Khi deploy lên hosting, `localhost` không phải máy đang chạy API Node. Dựng service
+này thành một web service riêng (runtime Python 3.11, build `pip install -r
+requirements.txt`, start `uvicorn main:app --host 0.0.0.0 --port $PORT`, health check
+`/health`), sau đó đặt `PADDLE_OCR_URL` của API Node thành URL công khai của nó rồi
+redeploy API.
 
 Bỏ trống `OCR_PROVIDER` → BE tự chọn: có `PADDLE_OCR_URL` dùng paddle, có `GEMINI_API_KEY` dùng gemini. Không cấu hình gì → endpoint `/scan` trả lỗi 503 (không có mock fallback).
 

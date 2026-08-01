@@ -291,10 +291,20 @@ Không có bước build (không TypeScript/bundler) — `npm start` chạy th�
 4. `npm start`.
 5. MongoDB Atlas + PayOS phải là project/kênh thanh toán **production**, không
    phải sandbox/dev, trước khi nhận thanh toán thật.
+6. Chạy `npm run migrate:vehicles` MỘT LẦN trên database đích (xem
+   `npm run migrate:vehicles:dry` để xem trước) — dữ liệu cũ còn giữ biển số
+   trong mảng của User sẽ không tra cứu được cho tới khi chuyển sang
+   collection `Vehicle`.
 
-> Nhánh này (`chore/full-review-2026-07`) là một đợt rà soát chất lượng trước
-> triển khai — không tự động deploy, quyết định thời điểm đi production do chủ dự
-> án quyết định riêng.
+> Repo **không** giữ file blueprint deploy nào (không `render.yaml`, không
+> workflow ping URL production). Tài khoản hosting, tên service và URL là việc
+> riêng của người triển khai — cấu hình trong dashboard của nền tảng, bật
+> auto-deploy từ nhánh `main`. Giữ chúng ngoài repo để đổi chủ triển khai không
+> phải sửa code.
+>
+> Muốn chống ngủ đông trên gói free: đặt `SELF_PING_URL` (hoặc để nền tảng tự
+> tiêm `RENDER_EXTERNAL_URL`) — `src/jobs/keepAlive.job.js` sẽ tự ping
+> `/health` mỗi 10 phút vào chính service của mình.
 
 ## 8. Thư mục khác
 - `openspec/` — quy trình OpenSpec cho thay đổi hành vi/nghiệp vụ (`propose` →
