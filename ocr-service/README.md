@@ -44,6 +44,20 @@ công khai của service đó (ví dụ `https://<pbms-ocr-url>`), rồi redeplo
 
 Bỏ trống `OCR_PROVIDER` → BE tự chọn: có `PADDLE_OCR_URL` dùng paddle, có `GEMINI_API_KEY` dùng gemini. Không cấu hình gì → endpoint `/scan` trả lỗi 503 (không có mock fallback).
 
+### Hai cái bẫy khi host trên gói free
+
+1. **RAM.** `paddlepaddle` cộng model PP-OCR vượt xa hạn mức 512MB của một instance
+   free — service sẽ bị OOM lúc nạp model chứ không phải lúc quét. Muốn chạy thật
+   thì nâng gói RAM lớn hơn, hoặc để service này trên một máy tự quản.
+2. **Ngủ đông.** Instance free ngủ sau ~15 phút rảnh; lần quét kế tiếp phải đánh
+   thức tiến trình rồi nạp lại model, thường lâu hơn `PADDLE_OCR_TIMEOUT_MS`
+   (mặc định 15s). Nới biến đó lên ~60000, hoặc giữ `GEMINI_API_KEY` để BE tự
+   chuyển sang Gemini khi PaddleOCR không kịp trả lời.
+
+Đặt cả hai provider là cấu hình bền nhất: `OCR_PROVIDER` chọn cái chạy trước, cái
+còn lại tự động đỡ khi cái chính chết (xem `resolveProviderChain` trong
+`src/services/staff/visionScan.service.js`).
+
 ## API
 
 ### `POST /scan`
