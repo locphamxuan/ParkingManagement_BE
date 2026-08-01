@@ -3,10 +3,25 @@ const asyncHandler = require('../utils/asyncHandler');
 const { sendSuccess } = require('../utils/response');
 const { setAuthCookie, clearAuthCookie } = require('../utils/authCookie');
 
+/**
+ * Bỏ JWT khỏi thân phản hồi trừ khi client tự khai là 'mobile'.
+ *
+ * Web nhận phiên qua cookie httpOnly — trả kèm token trong JSON là tự tay đưa nó
+ * về nơi JavaScript đọc được, đúng thứ mà cookie httpOnly sinh ra để tránh. Client
+ * native không dùng được cookie nên vẫn cần token: gửi `clientType: 'mobile'`
+ * trong body (cùng quy ước đã dùng ở forgot-password) để nhận.
+ */
+const authResponse = (req, data) => {
+  if (req.body?.clientType === 'mobile') return data;
+  const { token, ...rest } = data;
+  void token;
+  return rest;
+};
+
 const login = asyncHandler(async (req, res) => {
   const data = await authService.login(req.body);
   setAuthCookie(res, data.token);
-  sendSuccess(res, { message: 'Login successful', data });
+  sendSuccess(res, { message: 'Login successful', data: authResponse(req, data) });
 });
 
 // The route authenticates first so we know WHICH account to revoke; the cookie
@@ -32,7 +47,10 @@ const forgotPassword = asyncHandler(async (req, res) => {
 
 const resetPassword = asyncHandler(async (req, res) => {
   const data = await authService.resetPassword(req.body.token, req.body.newPassword);
-  sendSuccess(res, { message: 'Password has been reset successfully', data });
+  sendSuccess(res, {
+    message: 'Password has been reset successfully',
+    data: authResponse(req, data),
+  });
 });
 
 // Always the same 200 + message, whether or not an OTP was actually sent —
@@ -51,7 +69,7 @@ const registerVerify = asyncHandler(async (req, res) => {
   sendSuccess(res, {
     statusCode: 201,
     message: 'Registration successful',
-    data,
+    data: authResponse(req, data),
   });
 });
 
@@ -65,7 +83,13 @@ const forgotPasswordSms = asyncHandler(async (req, res) => {
 
 const resetPasswordSms = asyncHandler(async (req, res) => {
   const data = await authService.resetPasswordSms(req.body);
-  sendSuccess(res, { message: 'Password has been reset successfully', data });
+  // Đặt cookie như mọi lối đăng nhập khác để web dùng được đường này, thay vì chỉ
+  // phát token trần trong body.
+  setAuthCookie(res, data.token);
+  sendSuccess(res, {
+    message: 'Password has been reset successfully',
+    data: authResponse(req, data),
+  });
 });
 
 module.exports = {

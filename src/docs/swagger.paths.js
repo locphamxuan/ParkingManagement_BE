@@ -115,7 +115,12 @@
  *       properties:
  *         token:
  *           type: string
- *           description: JWT access token.
+ *           description: >
+ *             JWT access token. CHỈ trả về khi request khai `clientType: "mobile"` —
+ *             client native không dùng được cookie nên cần token để gửi
+ *             `Authorization: Bearer`. Web nhận phiên qua cookie httpOnly
+ *             `pbms_token` (đã set ở header của chính phản hồi này) và cố tình
+ *             KHÔNG nhận token trong body, để JavaScript không đọc được nó.
  *           example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example.signature
  *         user:
  *           $ref: '#/components/schemas/PublicUser'
