@@ -7,7 +7,7 @@ const LongTermSubscription = require("../../models/policy/LongTermSubscription")
 const Feedback = require("../../models/operations/Feedback");
 const mongoose = require("mongoose");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
-const { localUtcOffset } = require("../../utils/dateBucket");
+const { localUtcOffset, fillDailySeries } = require("../../utils/dateBucket");
 const { REVENUE_PAYMENT_TYPES } = require("../../constants/finance");
 
 const startOfDay = (date) => {
@@ -143,11 +143,16 @@ const getOverview = async (user, buildingId) => {
     revenue: {
       today: todayRevenueTotal,
       byMethod: revenueByMethod,
-      weekly: weeklyRevenue.map((d) => ({
-        date: d._id,
-        revenue: d.totalRevenue,
-        sessions: d.sessionCount,
-      })),
+      // Đủ 7 ngày liên tiếp, ngày không phát sinh giao dịch = 0 (xem `fillDailySeries`).
+      weekly: fillDailySeries(
+        weeklyRevenue.map((d) => ({
+          date: d._id,
+          revenue: d.totalRevenue,
+          sessions: d.sessionCount,
+        })),
+        7,
+        { revenue: 0, sessions: 0 },
+      ),
     },
   };
 };

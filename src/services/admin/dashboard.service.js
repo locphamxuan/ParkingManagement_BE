@@ -4,7 +4,7 @@ const ParkingSession = require("../../models/operations/ParkingSession");
 const ParkingSlot = require("../../models/building/ParkingSlot");
 const Payment = require("../../models/finance/Payment");
 const { ROLES } = require("../../constants/roles");
-const { localUtcOffset } = require("../../utils/dateBucket");
+const { localUtcOffset, fillDailySeries } = require("../../utils/dateBucket");
 const { REVENUE_PAYMENT_TYPES } = require("../../constants/finance");
 
 const getDateRange = (period) => {
@@ -111,7 +111,12 @@ const getOverview = async (period = "today") => {
   const totalRevenue = periodPayments.reduce((acc, row) => acc + row.amount, 0);
   const totalRefunds = periodPayments.reduce((acc, row) => acc + row.refunds, 0);
 
-  const weekly = weeklyAgg.map((d) => ({ date: d._id, revenue: d.revenue, sessions: d.sessions }));
+  // Đủ 7 ngày liên tiếp, ngày không phát sinh giao dịch = 0 (xem `fillDailySeries`).
+  const weekly = fillDailySeries(
+    weeklyAgg.map((d) => ({ date: d._id, revenue: d.revenue, sessions: d.sessions })),
+    7,
+    { revenue: 0, sessions: 0 },
+  );
 
   const revenueTodayMap = new Map(revenueByBuildingToday.map((r) => [String(r._id), r.amount]));
   const buildingStats = slotsByBuilding.map((s) => ({
