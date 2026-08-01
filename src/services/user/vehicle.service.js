@@ -5,6 +5,7 @@ const LongTermSubscription = require('../../models/policy/LongTermSubscription')
 const ParkingSession = require('../../models/operations/ParkingSession');
 const AppError = require('../../utils/AppError');
 const { normalizePlate, isValidVietnamPlate, plateMatchRegex } = require('../../utils/plate.util');
+const { assertCategoryMatchesPlate } = require('../../utils/vehicleRules');
 const { ensureFreshQr, ensureFreshQrForAll, stampNewQr } = require('./vehicleQr.service');
 
 const MAX_VEHICLES_PER_USER = 5;
@@ -105,6 +106,10 @@ const update = async (ownerId, vehicleId, payload) => {
   // Đổi thể loại xe làm thay đổi bảng giá và ô đỗ tương thích → cấm đổi khi xe đang
   // trong bãi hoặc đang gắn gói dài hạn còn hiệu lực.
   if (payload.category !== undefined && payload.category !== vehicle.category) {
+    // Sửa xe cũng phải khớp sê-ri biển như lúc tạo, nếu không thì chỉ cần thêm xe
+    // đúng rồi sửa category là lách được ràng buộc.
+    assertCategoryMatchesPlate(vehicle.plateNumber, payload.category);
+
     const { hasActiveSubscription, hasActiveSession } = await findActiveUsage(
       ownerId,
       vehicle.plateNumber

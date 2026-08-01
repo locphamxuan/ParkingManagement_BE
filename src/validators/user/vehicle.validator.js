@@ -1,5 +1,6 @@
 const AppError = require('../../utils/AppError');
 const { normalizePlate, isValidVietnamPlate } = require('../../utils/plate.util');
+const { assertCategoryMatchesPlate } = require('../../utils/vehicleRules');
 const {
   VEHICLE_CATEGORY_CODES,
   DEFAULT_VEHICLE_CATEGORY,
@@ -61,6 +62,7 @@ const validateCreateVehicle = wrap((req) => {
   req.body.category = req.body.category
     ? assertCategory(req.body.category)
     : DEFAULT_VEHICLE_CATEGORY;
+  assertCategoryMatchesPlate(normalized, req.body.category);
   normalizeDescriptiveFields(req.body);
 });
 
