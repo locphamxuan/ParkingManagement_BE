@@ -12,11 +12,17 @@ const list = async (query = {}) => {
 
   const [items, total] = await Promise.all([
     AuditLog.find(filter)
+      // `previousValue`/`newValue`/`metadata` là ảnh chụp nguyên bản ghi (một
+      // ParkingSession kèm ảnh base64 có thể tới hàng trăm KB). Danh sách chỉ dùng
+      // để tra cứu nên bỏ hẳn ba trường này ra khỏi payload — chúng từng làm một
+      // trang 200 dòng nặng vài MB và mất hàng chục giây trên mạng chậm.
+      .select("-previousValue -newValue -metadata")
       .populate("actor", "fullName email role")
       .populate("building", "name code")
       .sort("-createdAt")
       .skip((page - 1) * limit)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     AuditLog.countDocuments(filter),
   ]);
 
