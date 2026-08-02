@@ -342,8 +342,9 @@ const scanVehicle = async (staffUser, image, buildingId) => {
     hasActivePackage: false,
     activePackage: null,
   };
-  if (isValidVietnamPlate(plateNumber)) {
-    const lookup = await lookupPlate(staffUser, plateNumber, buildingId);
+  const normalized = normalizePlate(plateNumber);
+  if (normalized && isValidVietnamPlate(normalized)) {
+    const lookup = await lookupPlate(staffUser, normalized, buildingId);
     account = {
       hasAccount: lookup.hasAccount,
       registeredVehicleKind: lookup.registeredVehicleKind,
@@ -364,7 +365,7 @@ const scanVehicle = async (staffUser, image, buildingId) => {
 
   return {
     scanStatus,
-    plateNumber, // canonical VN form, or '' if unreadable
+    plateNumber: normalized || plateNumber, // canonical VN form, or '' if unreadable
     plateConfidence,
     vehicleType, // detected by AI (car|motorcycle|null)
     brand,
