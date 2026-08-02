@@ -7,24 +7,19 @@ const LongTermSubscription = require("../../models/policy/LongTermSubscription")
 const Feedback = require("../../models/operations/Feedback");
 const mongoose = require("mongoose");
 const { ensureManagerOwnsBuilding } = require("../../utils/managerScope");
-const { localUtcOffset } = require("../../utils/dateBucket");
+const {
+  localUtcOffset,
+  startOfBusinessDay,
+  addDays,
+} = require("../../utils/dateBucket");
 const { REVENUE_PAYMENT_TYPES } = require("../../constants/finance");
-
-const startOfDay = (date) => {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
 
 const getOverview = async (user, buildingId) => {
   ensureManagerOwnsBuilding(user, buildingId);
 
-  const today = startOfDay(new Date());
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+  const today = startOfBusinessDay();
+  const tomorrow = addDays(today, 1);
+  const sevenDaysAgo = addDays(today, -6);
 
   const [
     slots,

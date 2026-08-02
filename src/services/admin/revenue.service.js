@@ -9,6 +9,7 @@ const {
   REVENUE_PAYMENT_TYPES,
   ONLINE_PAYMENT_METHODS,
 } = require('../../constants/finance');
+const { startOfBusinessDay, endOfBusinessDay } = require('../../utils/dateBucket');
 
 const { PAYMENT_TYPES, PAYMENT_METHODS, PAYMENT_STATUS } = Payment;
 
@@ -36,9 +37,7 @@ const parseRange = ({ from, to }) => {
     throw new AppError('Invalid date format', 400);
   }
   if (dateFrom > dateTo) throw new AppError('from must be before or equal to to', 400);
-  dateFrom.setHours(0, 0, 0, 0);
-  dateTo.setHours(23, 59, 59, 999);
-  return { dateFrom, dateTo };
+  return { dateFrom: startOfBusinessDay(dateFrom), dateTo: endOfBusinessDay(dateTo) };
 };
 
 const moneyWhen = (condition) => ({
@@ -223,12 +222,8 @@ const listPayments = async (query = {}) => {
     const effectiveRange = {};
     const from = optionalDate(query.from, 'from');
     const to = optionalDate(query.to, 'to');
-    if (from) effectiveRange.$gte = from;
-    if (to) {
-      const end = new Date(to);
-      end.setHours(23, 59, 59, 999);
-      effectiveRange.$lte = end;
-    }
+    if (from) effectiveRange.$gte = startOfBusinessDay(from);
+    if (to) effectiveRange.$lte = endOfBusinessDay(to);
     filter.$or = [
       { settledAt: effectiveRange },
       { settledAt: null, createdAt: effectiveRange },

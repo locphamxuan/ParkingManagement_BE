@@ -4,7 +4,11 @@ const ParkingSession = require("../../models/operations/ParkingSession");
 const ParkingSlot = require("../../models/building/ParkingSlot");
 const Payment = require("../../models/finance/Payment");
 const { ROLES } = require("../../constants/roles");
-const { localUtcOffset } = require("../../utils/dateBucket");
+const {
+  localUtcOffset,
+  startOfBusinessDay,
+  addDays,
+} = require("../../utils/dateBucket");
 const { REVENUE_PAYMENT_TYPES } = require("../../constants/finance");
 
 const getDateRange = (period) => {
@@ -18,21 +22,17 @@ const getDateRange = (period) => {
   } else if (period === "month") {
     from.setDate(1);
   }
-  from.setHours(0, 0, 0, 0);
 
-  return { from, to: now };
+  return { from: startOfBusinessDay(from), to: now };
 };
 
 const getOverview = async (period = "today") => {
   const { from, to } = getDateRange(period);
 
   // Cửa sổ 7 ngày cho biểu đồ xu hướng doanh thu.
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+  const today = startOfBusinessDay();
+  const tomorrow = addDays(today, 1);
+  const sevenDaysAgo = addDays(today, -6);
 
   const [
     totalBuildings,
@@ -114,11 +114,22 @@ const getOverview = async (period = "today") => {
   const weekly = weeklyAgg.map((d) => ({ date: d._id, revenue: d.revenue, sessions: d.sessions }));
 
   const revenueTodayMap = new Map(revenueByBuildingToday.map((r) => [String(r._id), r.amount]));
-  const buildingStats = slotsByBuilding.map((s) => ({
-    buildingId: String(s._id),
-    occupancyRate: s.total > 0 ? Math.round((s.occupied / s.total) * 1000) / 10 : 0,
-    revenueToday: revenueTodayMap.get(String(s._id)) || 0,
-  }));
+  const slotMap = new Map(slotsByBuilding.map((s) => [String(s._id), s]));
+  // Hợp của 2 nguồn: một tòa có doanh thu nhưng chưa khai báo slot vẫn phải xuất hiện,
+  // nếu chỉ duyệt theo slot thì doanh thu hôm nay của tòa đó bị mất khỏi báo cáo.
+  const buildingStats = [...new Set([...slotMap.keys(), ...revenueTodayMap.keys()])].map(
+    (buildingId) => {
+      const slots = slotMap.get(buildingId);
+      return {
+        buildingId,
+        occupancyRate:
+          slots && slots.total > 0
+            ? Math.round((slots.occupied / slots.total) * 1000) / 10
+            : 0,
+        revenueToday: revenueTodayMap.get(buildingId) || 0,
+      };
+    }
+  );
 
   return {
     period,

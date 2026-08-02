@@ -1,5 +1,13 @@
 require('dotenv').config();
 
+// Mọi khái niệm "hôm nay" trong hệ thống (doanh thu hôm nay, trần phí theo ngày,
+// ca làm việc) là ngày theo giờ Việt Nam, không phải giờ của máy chủ. Host miễn phí
+// (Render/Fly) chạy UTC, nên nếu không ghim TZ thì 00:00–07:00 giờ VN bị tính sang
+// ngày hôm trước và card "Revenue Today" hiện 0 dù đã có giao dịch.
+// Gán vào process.env.TZ ngay tại đây — trước khi bất kỳ Date nào được tạo — để mọi
+// setHours()/getTimezoneOffset() trong codebase dùng chung một múi giờ nghiệp vụ.
+process.env.TZ = process.env.APP_TIMEZONE || 'Asia/Ho_Chi_Minh';
+
 const clientOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim().replace(/\/+$/, ''))
@@ -43,6 +51,8 @@ const env = {
   // từng tòa tự đặt thì một chiếc xe đi 3 tòa sẽ có 3 hạn mâu thuẫn nhau.
   // Hết hạn thì QR tự được cấp lại khi chủ xe mở mã (xem services/user/vehicleQr).
   vehicleQrTtlDays: Number(process.env.VEHICLE_QR_TTL_DAYS) || 2,
+  // Múi giờ nghiệp vụ đã ghim vào process.env.TZ ở đầu file; giữ lại để log/debug.
+  timezone: process.env.TZ,
 };
 
 const required = ['mongodbUri', 'jwtSecret', 'payosClientId', 'payosApiKey', 'payosChecksumKey'];

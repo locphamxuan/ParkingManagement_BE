@@ -14,6 +14,9 @@ process.env.CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 process.env.FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 process.env.KIOSK_DEVICE_TOKEN = process.env.KIOSK_DEVICE_TOKEN || 'test-kiosk-device-token';
 
+// Ghim múi giờ nghiệp vụ để assertion về "hôm nay" không phụ thuộc TZ của máy chạy CI.
+process.env.TZ = process.env.APP_TIMEZONE || 'Asia/Ho_Chi_Minh';
+
 // OCR nhận diện biển số: ghim RỖNG để test không bao giờ phụ thuộc .env của máy
 // dev (dotenv không ghi đè key đã tồn tại, kể cả khi giá trị là ''). Test nào cần
 // một provider cụ thể thì tự set env.ocrProvider / paddleOcrUrl / geminiApiKey.
